@@ -13,7 +13,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@beeline/design-system-react": "^2.1.2",
+    "@beeline/design-system-react": "^2.5.0",
     "@beeline/design-tokens": "^1.32.9",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
