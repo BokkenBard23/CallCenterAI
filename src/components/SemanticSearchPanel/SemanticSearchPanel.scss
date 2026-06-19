@@ -1,0 +1,123 @@
+/* ═══════════════════════════════════════════════════════════
+ * SemanticSearchPanel — right sidebar styles
+ * Mirrors DictionaryPhraseList sidebar pattern
+ * ═══════════════════════════════════════════════════════════ */
+
+.semantic-search-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+
+  @media (max-width: 767px) {
+    /* Mobile: overlay with fixed positioning */
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 85vw;
+    max-width: 320px;
+    background-color: var(--color-background-secondary, #fafafa);
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* ── Result card ── */
+.semantic-result-card {
+  border-bottom: 1px solid var(--color-border-default, #e0e0e0);
+  transition: background-color 150ms ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
+  &:hover {
+    background-color: var(--color-background-base-hover, rgba(0, 0, 0, 0.04));
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-border-brand, #1e88e5);
+    outline-offset: -2px;
+    border-radius: 4px;
+  }
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+/* ── Highlighted text in results ── */
+.semantic-highlight {
+  background-color: var(--highlight-level-3-bg, #bbdefb);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* ── Result text — line clamp for long texts ── */
+.semantic-result-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  line-clamp: 3;
+}
+
+/* ── History item ── */
+.semantic-history-item {
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
+  &:hover {
+    background-color: var(--color-background-base-hover, rgba(0, 0, 0, 0.04));
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-border-brand, #1e88e5);
+    outline-offset: -2px;
+    border-radius: 4px;
+  }
+}
+
+/* ── Right sidebar container ── */
+.semantic-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-border-default, #e0e0e0);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--color-background-secondary, #fafafa);
+
+  @media (max-width: 767px) {
+    /* Mobile: full overlay */
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 85vw;
+    max-width: 320px;
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* ── Mobile backdrop for semantic sidebar ── */
+.semantic-sidebar-backdrop {
+  display: none;
+
+  @media (max-width: 767px) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.32);
+    z-index: 99;
+  }
+}

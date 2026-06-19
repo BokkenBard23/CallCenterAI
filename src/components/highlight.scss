@@ -1,0 +1,527 @@
+/* ═══════════════════════════════════════════════════════════
+ * Highlight CSS — custom properties for light/dark themes
+ * + color-blindness patterns + accessibility
+ * + DR-1/DR-2/DR-3 classes + dim/bright (Chunk 2)
+ * ═══════════════════════════════════════════════════════════ */
+
+/* --- Light theme (default) --- */
+:root,
+[data-theme="light"] {
+  --highlight-level-1-bg: #fff9c4;
+  --highlight-level-1-border: #e08600;
+  --highlight-level-2-bg: #c8e6c9;
+  --highlight-level-2-border: #43a047;
+  --highlight-level-3-bg: #bbdefb;
+  --highlight-level-3-border: #1e88e5;
+  --highlight-level-4-bg: #f8bbd0;
+  --highlight-level-4-border: #e91e63;
+  --highlight-level-5-bg: #e1bee7;
+  --highlight-level-5-border: #8e24aa;
+  --highlight-level-6-bg: #ffe0b2;
+  --highlight-level-6-border: #d97b00;
+
+  --highlight-speaker-client-bg: #e3f2fd;
+  --highlight-speaker-operator-bg: #f3e5f5;
+  --highlight-segment-border: #e0e0e0;
+  --highlight-ellipsis-color: #9e9e9e;
+
+  /* Channel colors for Dictionary sidebar (DR-3) — based on DS status tokens */
+  --dict-channel-operator: var(--color-status-success, #43a047);
+  --dict-channel-client: var(--color-status-info, #1e88e5);
+  --dict-channel-any: var(--color-status-warning, #e08600);
+
+  /* Semantic text/background colors (Chunk 3 audit) */
+  --color-background-base: #fff;
+  --color-background-secondary: #fafafa;
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #9e9e9e;
+  --color-border-default: #e0e0e0;
+}
+
+/* --- Dark theme --- */
+[data-theme="dark"] {
+  --highlight-level-1-bg: #5d4e37;
+  --highlight-level-1-border: #f9a825;
+  --highlight-level-2-bg: #2e4a2f;
+  --highlight-level-2-border: #66bb6a;
+  --highlight-level-3-bg: #1a3a5c;
+  --highlight-level-3-border: #42a5f5;
+  --highlight-level-4-bg: #5c2a3e;
+  --highlight-level-4-border: #ec407a;
+  --highlight-level-5-bg: #4a2d5e;
+  --highlight-level-5-border: #ab47bc;
+  --highlight-level-6-bg: #5d4037;
+  --highlight-level-6-border: #ffa726;
+
+  --highlight-speaker-client-bg: #1a2a3e;
+  --highlight-speaker-operator-bg: #2a1a3e;
+  --highlight-segment-border: #424242;
+  --highlight-ellipsis-color: #757575;
+
+  /* Channel colors adapt for dark mode (DS status tokens auto-adapt) */
+  --dict-channel-operator: var(--color-status-success, #66bb6a);
+  --dict-channel-client: var(--color-status-info, #42a5f5);
+  --dict-channel-any: var(--color-status-warning, #ffa726);
+
+  /* Semantic text/background colors — dark theme fix (Chunk 3) */
+  --color-background-base: #1e1e1e;
+  --color-background-secondary: #2d2d2d;
+  --color-text-primary: #e0e0e0;
+  --color-text-secondary: #b0b0b0;
+  --color-border-default: #424242;
+}
+
+/* --- Highlight span --- */
+.highlight-match {
+  border-radius: 3px;
+  padding: 1px 2px;
+  cursor: default;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+.highlight-match:focus-visible {
+  outline: 2px solid var(--highlight-level-3-border);
+  outline-offset: 2px;
+}
+
+/* --- Level-specific styles (innermost = bg, outer = border) --- */
+.highlight-level-1 {
+  background-color: var(--highlight-level-1-bg);
+}
+
+.highlight-level-1-outer {
+  border-bottom: 2px dashed var(--highlight-level-1-border);
+}
+
+.highlight-level-2 {
+  background-color: var(--highlight-level-2-bg);
+  border-bottom: 2px dashed var(--highlight-level-2-border);
+}
+
+.highlight-level-2-outer {
+  border-bottom: 2px dashed var(--highlight-level-2-border);
+}
+
+.highlight-level-3 {
+  background-color: var(--highlight-level-3-bg);
+  border-left: 3px solid var(--highlight-level-3-border);
+}
+
+.highlight-level-3-outer {
+  border-left: 3px solid var(--highlight-level-3-border);
+}
+
+.highlight-level-4 {
+  background-color: var(--highlight-level-4-bg);
+  border: 2px dotted var(--highlight-level-4-border);
+}
+
+.highlight-level-4-outer {
+  border: 2px dotted var(--highlight-level-4-border);
+}
+
+.highlight-level-5 {
+  background-color: var(--highlight-level-5-bg);
+  border-right: 3px solid var(--highlight-level-5-border);
+}
+
+.highlight-level-5-outer {
+  border-right: 3px solid var(--highlight-level-5-border);
+}
+
+.highlight-level-6 {
+  background-color: var(--highlight-level-6-bg);
+  border-top: 2px dashed var(--highlight-level-6-border);
+}
+
+.highlight-level-6-outer {
+  border-top: 2px dashed var(--highlight-level-6-border);
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * DR-1/DR-2/DR-3 CSS classes (Chunk 1)
+ * ═══════════════════════════════════════════════════════════ */
+
+/* DR-1: Exact match — visual enhancement for quotes (cursor pointer for Popover) */
+.highlight-exact {
+  cursor: pointer;
+}
+
+/* DR-2: Adjacent (word_distance=0) — already handled by inline fontWeight:600,
+   this class is for hover/focus decoration only */
+.highlight-adjacent:focus-visible {
+  outline-width: 3px;
+}
+
+/* DR-3: Channel-specific hover/focus styles */
+.highlight-channel-client:focus-visible {
+  outline-color: var(--dict-channel-client, #1e88e5);
+}
+
+.highlight-channel-operator:focus-visible {
+  outline-color: var(--dict-channel-operator, #64b5f6);
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * Dim/bright for multi-dict filtering (Chunk 2)
+ * ═══════════════════════════════════════════════════════════ */
+.highlight-dim {
+  opacity: 0.35;
+  filter: brightness(0.6);
+}
+
+/* --- Segment card --- */
+.segment-card {
+  border: 1px solid var(--highlight-segment-border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background-color: var(--color-background-base, #fff);
+
+  &[data-speaker="Клиент"] {
+    background-color: var(--highlight-speaker-client-bg);
+  }
+
+  &[data-speaker="Сотрудник"] {
+    background-color: var(--highlight-speaker-operator-bg);
+  }
+}
+
+.segment-speaker {
+  font-weight: 600;
+  font-size: 0.85em;
+  margin-bottom: 4px;
+  opacity: 0.8;
+  color: var(--color-text-primary, #1a1a1a);
+}
+
+.segment-text {
+  line-height: 1.6;
+  word-break: break-word;
+  color: var(--color-text-primary, #1a1a1a);
+}
+
+/* --- Ellipsis for collapsed segments --- */
+.segment-ellipsis {
+  color: var(--highlight-ellipsis-color);
+  font-style: italic;
+  user-select: none;
+  padding: 4px 0;
+}
+
+/* --- Match legend --- */
+.match-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 16px;
+  margin-bottom: 8px;
+}
+
+.match-legend-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+/* --- Restructured dialogue chat --- */
+.dialogue-bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  word-break: break-word;
+  line-height: 1.5;
+  color: var(--color-text-primary, #1a1a1a);
+
+  &[data-speaker="Клиент"] {
+    align-self: flex-start;
+    background-color: var(--highlight-speaker-client-bg);
+    border-bottom-left-radius: 4px;
+  }
+
+  &[data-speaker="Сотрудник"] {
+    align-self: flex-end;
+    background-color: var(--highlight-speaker-operator-bg);
+    border-bottom-right-radius: 4px;
+  }
+}
+
+.dialogue-speaker-label {
+  font-weight: 600;
+  font-size: 0.8em;
+  opacity: 0.7;
+  margin-bottom: 2px;
+}
+
+/* --- Upload area --- */
+.upload-area {
+  border: 2px dashed var(--color-border-default, #bdbdbd);
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
+  &:hover,
+  &:focus-within {
+    border-color: var(--color-border-brand, #1e88e5);
+    background-color: rgba(30, 136, 229, 0.04);
+  }
+
+  &[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+}
+
+.upload-area--error {
+  border-color: var(--color-border-danger, #e53935);
+}
+
+.upload-area--success {
+  border-color: var(--color-border-success, #43a047);
+}
+
+/* --- File chip --- */
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  background-color: var(--color-background-surface, #f5f5f5);
+  font-size: 0.85em;
+  margin: 4px;
+}
+
+.file-chip__remove {
+  cursor: pointer;
+  opacity: 0.6;
+  border: none;
+  background: none;
+  padding: 0;
+  line-height: 1;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+/* --- Key points list (SummaryView) --- */
+.key-points-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * Cross-highlighting: highlight-hovered class for <mark>
+ * Applied when hoveredPhrase matches match.phrase_text
+ * ═══════════════════════════════════════════════════════════ */
+.highlight-hovered {
+  outline: 2px solid var(--dict-channel-any, #e08600);
+  outline-offset: 2px;
+  border-radius: 3px;
+  transition: outline 150ms ease, outline-color 150ms ease;
+
+  /* Optional pulse animation (2 cycles, 600ms) — disabled at prefers-reduced-motion */
+  animation: highlight-pulse 600ms ease 2;
+}
+
+@keyframes highlight-pulse {
+  0% { outline-offset: 2px; }
+  50% { outline-offset: 4px; }
+  100% { outline-offset: 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .highlight-hovered {
+    animation: none;
+    /* Keep outline, remove pulse */
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * Dictionary sidebar styles
+ * ═══════════════════════════════════════════════════════════ */
+
+/* Sidebar container */
+.results-sidebar {
+  @media (max-width: 767px) {
+    /* Mobile: overlay with fixed positioning */
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 85vw;
+    max-width: 320px;
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* Dictionary phrase list */
+.dict-phrase-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Dictionary phrase item */
+.dict-phrase-item {
+  border-bottom: 1px solid var(--color-border-default, #e0e0e0);
+  transition: background-color 150ms ease, border-left-color 150ms ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
+  &:hover {
+    background-color: var(--color-background-base-hover, rgba(0, 0, 0, 0.04));
+  }
+
+  /* Focus ring for keyboard navigation */
+  &:focus-visible {
+    outline: 2px solid var(--color-border-brand, #1e88e5);
+    outline-offset: -2px;
+    border-radius: 4px;
+  }
+}
+
+/* Dictionary tree styles (Chunk 2) */
+.dict-tree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.dict-tree-header {
+  padding: 12px 16px;
+}
+
+.dict-tree-level-btn-active {
+  font-weight: 600;
+}
+
+.dict-tree-phrase-row {
+  padding: 6px 12px 6px 36px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+
+  &:hover {
+    background-color: var(--color-background-base-hover, rgba(0, 0, 0, 0.04));
+  }
+}
+
+.dict-tree-phrase-row--unmatched {
+  opacity: 0.5;
+}
+
+.dict-tree-nested {
+  padding-left: 52px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.dict-tree-exception {
+  color: var(--color-status-warning, #e08600);
+  font-weight: 600;
+}
+
+/* Mobile sidebar backdrop */
+.sidebar-backdrop {
+  display: none;
+
+  @media (max-width: 767px) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.32);
+    z-index: 99;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * Semantic search cross-highlighting
+ * Applied when clicking a result in SemanticSearchPanel
+ * ═══════════════════════════════════════════════════════════ */
+.semantic-result-highlight {
+  outline: 3px solid var(--dict-channel-client, #1e88e5);
+  outline-offset: 2px;
+  border-radius: 4px;
+  transition: outline-color 200ms ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * Phrase Popover styles (Chunk 4)
+ * ═══════════════════════════════════════════════════════════ */
+.phrase-popover-content {
+  min-width: 280px;
+  max-width: 360px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.phrase-popover-param {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.phrase-popover-param-label {
+  font-weight: 600;
+  font-size: 0.85em;
+  min-width: 80px;
+  color: var(--color-text-secondary, #9e9e9e);
+}
+
+.phrase-popover-param-value {
+  font-size: 0.85em;
+  color: var(--color-text-primary, #1a1a1a);
+}
+
+.phrase-popover-feedback {
+  margin-top: 8px;
+}
+
+.phrase-popover-char-count {
+  font-size: 0.75em;
+  color: var(--color-text-secondary, #9e9e9e);
+  text-align: right;
+  margin-top: 4px;
+}
+
+/* Dark theme adjustments for Popover */
+[data-theme="dark"] .phrase-popover-param-value {
+  color: var(--color-text-primary, #e0e0e0);
+}
+
+[data-theme="dark"] .phrase-popover-param-label {
+  color: var(--color-text-secondary, #b0b0b0);
+}

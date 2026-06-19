@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@beeline/design-system-react": "^2.5.0",
-    "@beeline/design-tokens": "^1.32.9",
+    "@beeline/design-tokens": "^1.35.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.17.0"

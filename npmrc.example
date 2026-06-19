@@ -1,0 +1,4 @@
+# CA bundle: <corporate-ca-bundle.pem>
+@beeline/design-tokens:registry = https://registry.npmjs.org/
+registry = https://registry.npmjs.org/
+
