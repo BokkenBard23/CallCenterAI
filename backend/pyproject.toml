@@ -16,6 +16,13 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
     "python-dotenv>=1.0.1",
+    # FRIDA embedding integration
+    "faiss-cpu>=1.7.4",
+    "numpy>=1.26.0",
+    "razdel>=0.5.0",
+    "natasha>=1.6.0",
+    "slowapi>=0.1.9",
+    "tenacity>=8.2.0",
 ]
 
 [project.optional-dependencies]

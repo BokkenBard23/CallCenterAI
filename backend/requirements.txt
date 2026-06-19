@@ -6,3 +6,14 @@ httpx>=0.28.0
 pydantic>=2.10.0
 pydantic-settings>=2.7.0
 python-dotenv>=1.0.1
+striprtf>=0.0.26
+pymorphy3>=0.2.0
+pymorphy3-dicts-ru>=0.1.0
+
+# ── FRIDA embedding integration ──
+faiss-cpu>=1.7.4
+numpy>=1.26.0
+razdel>=0.5.0
+natasha>=1.6.0
+slowapi>=0.1.9
+tenacity>=8.2.0
