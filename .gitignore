@@ -40,3 +40,14 @@ debug_*.json
 
 # Test coverage
 coverage/
+
+# External repos and trash (reference only, not for tracking)
+Repo/
+Trash/
+
+# Secrets and tokens
+*.pem
+!ca-bundle.pem  # McAfee proxy CA cert (public, needed for SSL bypass)
+*.key
+*.secret
+*.token
