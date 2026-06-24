@@ -1,8 +1,11 @@
-"""FastAPI application entry point with CORS, rate limiting, and healthcheck."""
+"""FastAPI application entry point with CORS, rate limiting, structured logging, and healthcheck."""
 
+import logging
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +14,8 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.middleware.rate_limiter import limiter
-from app.routers import upload, analysis, batch, providers, embeddings, feedback
+from app.middleware.structured_logging import StructuredLoggingMiddleware, setup_structured_logging
+from app.routers import upload, analysis, batch, providers, embeddings, feedback, dictionary, export, rag, health
 
 
 # ── Make smartlogger importable ──────────────────────────────
@@ -22,12 +26,16 @@ if _TRANSCRIB_DIR.is_dir() and str(_TRANSCRIB_DIR) not in sys.path:
 
 # ── OpenAPI tags ─────────────────────────────────────────────
 _OPENAPI_TAGS = [
-    {"name": "upload", "description": "File upload (RTF, XML dictionaries)"},
+    {"name": "upload", "description": "File upload (RTF, XML dictionaries, batch RTF)"},
     {"name": "analysis", "description": "Dialog analysis and results"},
     {"name": "batch", "description": "Batch analysis"},
     {"name": "providers", "description": "LLM provider management"},
     {"name": "embeddings", "description": "Vector embeddings and search (FRIDA)"},
     {"name": "feedback", "description": "Phrase match feedback (AG-UIREWORK-4)"},
+    {"name": "dictionary", "description": "Dictionary display tokens (SpeechLab)"},
+    {"name": "export", "description": "Export analysis results (Excel, PDF)"},
+    {"name": "rag", "description": "RAG Q&A over analyzed dialogues (retrieval + LLM generation)"},
+    {"name": "health", "description": "System health check and monitoring (ID-15)"},
 ]
 
 
@@ -64,9 +72,9 @@ def _init_services() -> None:
     if index_dir.exists() and (index_dir / "index.faiss").exists():
         try:
             vector_store.load(str(index_dir))
-            print(f"[OK] VectorStore loaded from {index_dir} ({vector_store.index.ntotal} vectors)")
+            logger.info("VectorStore loaded from %s (%d vectors)", index_dir, vector_store.index.ntotal)
         except Exception as exc:
-            print(f"[WARN] VectorStore load failed: {exc}. Starting with empty index.")
+            logger.warning("VectorStore load failed: %s. Starting with empty index.", exc)
 
     # Chunker (razdel + Natasha NER)
     chunker = Chunker()
@@ -86,17 +94,26 @@ def _init_services() -> None:
     app.state.chunker = chunker
     app.state.hybrid_search_service = hybrid_search_service
 
+    # RAG service (uses existing HybridSearch + FRIDA + LLM providers)
+    from app.services.rag import RAGService
+    rag_service = RAGService(
+        hybrid_search_service=hybrid_search_service,
+        embedding_service=embedding_service,
+        vector_store=vector_store,
+    )
+    app.state.rag_service = rag_service
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup / shutdown hooks."""
     # Startup
-    print(f"[OK] Call Center AI backend starting - debug={settings.debug}")
-    print(f"  Transcrib dir: {_TRANSCRIB_DIR} (exists={_TRANSCRIB_DIR.is_dir()})")
+    logger.info("Call Center AI backend starting - debug=%s", settings.debug)
+    logger.info("Transcrib dir: %s (exists=%s)", _TRANSCRIB_DIR, _TRANSCRIB_DIR.is_dir())
 
     # Initialize FRIDA services
     _init_services()
-    print("[OK] FRIDA embedding services initialized")
+    logger.info("FRIDA embedding services initialized")
 
     yield
 
@@ -104,22 +121,22 @@ async def lifespan(app: FastAPI):
     from app.utils.session import session_store
     removed = session_store.cleanup_expired()
     if removed:
-        print(f"[OK] Cleaned up {removed} expired sessions")
+        logger.info("Cleaned up %d expired sessions", removed)
 
     # Close FRIDA HTTP client
     if hasattr(app.state, "embedding_service"):
         try:
             await app.state.embedding_service.http_client.aclose()
-            print("[OK] FRIDA HTTP client closed")
+            logger.info("FRIDA HTTP client closed")
         except Exception as exc:
-            print(f"[WARN] FRIDA HTTP client close failed: {exc}")
+            logger.warning("FRIDA HTTP client close failed: %s", exc)
 
-    print("[OK] Call Center AI backend shutting down")
+    logger.info("Call Center AI backend shutting down")
 
 
 app = FastAPI(
     title="Call Center AI — Dialog Analysis",
-    version="0.1.0",
+    version=settings.app_version,
     description="FastAPI backend for RTF/XML dialog analysis with LLM support, "
                 "FRIDA embeddings, and hybrid search",
     lifespan=lifespan,
@@ -139,6 +156,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Structured logging middleware (opt-in, does not replace existing handlers) ──
+app.add_middleware(StructuredLoggingMiddleware)
+setup_structured_logging()
+
 # ── Routers ──────────────────────────────────────────────────
 app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
@@ -146,13 +167,19 @@ app.include_router(batch.router, prefix="/api/analysis", tags=["batch"])
 app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
 app.include_router(embeddings.router, prefix="/api/embeddings", tags=["embeddings"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
+app.include_router(dictionary.router, prefix="/api/dictionary", tags=["dictionary"])
+app.include_router(export.router, prefix="/api", tags=["export"])
+app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
+app.include_router(health.router, prefix="/api/health", tags=["health"])
 
 
-# ── Healthcheck ──────────────────────────────────────────────
-@app.get("/health", summary="Health check")
-@app.get("/api/health", summary="Health check (API prefix)")
+# ── Legacy healthcheck (kept for backward compatibility) ─────
+@app.get("/health", summary="Health check (legacy)", deprecated=True)
 async def healthcheck():
-    """Return service health status."""
+    """Return service health status.
+
+    Deprecated: use GET /api/health instead for structured health data.
+    """
     smartlogger_ok = True
     try:
         import smartlogger  # noqa: F401
@@ -161,7 +188,7 @@ async def healthcheck():
 
     return {
         "status": "ok",
-        "version": "0.1.0",
+        "version": settings.app_version,
         "smartlogger_available": smartlogger_ok,
         "transcrib_dir": str(_TRANSCRIB_DIR),
         "transcrib_exists": _TRANSCRIB_DIR.is_dir(),
