@@ -1,0 +1,666 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "pipeline-orchestrator",
+  "agent": {
+    "pipeline-orchestrator": {
+      "description": "Единая точка входа OpenCode Pipeline: автоматически запускает stage agents, проверяет артефакты и ведёт pipeline-state без ручного переключения режимов.",
+      "mode": "primary",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow",
+          "git status*": "allow",
+          "npx --yes @beeline/yellowbe-opencode-pipeline@latest check-update*": "allow",
+          "npx --yes @beeline/yellowbe-opencode-pipeline@latest safe-update*": "allow",
+          "*yellowbe-opencode-pipeline.mjs check-update*": "allow",
+          "*yellowbe-opencode-pipeline.mjs safe-update*": "allow",
+          "npm run*": "allow",
+          "npm install*": "allow",
+          "npx tsc*": "allow",
+          "npx vitest*": "allow",
+          "git push*": "deny",
+          "rm *": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "request-analyst": "allow",
+          "request-analyst-product": "allow",
+          "request-analyst-marketing": "allow",
+          "project-setup": "allow",
+          "designer": "allow",
+          "ui-coder": "allow",
+          "ui-tester": "allow",
+          "coder": "allow",
+          "reviewer": "allow",
+          "tester": "allow",
+          "mcp-researcher": "allow"
+        },
+        "webfetch": "allow",
+        "websearch": "allow"
+      }
+    },
+    "request-analyst": {
+      "description": "Лёгкий входной режим: выбирает трек `product` или `marketing`, обновляет pipeline-state и маршрутизирует задачу дальше.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow"
+      }
+    },
+    "request-analyst-product": {
+      "description": "Product/app аналитика: hub `spec.md` + `spec-chunk-{N}.md` для app/process-heavy задач.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow"
+      }
+    },
+    "request-analyst-marketing": {
+      "description": "Marketing/landing аналитика: hub `spec.md` + `spec-chunk-{N}.md`, messaging и content matrix.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow"
+      }
+    },
+    "project-setup": {
+      "description": "Инициализация или валидация проекта и подготовка окружения перед следующим этапом пайплайна.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow",
+          "git status*": "allow",
+          "npm run*": "allow",
+          "npm install*": "allow",
+          "npx tsc*": "allow",
+          "npx vitest*": "allow",
+          "git push*": "deny",
+          "rm *": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow"
+      }
+    },
+    "designer": {
+      "description": "UI/UX на Beeline DS: hub `design-spec.md` + `design-spec-chunk-{N}.md`, scratchpad hub/chunk, `user-scenarios.json`, DQG.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "mcp-researcher": "allow"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "prod-design-system-http_*": "allow",
+        "prod_design_system_http_*": "allow",
+        "local-design-system-http_*": "allow",
+        "local_design_system_http_*": "allow",
+        "chrome-devtools-mcp_*": "allow",
+        "chrome_devtools_mcp_*": "allow",
+        "figma_*": "allow",
+        "storybook_*": "allow",
+        "sentry_*": "allow",
+        "ux-mcp-server_*": "allow",
+        "vuda_*": "allow",
+        "tactual_*": "allow",
+        "ui-ux-pro-mcp_*": "allow",
+        "playwright-mcp_*": "allow",
+        "playwright_mcp_*": "allow",
+        "local-faiss-mcp_*": "allow",
+        "local_faiss_mcp_*": "allow",
+        "openapi-schema-explorer_*": "allow",
+        "openapi_schema_explorer_*": "allow",
+        "brave-search_*": "allow"
+      }
+    },
+    "ui-coder": {
+      "description": "React/TS на Beeline DS: hub+chunk spec/design, код и тесты, `implementation-chunk-{N}.md`, build и devtools loop.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow",
+          "git status*": "allow",
+          "npm run*": "allow",
+          "npm install*": "allow",
+          "npx tsc*": "allow",
+          "npx vitest*": "allow",
+          "git push*": "deny",
+          "rm *": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "mcp-researcher": "allow"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "prod-design-system-http_*": "allow",
+        "prod_design_system_http_*": "allow",
+        "local-design-system-http_*": "allow",
+        "local_design_system_http_*": "allow",
+        "chrome-devtools-mcp_*": "allow",
+        "chrome_devtools_mcp_*": "allow",
+        "figma_*": "allow",
+        "storybook_*": "allow",
+        "sentry_*": "allow",
+        "playwright-mcp_*": "allow",
+        "playwright_mcp_*": "allow",
+        "ux-mcp-server_*": "allow",
+        "vuda_*": "allow",
+        "tactual_*": "allow",
+        "ui-ux-pro-mcp_*": "allow",
+        "local-faiss-mcp_*": "allow",
+        "local_faiss_mcp_*": "allow",
+        "openapi-schema-explorer_*": "allow",
+        "openapi_schema_explorer_*": "allow",
+        "brave-search_*": "allow"
+      }
+    },
+    "ui-tester": {
+      "description": "Визуальная и a11y-проверка UI через browser/devtools на 375 / 768 / 1440.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow",
+          "git status*": "allow",
+          "npm run*": "allow",
+          "npm install*": "allow",
+          "npx tsc*": "allow",
+          "npx vitest*": "allow",
+          "git push*": "deny",
+          "rm *": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "chrome-devtools-mcp_*": "allow",
+        "chrome_devtools_mcp_*": "allow",
+        "figma_*": "allow",
+        "storybook_*": "allow",
+        "sentry_*": "allow",
+        "playwright-mcp_*": "allow",
+        "playwright_mcp_*": "allow",
+        "ux-mcp-server_*": "allow",
+        "vuda_*": "allow",
+        "tactual_*": "allow",
+        "ui-ux-pro-mcp_*": "allow",
+        "local-faiss-mcp_*": "allow",
+        "local_faiss_mcp_*": "allow",
+        "openapi-schema-explorer_*": "allow",
+        "openapi_schema_explorer_*": "allow",
+        "brave-search_*": "allow"
+      }
+    },
+    "coder": {
+      "description": "Бизнес-логика: API, hooks, stores, валидация, замена типизированных UI-заглушек.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow",
+          "git status*": "allow",
+          "npm run*": "allow",
+          "npm install*": "allow",
+          "npx tsc*": "allow",
+          "npx vitest*": "allow",
+          "git push*": "deny",
+          "rm *": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "prod-design-system-http_*": "allow",
+        "prod_design_system_http_*": "allow",
+        "local-design-system-http_*": "allow",
+        "local_design_system_http_*": "allow",
+        "microsoft-learn_*": "allow",
+        "context7_*": "allow",
+        "figma_*": "allow",
+        "storybook_*": "allow",
+        "postgres_*": "allow",
+        "sentry_*": "allow",
+        "openapi-schema-explorer_*": "allow",
+        "openapi_schema_explorer_*": "allow",
+        "brave-search_*": "allow",
+        "ux-mcp-server_*": "allow"
+      }
+    },
+    "reviewer": {
+      "description": "Код-ревью: spec compliance, DS compliance, build/type/lint checks, tests и rework routing.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow",
+          "git status*": "allow",
+          "npm run*": "allow",
+          "npm install*": "allow",
+          "npx tsc*": "allow",
+          "npx vitest*": "allow",
+          "git push*": "deny",
+          "rm *": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "mcp-researcher": "allow"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "prod-design-system-http_*": "allow",
+        "prod_design_system_http_*": "allow",
+        "local-design-system-http_*": "allow",
+        "local_design_system_http_*": "allow",
+        "microsoft-learn_*": "allow",
+        "context7_*": "allow",
+        "figma_*": "allow",
+        "storybook_*": "allow",
+        "postgres_*": "allow",
+        "sentry_*": "allow",
+        "openapi-schema-explorer_*": "allow",
+        "openapi_schema_explorer_*": "allow",
+        "brave-search_*": "allow",
+        "ux-mcp-server_*": "allow"
+      }
+    },
+    "mcp-researcher": {
+      "description": "Сбор данных из Excel и Microsoft Learn MCP, консолидация и запись research-артефакта.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "prod-design-system-http_*": "allow",
+        "prod_design_system_http_*": "allow",
+        "local-design-system-http_*": "allow",
+        "local_design_system_http_*": "allow",
+        "excel_*": "allow",
+        "microsoft-learn_*": "allow",
+        "context7_*": "allow",
+        "pixso-remote-mcp_*": "allow",
+        "pixso-remote-mcp_*": "allow",
+        "rag-knowledge_*": "allow",
+        "gitlab-mcp_*": "allow",
+        "atlassian-mcp_*": "allow",
+        "fetch_*": "allow",
+        "figma_*": "allow",
+        "storybook_*": "allow",
+        "postgres_*": "allow",
+        "slack_*": "allow",
+        "sentry_*": "allow",
+        "playwright-mcp_*": "allow",
+        "playwright_mcp_*": "allow",
+        "local-faiss-mcp_*": "allow",
+        "local_faiss_mcp_*": "allow",
+        "openapi-schema-explorer_*": "allow",
+        "openapi_schema_explorer_*": "allow",
+        "brave-search_*": "allow",
+        "ux-mcp-server_*": "allow",
+        "vuda_*": "allow",
+        "tactual_*": "allow",
+        "ui-ux-pro-mcp_*": "allow"
+      }
+    },
+    "tester": {
+      "description": "Финальный QA: test plan, unit/component/e2e tests, coverage и bugs report.",
+      "mode": "subagent",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "allow",
+          "git status*": "allow",
+          "npm run*": "allow",
+          "npm install*": "allow",
+          "npx tsc*": "allow",
+          "npx vitest*": "allow",
+          "git push*": "deny",
+          "rm *": "deny"
+        },
+        "task": {
+          "*": "deny"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "chrome-devtools-mcp_*": "allow",
+        "chrome_devtools_mcp_*": "allow",
+        "microsoft-learn_*": "allow",
+        "context7_*": "allow",
+        "figma_*": "allow",
+        "storybook_*": "allow",
+        "sentry_*": "allow",
+        "playwright-mcp_*": "allow",
+        "playwright_mcp_*": "allow",
+        "ux-mcp-server_*": "allow",
+        "vuda_*": "allow",
+        "tactual_*": "allow",
+        "ui-ux-pro-mcp_*": "allow",
+        "local-faiss-mcp_*": "allow",
+        "local_faiss_mcp_*": "allow",
+        "openapi-schema-explorer_*": "allow",
+        "openapi_schema_explorer_*": "allow",
+        "brave-search_*": "allow"
+      }
+    }
+  },
+  "mcp": {
+    "pixso-remote-mcp": {
+      "type": "remote",
+      "url": "https://example.com/api/mcp/mcp",
+      "enabled": true,
+      "headers": {
+        "Token": "{env:PIXSO_TOKEN}"
+      },
+      "description": "Pixso Remote MCP — дизайн-система Pixso (токен из переменной окружения)"
+    },
+    "rag-knowledge": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8765/mcp",
+      "enabled": true,
+      "description": "Beeline AI RAG Knowledge Base — поиск по базе знаний (permanent-api-crq411646), LLM glm-5.1. HTTP сервер на порту 8765."
+    },
+    "prod-design-system-http": {
+      "type": "remote",
+      "url": "https://example.com/sse",
+      "enabled": true
+    },
+    "chrome-devtools-mcp": {
+      "type": "local",
+      "command": ["node", "node_modules/chrome-devtools-mcp/build/src/index.js"],
+      "environment": { },
+      "enabled": true,
+      "description": "Chrome DevTools MCP v1.4.0 — browser automation, screenshots, performance, network, debugging. Official Google package. Requires Chrome stable with --remote-debugging-port=9222."
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+      "oauth": false,
+      "headers": {
+        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+      },
+      "description": "Context7 MCP — документация и код из Context7. API key из env CONTEXT7_API_KEY. Без ключа работает с rate-limit, с ключом — выше лимиты."
+    },
+    "fetch": {
+      "type": "local",
+      "command": ["npx", "--yes", "@modelcontextprotocol/server-fetch"],
+      "enabled": false,
+      "description": "Fetch MCP — HTTP requests, web scraping. DISABLED: @modelcontextprotocol/server-fetch не существует на npm (404). Альтернативы: использовать built-in webfetch или написать кастомный скрипт. НЕ заменять на mcp-server-fetch (0.0.2) — это подозрительный canary-пакет."
+    },
+    "git": {
+      "type": "local",
+      "command": ["uvx", "mcp-server-git", "--repository", "."],
+      "enabled": true,
+      "description": "Git MCP — git history, blame, diff. Использует uvx (uv 0.11.24+). uv установлен и подтверждён."
+    },
+    "memory": {
+      "type": "local",
+      "command": ["cmd", "/c", "node_modules\\.bin\\mcp-server-memory.cmd"],
+      "environment": { },
+      "enabled": true,
+      "description": "Memory MCP — persistent key-value memory across sessions"
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": ["node", "node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js"],
+      "environment": { },
+      "enabled": true,
+      "description": "Sequential Thinking MCP — structured step-by-step reasoning. Official @modelcontextprotocol package v2025.12.18."
+    },
+    "filesystem": {
+      "type": "local",
+      "command": ["npx", "-y", "mcp-server-filesystem", "."],
+      "environment": { },
+      "enabled": true,
+      "description": "Filesystem MCP — read/write files"
+    },
+    "microsoft-learn": {
+      "type": "remote",
+      "url": "https://learn.microsoft.com/api/mcp",
+      "enabled": true,
+      "environment": { },
+      "description": "Microsoft Learn MCP — официальная документация. NOTE: McAfee может блокировать — если 407, нужен VPN"
+    },
+    "gitlab-mcp": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "enabled": true,
+      "description": "GitLab MCP — MR, issues, pipelines, код-серч (токен из переменной окружения GITLAB_TOKEN)",
+      "headers": {
+        "Authorization": "Bearer {env:GITLAB_TOKEN}"
+      }
+    },
+    "atlassian-mcp": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "enabled": true,
+      "description": "Atlassian MCP — Jira + Confluence (токен из переменной окружения ATLASSIAN_TOKEN)",
+      "headers": {
+        "Authorization": "Bearer {env:ATLASSIAN_TOKEN}"
+      }
+    },
+    "figma": {
+      "type": "local",
+      "command": ["cmd", "/c", "node_modules\\.bin\\figma-developer-mcp.cmd", "--figma-api-key={env:FIGMA_API_KEY}", "--stdio"],
+      "environment": { "FRAMELINK_TELEMETRY": "off" },
+      "enabled": true,
+      "description": "Figma MCP — чтение Figma файлов, слоёв, компонентов, design tokens (ключ из переменной окружения FIGMA_API_KEY)"
+    },
+    "storybook": {
+      "type": "local",
+      "command": ["npx", "-y", "storybook-mcp@latest"],
+      "environment": { "STORYBOOK_URL": "http://localhost:6006/index.json" },
+      "enabled": false,
+      "description": "Storybook MCP — нужен запущенный Storybook на localhost:6006"
+    },
+    "postgres": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-postgres", "postgresql://{env:POSTGRES_USER}:{env:POSTGRES_PASS}@localhost:5432/mydb"],
+      "environment": { },
+      "enabled": true,
+      "description": "PostgreSQL MCP — read-only SQL queries, schema inspection (credentials из POSTGRES_USER и POSTGRES_PASS)"
+    },
+    "slack": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-slack"],
+      "environment": {
+        "SLACK_BOT_TOKEN": "{env:SLACK_BOT_TOKEN}",
+        "SLACK_TEAM_ID": "{env:SLACK_TEAM_ID}"
+      },
+      "enabled": false,
+      "description": "Slack MCP — read/send messages, search channels. DISABLED: пакет @modelcontextprotocol/server-slack устарел (deprecated). Токен из переменной окружения SLACK_BOT_TOKEN."
+    },
+    "sentry": {
+      "type": "local",
+      "command": ["npx", "-y", "@sentry/mcp-server"],
+      "environment": { "SENTRY_AUTH_TOKEN": "{env:SENTRY_AUTH_TOKEN}" },
+      "enabled": false,
+      "description": "Sentry MCP — ОФИЦИАЛЬНЫЙ @sentry/mcp-server (v0.36.0). Error tracking, issues, releases. ЗАМЕНА: был @supernova123/sentry-mcp-server (third-party). Токен из env SENTRY_AUTH_TOKEN."
+    },
+    "brave-search": {
+      "type": "local",
+      "command": ["npx", "-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
+      "environment": { "BRAVE_API_KEY": "{env:BRAVE_API_KEY}" },
+      "enabled": true,
+      "description": "Официальный Brave Search MCP v2 — 8 инструментов: web/local/video/image/news search, summarizer, LLM context. Заменяет устаревший fork. Бесплатно 2000 запросов/мес. Получи ключ: https://brave.com/search/api/"
+    },
+    "playwright-mcp": {
+      "type": "local",
+      "command": ["npx", "-y", "@executeautomation/playwright-mcp-server"],
+      "environment": { },
+      "enabled": true,
+      "description": "Playwright MCP Server — 143 device presets, DOM interaction, screenshots, JS execution, test codegen. E2E тестирование 5 страниц CCAI. Автоматически устанавливает браузеры."
+    },
+    "local-faiss-mcp": {
+      "type": "local",
+      "command": ["uvx", "local-faiss-mcp", "--stdio"],
+      "enabled": true,
+      "description": "Local FAISS vector store as MCP server — semantic search, document ingestion. Python-пакет, использует uvx (uv 0.11.24+)."
+    },
+    "openapi-schema-explorer": {
+      "type": "local",
+      "command": ["npx", "-y", "mcp-openapi-schema-explorer@latest", "http://localhost:8000/openapi.json", "--output-format", "json"],
+      "environment": { },
+      "enabled": false,
+      "description": "MCP OpenAPI Schema Explorer v1.3.4 — token-efficient доступ к OpenAPI specs. DISABLED: требует запущенный backend на localhost:8000. Включить после запуска backend."
+    },
+    "ux-mcp-server": {
+      "type": "local",
+      "command": ["cmd", "/c", "node_modules\\.bin\\ux-mcp-server.cmd"],
+      "environment": { },
+      "enabled": true,
+      "description": "UX MCP Server — 28 UX resources (WCAG, Nielsen, UI patterns, a11y, dark patterns) + 23 analysis tools"
+    },
+    "vuda": {
+      "type": "local",
+      "command": ["cmd", "/c", "node_modules\\.bin\\vuda.cmd"],
+      "environment": { },
+      "enabled": true,
+      "description": "VUDA — Visual UI Debug Agent: 30 Playwright tools for screenshots, visual diff, workflow testing, Core Web Vitals"
+    },
+    "tactual": {
+      "type": "local",
+      "command": ["npx", "--yes", "tactual-mcp"],
+      "enabled": true,
+      "description": "Tactual — Screen-reader navigation cost analyzer: 5-dim scoring, NVDA/JAWS/VoiceOver/TalkBack profiles. Включён: исправлена команда (npx --yes tactual-mcp) для обхода локальной JSON Schema ошибки."
+    },
+    "ui-ux-pro-mcp": {
+      "type": "local",
+      "command": ["npx", "-y", "ui-ux-pro-mcp", "--stdio"],
+      "environment": { },
+      "enabled": true,
+      "description": "UI/UX Pro MCP — 1920+ curated documents: styles, palettes, typography, icons, charts, UX guidelines, 12 frameworks"
+    }
+  },
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "allow",
+    "bash": {
+      "*": "allow",
+      "git push*": "deny"
+    },
+    "task": {
+      "*": "allow"
+    },
+    "prod-design-system-http_*": "allow",
+    "prod_design_system_http_*": "allow",
+    "local-design-system-http_*": "allow",
+    "local_design_system_http_*": "allow",
+    "chrome-devtools-mcp_*": "allow",
+    "chrome_devtools_mcp_*": "allow",
+    "context7_*": "allow",
+    "fetch_*": "allow",
+    "git_*": "allow",
+    "memory_*": "allow",
+    "sequential-thinking_*": "allow",
+    "filesystem_*": "allow",
+    "microsoft-learn_*": "allow",
+    "gitlab-mcp_*": "allow",
+    "atlassian-mcp_*": "allow",
+    "figma_*": "allow",
+    "storybook_*": "allow",
+    "postgres_*": "allow",
+    "slack_*": "allow",
+    "sentry_*": "allow",
+    "playwright-mcp_*": "allow",
+    "playwright_mcp_*": "allow",
+    "local-faiss-mcp_*": "allow",
+    "local_faiss_mcp_*": "allow",
+    "openapi-schema-explorer_*": "allow",
+    "openapi_schema_explorer_*": "allow",
+    "brave-search_*": "allow",
+    "ux-mcp-server_*": "allow",
+    "vuda_*": "allow",
+    "tactual_*": "allow",
+    "ui-ux-pro-mcp_*": "allow"
+  }
+}
