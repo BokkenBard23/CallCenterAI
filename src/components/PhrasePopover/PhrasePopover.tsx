@@ -94,16 +94,32 @@ export default function PhrasePopover({
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset state when match changes
-  useEffect(() => {
+  // Track the match identity to reset form when it changes
+  const matchKey = `${match?.phrase_text ?? ''}-${match?.turn_index ?? -1}`;
+  const [lastMatchKey, setLastMatchKey] = useState(matchKey);
+
+  // Reset state when match changes — using key comparison instead of useEffect
+  if (matchKey !== lastMatchKey) {
+    setLastMatchKey(matchKey);
     setFeedbackText('');
     setSubmitStatus('idle');
     setErrorMessage(null);
     setIsSubmitting(false);
-  }, [match?.phrase_text, match?.turn_index]);
+  }
 
-  // Cleanup abort controller
+  // Cancel auto-close timer when match changes or on unmount
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimerRef.current !== null) {
+        clearTimeout(autoCloseTimerRef.current);
+        autoCloseTimerRef.current = null;
+      }
+    };
+  }, [matchKey]);
+
+  // Cleanup abort controller on unmount
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
@@ -144,7 +160,8 @@ export default function PhrasePopover({
       setFeedbackText('');
 
       // Auto-close after 2 seconds
-      setTimeout(() => {
+      autoCloseTimerRef.current = setTimeout(() => {
+        autoCloseTimerRef.current = null;
         onClose();
       }, 2000);
     } catch (err) {

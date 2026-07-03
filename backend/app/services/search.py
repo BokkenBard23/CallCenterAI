@@ -103,7 +103,10 @@ async def run_hierarchical_search(
         SearchResult with segments, total_matches, matches, and level statistics.
     """
     if not dialog.turns:
-        return SearchResult(segments=[], total_matches=0, matches=[], matches_by_level={})
+        return SearchResult(
+            segments=[], total_matches=0, matches=[], matches_by_level={},
+            search_source="morph",
+        )
 
     # Build turn data in smartlogger format
     turns = _build_smartlogger_turns(dialog)
@@ -164,6 +167,7 @@ async def run_hierarchical_search(
         total_matches=len(all_matches),
         matches=all_matches,
         matches_by_level=matches_by_level,
+        search_source="morph",
     )
 
 

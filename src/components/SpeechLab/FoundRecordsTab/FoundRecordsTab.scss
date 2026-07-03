@@ -1,0 +1,32 @@
+.found-records-tab {
+  height: 100%;
+  overflow-y: auto;
+
+  &--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+}
+
+.found-record-card {
+  &__header {
+    padding: 12px;
+    border-radius: 8px;
+    transition: background-color 150ms ease;
+
+    &:hover {
+      background-color: var(--color-background-base-hover, rgba(0, 0, 0, 0.04));
+    }
+  }
+
+  &__content {
+    border-top: 1px solid var(--color-border-default, #e0e0e0);
+  }
+
+  &__text {
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+}

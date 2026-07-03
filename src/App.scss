@@ -24,6 +24,55 @@
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+ * Skip-to-content link — visible on keyboard focus only
+ * ═══════════════════════════════════════════════════════════ */
+.skip-nav {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  z-index: 9999;
+  padding: var(--sizeSpacingX2) var(--sizeSpacingX4);
+  background: var(--color-background-brand);
+  color: var(--color-text-active);
+  font-weight: bold;
+  border-radius: var(--sizeBorderRadiusX2);
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+
+.skip-nav:focus {
+  top: var(--sizeSpacingX2);
+  left: var(--sizeSpacingX2);
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * Focus-visible — keyboard navigation indicators
+ * ═══════════════════════════════════════════════════════════ */
+:focus-visible {
+  outline: 2px solid var(--color-border-focus, #1e88e5) !important;
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none !important;
+}
+
+/* Beeline DS overrides outline-width:0 on buttons/inputs.
+   Force focus ring for keyboard users (WCAG 2.4.7 Focus Visible). */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-border-focus, #1e88e5) !important;
+  outline-offset: 2px;
+}
+
 .app-main {
   flex: 1;
   min-width: 0;
@@ -35,7 +84,46 @@
   width: 100%;
   margin: 0 auto;
 
+  /* Focus target for skip-nav — remove outline when focused via JS */
+  &:focus {
+    outline: none;
+  }
+
   @media (max-width: 767px) {
     padding: 16px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * View Transitions API — circle-reveal theme animation
+ * Activated by AnimatedThemeToggler when supported.
+ * ═══════════════════════════════════════════════════════════ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  animation: circle-reveal 0.4s ease-in forwards;
+}
+
+::view-transition-new(root) {
+  animation: circle-reveal 0.4s ease-out forwards;
+}
+
+@keyframes circle-reveal {
+  from {
+    clip-path: circle(0% at var(--theme-transition-x, 50%) var(--theme-transition-y, 50%));
+  }
+  to {
+    clip-path: circle(var(--theme-transition-max-radius, 100%) at var(--theme-transition-x, 50%) var(--theme-transition-y, 50%));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
   }
 }

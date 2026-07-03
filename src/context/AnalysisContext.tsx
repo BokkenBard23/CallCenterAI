@@ -50,6 +50,8 @@ export interface AnalysisState {
   analysisError: string | null;
   searchResult: SearchResult | null;
   llmResult: LLMResult | null;
+  /** True while LLM analysis is in progress (phase 2 of two-phase analysis) */
+  llmLoading: boolean;
 
   // UI
   viewMode: ViewMode;
@@ -82,6 +84,7 @@ export const initialState: AnalysisState = {
   analysisError: null,
   searchResult: null,
   llmResult: null,
+  llmLoading: false,
 
   viewMode: 'summary',
   hideNoMatch: true,
@@ -113,6 +116,7 @@ export type AnalysisAction =
   | { type: 'SET_ANALYSIS_ERROR'; payload: string | null }
   | { type: 'SET_SEARCH_RESULT'; payload: SearchResult | null }
   | { type: 'SET_LLM_RESULT'; payload: LLMResult | null }
+  | { type: 'SET_LLM_LOADING'; payload: boolean }
   | { type: 'SET_VIEW_MODE'; payload: ViewMode }
   | { type: 'SET_HIDE_NO_MATCH'; payload: boolean }
   | { type: 'SET_ANALYSIS_RESULTS'; payload: { searchResult: SearchResult | null; llmResult: LLMResult | null } }
@@ -167,6 +171,8 @@ function analysisReducer(
       return { ...state, searchResult: action.payload };
     case 'SET_LLM_RESULT':
       return { ...state, llmResult: action.payload };
+    case 'SET_LLM_LOADING':
+      return { ...state, llmLoading: action.payload };
     case 'SET_VIEW_MODE':
       return { ...state, viewMode: action.payload };
     case 'SET_HIDE_NO_MATCH':

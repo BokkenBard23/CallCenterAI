@@ -1,7 +1,8 @@
 /**
  * Tests for BatchResultsPage — batch analysis progress and summary table.
  * Covers: loading state, completed batch, partial batch, error states,
- * unmount safety (AbortController), and interval cleanup.
+ * unmount safety (AbortController), interval cleanup, AnimatedCircularProgressBar,
+ * StatusBadge, pagination, empty state, and snackbar notifications.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
@@ -44,6 +45,29 @@ vi.mock('../storage/history', () => ({
   isStorageNearCapacity: vi.fn(() => false),
   cleanupOldEntries: vi.fn(() => 0),
 }));
+
+// ─── Mock SnackbarContext ─────────────────────────────────
+
+const mockShowSnackbar = vi.fn();
+const mockCloseSnackbar = vi.fn();
+
+vi.mock('../context/SnackbarContext', () => ({
+  useSnackbar: () => ({
+    showSnackbar: mockShowSnackbar,
+    closeSnackbar: mockCloseSnackbar,
+  }),
+}));
+
+// ─── Mock motion/react (framer-motion) ───────────────────
+
+vi.mock('motion/react', async () => {
+  const actual = await vi.importActual('motion/react');
+  return {
+    ...actual,
+    // Speed up AnimatePresence in tests
+    AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
 
 // ─── Helper ───────────────────────────────────────────────
 
@@ -103,6 +127,35 @@ const PARTIAL_BATCH = {
   ],
 };
 
+const PROCESSING_BATCH = {
+  ...COMPLETED_BATCH,
+  status: 'processing',
+  completed_count: 1,
+  failed_count: 0,
+  items: [
+    COMPLETED_BATCH.items[0],
+    {
+      filename: 'file2.rtf',
+      status: 'pending',
+      analysis_id: null,
+      total_matches: 0,
+      matches_by_level: {},
+      error: null,
+    },
+  ],
+};
+
+const EMPTY_BATCH = {
+  batch_id: 'test-batch-123',
+  session_id: 'session-1',
+  total_files: 0,
+  status: 'completed',
+  items: [],
+  completed_count: 0,
+  failed_count: 0,
+  error: null,
+};
+
 // ─── Tests ────────────────────────────────────────────────
 
 describe('BatchResultsPage', () => {
@@ -110,6 +163,8 @@ describe('BatchResultsPage', () => {
     mockNavigate.mockReset();
     mockGetBatchStatus.mockReset();
     mockGetResults.mockReset();
+    mockShowSnackbar.mockReset();
+    mockCloseSnackbar.mockReset();
   });
 
   it('renders loading state initially', () => {
@@ -165,8 +220,76 @@ describe('BatchResultsPage', () => {
     }, { timeout: 10000 });
   });
 
+  it('shows empty state when batch has no items', async () => {
+    mockGetBatchStatus.mockResolvedValue(EMPTY_BATCH);
+    renderBatchResultsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Нет файлов для анализа')).toBeInTheDocument();
+    }, { timeout: 10000 });
+    expect(screen.getByText('На страницу загрузки')).toBeInTheDocument();
+  });
+
+  it('renders progress indicator for completed batch', async () => {
+    mockGetBatchStatus.mockResolvedValue(COMPLETED_BATCH);
+    renderBatchResultsPage();
+
+    // Wait for data to load and verify the progress text is shown
+    await waitFor(() => {
+      expect(screen.getByText(/Обработано 2 из 2 файлов/)).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    // Verify at least one SVG progressbar is rendered (AnimatedCircularProgressBar)
+    const progressSvgs = document.querySelectorAll('svg[role="progressbar"]');
+    expect(progressSvgs.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows snackbar notification on batch completion', async () => {
+    mockGetBatchStatus.mockResolvedValue(COMPLETED_BATCH);
+    renderBatchResultsPage();
+
+    await waitFor(() => {
+      expect(mockShowSnackbar).toHaveBeenCalledWith(
+        expect.stringContaining('Анализ завершён'),
+        expect.objectContaining({
+          action: expect.objectContaining({
+            label: 'Посмотреть',
+          }),
+        }),
+      );
+    }, { timeout: 10000 });
+  });
+
+  it('shows snackbar notification on partial batch', async () => {
+    mockGetBatchStatus.mockResolvedValue(PARTIAL_BATCH);
+    renderBatchResultsPage();
+
+    await waitFor(() => {
+      expect(mockShowSnackbar).toHaveBeenCalledWith(
+        expect.stringContaining('ошибкой'),
+        expect.objectContaining({
+          action: expect.objectContaining({
+            label: 'Посмотреть',
+          }),
+        }),
+      );
+    }, { timeout: 10000 });
+  });
+
+  it('does not fire repeated snackbars on same status', async () => {
+    // First call returns processing, then completed
+    mockGetBatchStatus
+      .mockResolvedValueOnce(PROCESSING_BATCH)
+      .mockResolvedValueOnce(COMPLETED_BATCH);
+
+    renderBatchResultsPage();
+
+    await waitFor(() => {
+      expect(mockShowSnackbar).toHaveBeenCalledTimes(1);
+    }, { timeout: 10000 });
+  });
+
   it('aborts in-flight fetch and clears interval on unmount', async () => {
-    // Create a controlled promise for the initial load
     let resolveInitial: (value: unknown) => void;
     const initialPromise = new Promise((resolve) => {
       resolveInitial = resolve;
@@ -175,10 +298,8 @@ describe('BatchResultsPage', () => {
 
     const { unmount } = renderBatchResultsPage();
 
-    // Initial load is in-flight
     expect(mockGetBatchStatus).toHaveBeenCalledTimes(1);
 
-    // Resolve initial load
     await act(async () => {
       resolveInitial!(COMPLETED_BATCH);
     });
@@ -189,40 +310,31 @@ describe('BatchResultsPage', () => {
 
     const callCountAfterLoad = mockGetBatchStatus.mock.calls.length;
 
-    // Unmount — should clear interval and abort any in-flight request
     unmount();
 
-    // After unmount, wait to see if any more API calls happen
     await act(async () => {
       await new Promise((r) => setTimeout(r, 3500));
     });
 
-    // No additional API calls after unmount (interval was cleared)
     expect(mockGetBatchStatus.mock.calls.length).toBe(callCountAfterLoad);
   });
 
   it('does not update state after unmount when fetch resolves late', async () => {
-    // Create a slow promise that we resolve after unmount
     let resolveSlow: (value: unknown) => void;
     const slowPromise = new Promise((resolve) => {
       resolveSlow = resolve;
     });
 
-    // First call is slow, never resolves during component lifecycle
     mockGetBatchStatus.mockReturnValue(slowPromise);
 
     const { unmount } = renderBatchResultsPage();
 
-    // Wait for initial load call
     await waitFor(() => {
       expect(mockGetBatchStatus).toHaveBeenCalled();
     });
 
-    // Unmount while fetch is still in-flight
     unmount();
 
-    // Now resolve the slow request — should NOT cause React state update error
-    // (AbortError is caught and ignored in fetchStatus, or component is already unmounted)
     await act(async () => {
       resolveSlow!(COMPLETED_BATCH);
     });

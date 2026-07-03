@@ -1,14 +1,17 @@
 /**
- * Tests for UploadPage — upload form for RTF, dictionaries, and LLM settings.
- * Covers: page renders, upload areas, reset button, analyze button disabled state,
- * health check, provider loading, RTF upload flow, analyze flow, error states.
+ * Tests for UploadPage — reworked upload form with Stepper, DropZone,
+ * Dialog confirmation, and snackbar notifications.
+ *
+ * Covers: page renders, Stepper navigation, DropZone upload, reset with
+ * Dialog confirmation, analyze button disabled state, health check,
+ * provider loading, RTF upload flow, dictionary upload, error states.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AnalysisProvider } from '../context/AnalysisContext';
+import { SnackbarProvider } from '../context/SnackbarContext';
 import UploadPage from './UploadPage';
-// api/client is mocked via vi.mock below
 
 // ─── Mock useNavigate ─────────────────────────────────────
 
@@ -42,14 +45,44 @@ vi.mock('../api/client', () => ({
   ApiError: class extends Error { status = 0; body?: unknown; },
 }));
 
+// ─── Mock motion/react to avoid animation issues in jsdom ─
+
+vi.mock('motion/react', () => ({
+  useMotionValue: (initial: number) => ({
+    set: vi.fn(),
+    get: () => initial,
+    on: () => () => {},
+  }),
+  useSpring: () => ({
+    on: () => () => {},
+    get: () => 0,
+  }),
+  useInView: () => true,
+  AnimatePresence: ({ children }: { children: React.ReactNode }) => children,
+  m: {
+    div: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) =>
+      React.createElement('div', props, children),
+    span: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) =>
+      React.createElement('span', props, children),
+  },
+  motion: {
+    div: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) =>
+      React.createElement('div', props, children),
+    span: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) =>
+      React.createElement('span', props, children),
+  },
+}));
+
 // ─── Helper ───────────────────────────────────────────────
 
 function renderUploadPage() {
   return render(
     <MemoryRouter>
-      <AnalysisProvider>
-        <UploadPage />
-      </AnalysisProvider>
+      <SnackbarProvider>
+        <AnalysisProvider>
+          <UploadPage />
+        </AnalysisProvider>
+      </SnackbarProvider>
     </MemoryRouter>,
   );
 }
@@ -96,16 +129,10 @@ describe('UploadPage', () => {
     expect(screen.getByText('Загрузка данных для анализа')).toBeTruthy();
   });
 
-  it('renders RTF upload area', () => {
+  it('renders RTF upload area via DropZone', () => {
     renderUploadPage();
     const rtfArea = screen.getByLabelText('Загрузить RTF-файл диалога');
     expect(rtfArea).toBeTruthy();
-  });
-
-  it('renders dictionary upload area', () => {
-    renderUploadPage();
-    const dictArea = screen.getByLabelText('Загрузить XML-файлы словарей');
-    expect(dictArea).toBeTruthy();
   });
 
   it('renders Analyze button as disabled by default', () => {
@@ -120,19 +147,9 @@ describe('UploadPage', () => {
     expect(resetBtn).toBeTruthy();
   });
 
-  it('renders RTF upload card heading', () => {
+  it('renders RTF upload step heading', () => {
     renderUploadPage();
     expect(screen.getByText('Диалог')).toBeTruthy();
-  });
-
-  it('renders Dictionary card heading', () => {
-    renderUploadPage();
-    expect(screen.getByText('Словари')).toBeTruthy();
-  });
-
-  it('renders LLM provider card heading', () => {
-    renderUploadPage();
-    expect(screen.getByText('LLM-провайдер')).toBeTruthy();
   });
 
   it('renders upload instruction text', () => {
@@ -145,14 +162,6 @@ describe('UploadPage', () => {
     const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
     expect(rtfInput).toBeTruthy();
     expect(rtfInput.accept).toBe('.rtf');
-  });
-
-  it('has hidden file input for dictionaries', () => {
-    renderUploadPage();
-    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
-    expect(dictInput).toBeTruthy();
-    expect(dictInput.accept).toBe('.xml');
-    expect(dictInput.multiple).toBe(true);
   });
 
   // ─── Health check ─────────────────────────────────────
@@ -174,25 +183,6 @@ describe('UploadPage', () => {
     });
   });
 
-  // ─── Provider loading ─────────────────────────────────
-
-  it('shows provider select when providers are loaded', async () => {
-    renderUploadPage();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('provider-select')).toBeTruthy();
-    });
-  });
-
-  it('shows error when provider loading fails', async () => {
-    mockGetProviders.mockRejectedValue(new Error('Network error'));
-    renderUploadPage();
-
-    await waitFor(() => {
-      expect(screen.getByText(/Не удалось загрузить список провайдеров/)).toBeTruthy();
-    });
-  });
-
   // ─── RTF upload flow ──────────────────────────────────
 
   it('shows uploaded file name after RTF selection', async () => {
@@ -204,7 +194,7 @@ describe('UploadPage', () => {
     fireEvent.change(rtfInput, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(screen.getByText(/Загружен: dialog\.rtf/)).toBeTruthy();
+      expect(screen.getByText('dialog.rtf')).toBeTruthy();
     });
   });
 
@@ -235,34 +225,76 @@ describe('UploadPage', () => {
     });
   });
 
-  // ─── Reset ────────────────────────────────────────────
+  // ─── Reset with Dialog confirmation ────────────────────
 
-  it('handles reset button click', () => {
+  it('opens reset confirmation dialog on reset click', async () => {
     renderUploadPage();
     const resetBtn = screen.getByText('Сбросить');
     fireEvent.click(resetBtn);
-    // After reset, the upload area should still be present
+
+    // DS Dialog renders via portal — wait for the dialog to appear
+    await waitFor(() => {
+      // Look for the dialog title text — DS may render it in a portal
+      const dialogElements = document.querySelectorAll('[role="dialog"]');
+      expect(dialogElements.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('closes dialog on Отмена click', async () => {
+    renderUploadPage();
+    const resetBtn = screen.getByText('Сбросить');
+    fireEvent.click(resetBtn);
+
+    // Wait for dialog to open
+    await waitFor(() => {
+      expect(document.querySelectorAll('[role="dialog"]').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Click cancel (inside the dialog portal)
+    const cancelBtn = screen.getByText('Отмена');
+    fireEvent.click(cancelBtn);
+
+    // Dialog should close
+    await waitFor(() => {
+      expect(document.querySelectorAll('[role="dialog"]').length).toBe(0);
+    });
+    // Upload area should still be present
     expect(screen.getByLabelText('Загрузить RTF-файл диалога')).toBeTruthy();
   });
 
-  it('clears file name on reset', async () => {
+  it('resets data on dialog confirm', async () => {
     renderUploadPage();
 
-    // First upload a file
+    // Upload a file first
     const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
     const file = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
     fireEvent.change(rtfInput, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(screen.getByText(/Загружен: dialog\.rtf/)).toBeTruthy();
+      expect(screen.getByText('dialog.rtf')).toBeTruthy();
     });
 
-    // Then reset
+    // Click reset
     const resetBtn = screen.getByText('Сбросить');
     fireEvent.click(resetBtn);
 
-    // File name should be gone
-    expect(screen.queryByText(/Загружен: dialog\.rtf/)).toBeNull();
+    // Wait for dialog
+    await waitFor(() => {
+      expect(document.querySelectorAll('[role="dialog"]').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Find the confirm button inside the dialog (it's the Сбросить button in the dialog)
+    // The dialog has two buttons: Отмена and Сбросить
+    // We need the Сбросить inside the dialog
+    const allResetBtns = screen.getAllByText('Сбросить');
+    // The dialog confirm button should be the last one (inside the dialog portal)
+    const confirmBtn = allResetBtns[allResetBtns.length - 1];
+    fireEvent.click(confirmBtn);
+
+    // File name should be gone — page returns to step 1 DropZone
+    await waitFor(() => {
+      expect(screen.queryByText('dialog.rtf')).toBeNull();
+    });
   });
 
   // ─── Analyze button state ─────────────────────────────
@@ -270,22 +302,75 @@ describe('UploadPage', () => {
   it('disables analyze when no session exists', () => {
     renderUploadPage();
     const analyzeBtn = screen.getByText('Анализировать');
-    // Button exists but is disabled (no sessionId)
     expect(analyzeBtn).toBeTruthy();
   });
 
-  // ─── Dictionary upload ────────────────────────────────
+  // ─── Stepper ──────────────────────────────────────────
 
-  it('shows dictionary count after upload', async () => {
+  it('shows Stepper with 3 steps', () => {
+    renderUploadPage();
+    expect(screen.getByText('Загрузка RTF')).toBeTruthy();
+    expect(screen.getByText('Словарь')).toBeTruthy();
+    expect(screen.getByText('Анализ')).toBeTruthy();
+  });
+
+  it('starts on RTF step by default', () => {
+    renderUploadPage();
+    // Step 1 heading should be visible
+    expect(screen.getByText('Диалог')).toBeTruthy();
+  });
+
+  // ─── Dictionary upload (Step 2) ────────────────────────
+
+  it('navigates to dictionary step after RTF upload', async () => {
     renderUploadPage();
 
-    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
-    const file = new File(['<xml/>'], 'dict.xml', { type: 'text/xml' });
-
-    fireEvent.change(dictInput, { target: { files: [file] } });
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(screen.getByText(/Загружено словарей: 1/)).toBeTruthy();
+      // After RTF upload, step 2 should be visible (Словари heading)
+      expect(screen.getByText('Словари')).toBeTruthy();
+      // Dictionary DropZone should be visible
+      expect(screen.getByLabelText('Загрузить XML-файлы словарей')).toBeTruthy();
+    });
+  });
+
+  it('has hidden file input for dictionaries', async () => {
+    renderUploadPage();
+
+    // Need to navigate to step 2 first by uploading RTF
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
+      expect(dictInput).toBeTruthy();
+      expect(dictInput.accept).toBe('.xml');
+      expect(dictInput.multiple).toBe(true);
+    });
+  });
+
+  it('shows dictionary file name after upload', async () => {
+    renderUploadPage();
+
+    // Navigate to step 2 by uploading RTF
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const rtfFile = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [rtfFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Загрузить XML-файлы словарей')).toBeTruthy();
+    });
+
+    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
+    const dictFile = new File(['<xml/>'], 'dict.xml', { type: 'text/xml' });
+    fireEvent.change(dictInput, { target: { files: [dictFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByText('dict.xml')).toBeTruthy();
     });
   });
 
@@ -293,31 +378,67 @@ describe('UploadPage', () => {
     mockUploadDictionary.mockRejectedValue(new Error('Bad XML'));
     renderUploadPage();
 
-    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
-    const file = new File(['<xml/>'], 'bad.xml', { type: 'text/xml' });
+    // Navigate to step 2
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const rtfFile = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [rtfFile] } });
 
-    fireEvent.change(dictInput, { target: { files: [file] } });
+    await waitFor(() => {
+      expect(screen.getByLabelText('Загрузить XML-файлы словарей')).toBeTruthy();
+    });
+
+    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
+    const dictFile = new File(['<xml/>'], 'bad.xml', { type: 'text/xml' });
+    fireEvent.change(dictInput, { target: { files: [dictFile] } });
 
     await waitFor(() => {
       expect(screen.getByText('Bad XML')).toBeTruthy();
     });
   });
 
-  // ─── Model select ────────────────────────────────────
+  // ─── Provider/Analyze step (Step 3) ───────────────────
 
-  it('shows model select after provider is loaded with models', async () => {
+  it('shows LLM provider card heading on analyze step', async () => {
     renderUploadPage();
 
+    // Upload RTF to move to step 2
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const rtfFile = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [rtfFile] } });
+
     await waitFor(() => {
-      expect(screen.getByTestId('provider-select')).toBeTruthy();
+      expect(screen.getByLabelText('Загрузить XML-файлы словарей')).toBeTruthy();
     });
 
-    // Provider has models, so model select should appear
-    // (the provider auto-populates and model select appears when providerOptions are available)
-    const modelSelect = document.querySelector('[data-testid="model-select"]');
-    // Model select may or may not be visible without selecting a provider
-    // It appears when selectedProvider is set and has models
-    // Since we haven't selected a provider, model select may not be visible
-    expect(modelSelect || screen.getByTestId('provider-select')).toBeTruthy();
+    // Upload dictionary to move to step 3
+    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
+    const dictFile = new File(['<xml/>'], 'dict.xml', { type: 'text/xml' });
+    fireEvent.change(dictInput, { target: { files: [dictFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByText('LLM-провайдер')).toBeTruthy();
+    });
+  });
+
+  it('shows error when provider loading fails', async () => {
+    mockGetProviders.mockRejectedValue(new Error('Network error'));
+    renderUploadPage();
+
+    // Navigate to step 3
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const rtfFile = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [rtfFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Загрузить XML-файлы словарей')).toBeTruthy();
+    });
+
+    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
+    const dictFile = new File(['<xml/>'], 'dict.xml', { type: 'text/xml' });
+    fireEvent.change(dictInput, { target: { files: [dictFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Не удалось загрузить список провайдеров/)).toBeTruthy();
+    });
   });
 });

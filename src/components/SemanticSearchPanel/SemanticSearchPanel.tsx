@@ -16,7 +16,7 @@
  * (mirrors DictionaryPhraseList pattern)
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import {
   Badge,
   Box,
@@ -324,7 +324,7 @@ function IdleState() {
 // Main Component
 // ═══════════════════════════════════════════════════════════
 
-export default function SemanticSearchPanel({
+export default memo(function SemanticSearchPanel({
   sessionId,
   onResultClick,
   onClose,
@@ -350,6 +350,12 @@ export default function SemanticSearchPanel({
   // ── Abort controller for search requests ──
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Ref to track current searchType for debounced callback ──
+  const searchTypeRef = useRef<SearchType>(searchType);
+  useEffect(() => {
+    searchTypeRef.current = searchType;
+  }, [searchType]);
 
   // ── Fetch FRIDA status on mount ──
   useEffect(() => {
@@ -471,7 +477,8 @@ export default function SemanticSearchPanel({
       // Debounce search — auto-search after 300ms if query is non-empty
       if (value.trim()) {
         debounceRef.current = setTimeout(() => {
-          performSearch(value, searchType);
+          // Use ref to get current searchType (avoids stale closure)
+          performSearch(value, searchTypeRef.current);
         }, DEBOUNCE_MS);
       } else {
         // Reset results when input is cleared
@@ -482,7 +489,7 @@ export default function SemanticSearchPanel({
         setErrorType(null);
       }
     },
-    [searchType, performSearch],
+    [performSearch],
   );
 
   // ── Result click → cross-highlighting ──
@@ -551,13 +558,15 @@ export default function SemanticSearchPanel({
                     : 'FRIDA недоступна'
               }
             >
-              <Badge
-                type="tertiary"
-                semantic={fridaAvailable ? 'success' : 'danger'}
-                dot
-              >
-                {fridaAvailable ? 'FRIDA' : 'OFF'}
-              </Badge>
+              <span>
+                <Badge
+                  type="tertiary"
+                  semantic={fridaAvailable ? 'success' : 'danger'}
+                  dot
+                >
+                  {fridaAvailable ? 'FRIDA' : 'OFF'}
+                </Badge>
+              </span>
             </Tooltip>
           </Stack>
           {onClose && (
@@ -745,4 +754,4 @@ export default function SemanticSearchPanel({
       )}
     </Box>
   );
-}
+});

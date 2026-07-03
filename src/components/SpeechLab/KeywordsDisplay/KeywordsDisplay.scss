@@ -1,0 +1,14 @@
+.keywords-display {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+
+  &--empty {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-text-secondary, #757575);
+  }
+}

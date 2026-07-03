@@ -67,8 +67,38 @@ class Settings(BaseSettings):
     hybrid_search_ner_per_weight: float = 1.5
     hybrid_search_default_top_k: int = 10
 
+    # ── Circuit Breaker: LLM providers ──
+    llm_circuit_breaker_failures: int = 3
+    llm_circuit_breaker_reset_seconds: float = 60.0
+
+    # ── Search fallback ──
+    search_fallback_enabled: bool = True
+
+    # ── LLM Orchestrator (IP-3.6) ──
+    llm_orchestrator_steps: List[str] = ["sentiment", "conflict", "profanity", "topic"]
+    llm_orchestrator_enabled: bool = True
+
+    # ── Domain-specific analysis (IP-6.1) ──
+    analysis_default_domain: str = "general"
+
+    # ── Session persistence ──
+    session_backend: str = "sqlite"  # "memory" | "sqlite" (future: "postgresql")
+    session_db_path: Path = Path("data/sessions.db")
+    session_ttl_seconds: int = 7200  # 2 hours
+
     # ── Upload limits ──
     max_upload_size_mb: int = 50
+
+    # ── Health check ──
+    health_check_enabled: bool = True
+    app_version: str = "1.0.0"
+
+    # ── PII Masking (ID-4) ──
+    pii_masking_enabled: bool = True
+    pii_masking_language: str = "ru"
+    pii_masking_min_score: float = 0.5
+    pii_masking_circuit_reset_seconds: float = 60.0
+    pii_masking_failure_threshold: int = 3
 
     @property
     def max_upload_bytes(self) -> int:

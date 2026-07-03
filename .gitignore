@@ -44,6 +44,7 @@ coverage/
 # External repos and trash (reference only, not for tracking)
 Repo/
 Trash/
+Transcrib/
 
 # Secrets and tokens
 *.pem
@@ -51,3 +52,23 @@ Trash/
 *.key
 *.secret
 *.token
+
+# Runtime data (SQLite DB + WAL files)
+backend/data/
+data/sessions.db
+data/sessions.db-shm
+data/sessions.db-wal
+
+# AI workspace and pipeline backups
+.ai/
+.opencode-pipeline/backups/
+mcp-logs/
+opencode.json.bak
+
+# Chat exports and temp files
+chat-*.txt
+chat-*.json
+temp_dialog.rtf
+
+# OpenCode pipeline lock
+docs/specs/opencode-pipeline.lock.json

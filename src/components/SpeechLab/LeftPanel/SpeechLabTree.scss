@@ -1,0 +1,70 @@
+/**
+ * SpeechLabTree styles — DS Tree based.
+ *
+ * Wave UI-2: Migrated from ExpansionPanel to DS Tree.
+ */
+
+.speechlab-tree {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sizeSpacingX1, 4px);
+
+  // DS Tree wraps into .dsb_tree or similar container
+  // Override node text to truncate long names (CONFLICT A3 fix)
+  [class*='tree-node'],
+  [class*='treeNode'] {
+    // Ensure title text truncates with ellipsis
+    [class*='title'],
+    [class*='text'] {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: calc(100% - 80px); // leave room for counter+badges
+    }
+  }
+
+  &__empty {
+    padding: var(--sizeSpacingX3, 12px);
+    text-align: center;
+  }
+
+  // Custom badges rendered via TreeData.custom slot
+  .tree-node-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 4px;
+    white-space: nowrap;
+  }
+
+  // Context menu button (appears on hover) — CONFLICT A4 fix
+  &__context-btn {
+    opacity: 0;
+    transition: opacity 150ms ease;
+
+    .speechlab-tree__node:hover & {
+      opacity: 1;
+    }
+  }
+}
+
+// Scrollbar styling for tree (dark theme)
+.speechlab-tree::-webkit-scrollbar {
+  width: 6px;
+}
+
+.speechlab-tree::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.speechlab-tree::-webkit-scrollbar-thumb {
+  background-color: var(--color-divider, rgba(255, 255, 255, 0.2));
+  border-radius: 3px;
+}
+
+.speechlab-tree::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-border, rgba(255, 255, 255, 0.48));
+}

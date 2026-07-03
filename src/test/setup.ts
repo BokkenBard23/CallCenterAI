@@ -92,3 +92,69 @@ if (typeof ResizeObserver === 'undefined') {
 
   (globalThis as unknown as Record<string, unknown>).ResizeObserver = ResizeObserverPolyfill;
 }
+
+/**
+ * Полифилл DataTransfer для jsdom — нужен для DropZone (drag-and-drop)
+ */
+if (typeof DataTransfer === 'undefined') {
+  (globalThis as unknown as Record<string, unknown>).DataTransfer = class DataTransferPolyfill {
+    items: { add: (file: File) => void }[] = [];
+    files: File[] = [];
+
+    constructor() {
+      const fileList: File[] = [];
+      this.files = fileList;
+      this.items = {
+        add: (file: File) => {
+          fileList.push(file);
+        },
+      } as unknown as typeof this.items;
+    }
+  };
+}
+
+/**
+ * Полифилл Element.scrollIntoView для jsdom — нужен DS Stepper
+ */
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = function scrollIntoView() {
+    /* noop in jsdom */
+  };
+}
+
+/**
+ * Полифилл IntersectionObserver для jsdom — нужен для:
+ * - motion/react (useInView) — BlurFade, NumberTicker
+ * - Lazy loading components
+ */
+if (typeof IntersectionObserver === 'undefined') {
+  class IntersectionObserverPolyfill {
+    readonly root: Element | null = null;
+    readonly rootMargin: string = '';
+    readonly thresholds: ReadonlyArray<number> = [];
+
+    constructor(
+      private callback: IntersectionObserverCallback,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      _options?: IntersectionObserverInit,
+    ) {}
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    observe(_target: Element): void {
+      /* noop in jsdom — report as not intersecting */
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    unobserve(_target: Element): void {
+      /* noop */
+    }
+    disconnect(): void {
+      /* noop */
+    }
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+  }
+
+  (globalThis as unknown as Record<string, unknown>).IntersectionObserver =
+    IntersectionObserverPolyfill;
+}

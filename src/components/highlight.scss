@@ -7,16 +7,41 @@
 /* --- Light theme (default) --- */
 :root,
 [data-theme="light"] {
-  --highlight-level-1-bg: #fff9c4;
-  --highlight-level-1-border: #e08600;
-  --highlight-level-2-bg: #c8e6c9;
-  --highlight-level-2-border: #43a047;
-  --highlight-level-3-bg: #bbdefb;
-  --highlight-level-3-border: #1e88e5;
-  --highlight-level-4-bg: #f8bbd0;
-  --highlight-level-4-border: #e91e63;
-  --highlight-level-5-bg: #e1bee7;
-  --highlight-level-5-border: #8e24aa;
+  /* Depth-based highlight colors (P0-2 rework):
+   * Depth 1 = Критический (red), Depth 2 = Важный (orange),
+   * Depth 3 = Умеренный (amber), Depth 4 = Информационный (teal),
+   * Depth 5 = Справочный (blue) */
+  --highlight-depth-1-bg: rgba(211, 47, 47, 0.15);
+  --highlight-depth-1-border: rgba(211, 47, 47, 0.6);
+  --highlight-depth-1-text: #b71c1c;
+
+  --highlight-depth-2-bg: rgba(230, 81, 0, 0.15);
+  --highlight-depth-2-border: rgba(230, 81, 0, 0.6);
+  --highlight-depth-2-text: #bf360c;
+
+  --highlight-depth-3-bg: rgba(249, 168, 37, 0.20);
+  --highlight-depth-3-border: rgba(249, 168, 37, 0.7);
+  --highlight-depth-3-text: #e65100;
+
+  --highlight-depth-4-bg: rgba(0, 137, 123, 0.15);
+  --highlight-depth-4-border: rgba(0, 137, 123, 0.6);
+  --highlight-depth-4-text: #004d40;
+
+  --highlight-depth-5-bg: rgba(21, 101, 192, 0.15);
+  --highlight-depth-5-border: rgba(21, 101, 192, 0.6);
+  --highlight-depth-5-text: #0d47a1;
+
+  /* Legacy level-based vars (kept for backward compat — MatchLegend etc.) */
+  --highlight-level-1-bg: var(--highlight-depth-1-bg);
+  --highlight-level-1-border: var(--highlight-depth-1-border);
+  --highlight-level-2-bg: var(--highlight-depth-2-bg);
+  --highlight-level-2-border: var(--highlight-depth-2-border);
+  --highlight-level-3-bg: var(--highlight-depth-3-bg);
+  --highlight-level-3-border: var(--highlight-depth-3-border);
+  --highlight-level-4-bg: var(--highlight-depth-4-bg);
+  --highlight-level-4-border: var(--highlight-depth-4-border);
+  --highlight-level-5-bg: var(--highlight-depth-5-bg);
+  --highlight-level-5-border: var(--highlight-depth-5-border);
   --highlight-level-6-bg: #ffe0b2;
   --highlight-level-6-border: #d97b00;
 
@@ -40,16 +65,38 @@
 
 /* --- Dark theme --- */
 [data-theme="dark"] {
-  --highlight-level-1-bg: #5d4e37;
-  --highlight-level-1-border: #f9a825;
-  --highlight-level-2-bg: #2e4a2f;
-  --highlight-level-2-border: #66bb6a;
-  --highlight-level-3-bg: #1a3a5c;
-  --highlight-level-3-border: #42a5f5;
-  --highlight-level-4-bg: #5c2a3e;
-  --highlight-level-4-border: #ec407a;
-  --highlight-level-5-bg: #4a2d5e;
-  --highlight-level-5-border: #ab47bc;
+  /* Depth-based highlight colors — dark theme (P0-2 rework) */
+  --highlight-depth-1-bg: rgba(239, 83, 80, 0.25);
+  --highlight-depth-1-border: rgba(239, 83, 80, 0.7);
+  --highlight-depth-1-text: #ef9a9a;
+
+  --highlight-depth-2-bg: rgba(255, 112, 67, 0.25);
+  --highlight-depth-2-border: rgba(255, 112, 67, 0.7);
+  --highlight-depth-2-text: #ffab91;
+
+  --highlight-depth-3-bg: rgba(255, 202, 40, 0.25);
+  --highlight-depth-3-border: rgba(255, 202, 40, 0.7);
+  --highlight-depth-3-text: #ffe082;
+
+  --highlight-depth-4-bg: rgba(29, 233, 182, 0.20);
+  --highlight-depth-4-border: rgba(29, 233, 182, 0.6);
+  --highlight-depth-4-text: #80cbc4;
+
+  --highlight-depth-5-bg: rgba(66, 165, 245, 0.25);
+  --highlight-depth-5-border: rgba(66, 165, 245, 0.7);
+  --highlight-depth-5-text: #90caf9;
+
+  /* Legacy level-based vars — backward compat */
+  --highlight-level-1-bg: var(--highlight-depth-1-bg);
+  --highlight-level-1-border: var(--highlight-depth-1-border);
+  --highlight-level-2-bg: var(--highlight-depth-2-bg);
+  --highlight-level-2-border: var(--highlight-depth-2-border);
+  --highlight-level-3-bg: var(--highlight-depth-3-bg);
+  --highlight-level-3-border: var(--highlight-depth-3-border);
+  --highlight-level-4-bg: var(--highlight-depth-4-bg);
+  --highlight-level-4-border: var(--highlight-depth-4-border);
+  --highlight-level-5-bg: var(--highlight-depth-5-bg);
+  --highlight-level-5-border: var(--highlight-depth-5-border);
   --highlight-level-6-bg: #5d4037;
   --highlight-level-6-border: #ffa726;
 
@@ -76,11 +123,17 @@
   border-radius: 3px;
   padding: 1px 2px;
   cursor: default;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.2s ease, filter 0.2s ease;
 
   @media (prefers-reduced-motion: reduce) {
     transition: none;
   }
+}
+
+/* When a Q-level is selected, the matching highlights get a subtle glow
+   to reinforce which dictionary's matches are active */
+.highlight-match.highlight-selected-level {
+  box-shadow: 0 0 0 2px var(--highlight-active-glow, rgba(0, 0, 0, 0.15));
 }
 
 .highlight-match:focus-visible {
@@ -88,9 +141,16 @@
   outline-offset: 2px;
 }
 
-/* --- Level-specific styles (innermost = bg, outer = border) --- */
+/* --- Level-specific styles (innermost = bg, outer = border) ---
+ * Each level has a DISTINCT visual treatment:
+ *   Q1 (level-1): Yellow background + dashed bottom border
+ *   Q2 (level-2): Green background + solid bottom border
+ *   Q3 (level-3): Blue background + solid left border
+ * This ensures color-blind users can also distinguish levels. */
 .highlight-level-1 {
   background-color: var(--highlight-level-1-bg);
+  border-bottom: 2px dashed var(--highlight-level-1-border);
+  --highlight-active-glow: var(--highlight-level-1-border);
 }
 
 .highlight-level-1-outer {
@@ -99,16 +159,18 @@
 
 .highlight-level-2 {
   background-color: var(--highlight-level-2-bg);
-  border-bottom: 2px dashed var(--highlight-level-2-border);
+  border-bottom: 2px solid var(--highlight-level-2-border);
+  --highlight-active-glow: var(--highlight-level-2-border);
 }
 
 .highlight-level-2-outer {
-  border-bottom: 2px dashed var(--highlight-level-2-border);
+  border-bottom: 2px solid var(--highlight-level-2-border);
 }
 
 .highlight-level-3 {
   background-color: var(--highlight-level-3-bg);
   border-left: 3px solid var(--highlight-level-3-border);
+  --highlight-active-glow: var(--highlight-level-3-border);
 }
 
 .highlight-level-3-outer {
@@ -143,6 +205,67 @@
 }
 
 /* ═══════════════════════════════════════════════════════════
+ * Depth-based highlight classes (P0-2 rework)
+ * Replaces highlight-level-N with highlight-depth-N.
+ * Depth = min(cascade_order, 5). If cascade_order > 5 → depth-5.
+ * ═══════════════════════════════════════════════════════════ */
+
+/* Depth 1 — Критический (red) */
+.highlight-depth-1 {
+  background-color: var(--highlight-depth-1-bg);
+  border: 2px solid var(--highlight-depth-1-border);
+  color: var(--highlight-depth-1-text);
+}
+
+.highlight-depth-1-outer {
+  border: 2px solid var(--highlight-depth-1-border);
+}
+
+/* Depth 2 — Важный (deep orange) */
+.highlight-depth-2 {
+  background-color: var(--highlight-depth-2-bg);
+  border: 2px dashed var(--highlight-depth-2-border);
+  color: var(--highlight-depth-2-text);
+}
+
+.highlight-depth-2-outer {
+  border: 2px dashed var(--highlight-depth-2-border);
+}
+
+/* Depth 3 — Умеренный (amber) */
+.highlight-depth-3 {
+  background-color: var(--highlight-depth-3-bg);
+  border: 2px dotted var(--highlight-depth-3-border);
+  color: var(--highlight-depth-3-text);
+}
+
+.highlight-depth-3-outer {
+  border: 2px dotted var(--highlight-depth-3-border);
+}
+
+/* Depth 4 — Информационный (teal) */
+.highlight-depth-4 {
+  background-color: var(--highlight-depth-4-bg);
+  border: 1px double var(--highlight-depth-4-border);
+  color: var(--highlight-depth-4-text);
+}
+
+.highlight-depth-4-outer {
+  border: 1px double var(--highlight-depth-4-border);
+}
+
+/* Depth 5 — Справочный (blue) */
+.highlight-depth-5 {
+  background-color: var(--highlight-depth-5-bg);
+  border: 1px dashed var(--highlight-depth-5-border);
+  color: var(--highlight-depth-5-text);
+}
+
+.highlight-depth-5-outer {
+  border: 1px dashed var(--highlight-depth-5-border);
+}
+
+/* ═══════════════════════════════════════════════════════════
  * DR-1/DR-2/DR-3 CSS classes (Chunk 1)
  * ═══════════════════════════════════════════════════════════ */
 
@@ -168,10 +291,64 @@
 
 /* ═══════════════════════════════════════════════════════════
  * Dim/bright for multi-dict filtering (Chunk 2)
+ * When a Q-level is selected, non-matching highlights are dimmed
+ * but retain a hint of their color so users can still distinguish levels.
  * ═══════════════════════════════════════════════════════════ */
 .highlight-dim {
-  opacity: 0.35;
-  filter: brightness(0.6);
+  opacity: 0.25;
+  background-color: inherit !important;
+  border-color: transparent !important;
+  filter: grayscale(0.8) brightness(1.2);
+  transition: opacity 0.2s ease, filter 0.2s ease;
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+/* Level-specific dim: keep a very faint tint so levels are still distinguishable */
+.highlight-level-1.highlight-dim {
+  background-color: rgba(211, 47, 47, 0.05) !important; /* faint red */
+}
+
+.highlight-level-2.highlight-dim {
+  background-color: rgba(230, 81, 0, 0.05) !important; /* faint orange */
+}
+
+.highlight-level-3.highlight-dim {
+  background-color: rgba(249, 168, 37, 0.05) !important; /* faint amber */
+}
+
+/* Depth-specific dim (P0-2 rework) */
+.highlight-depth-1.highlight-dim {
+  background-color: rgba(211, 47, 47, 0.05) !important;
+}
+
+.highlight-depth-2.highlight-dim {
+  background-color: rgba(230, 81, 0, 0.05) !important;
+}
+
+.highlight-depth-3.highlight-dim {
+  background-color: rgba(249, 168, 37, 0.05) !important;
+}
+
+.highlight-depth-4.highlight-dim {
+  background-color: rgba(0, 137, 123, 0.05) !important;
+}
+
+.highlight-depth-5.highlight-dim {
+  background-color: rgba(21, 101, 192, 0.05) !important;
+}
+
+/* Tree node selection: selected node's phrases get a glow effect */
+.highlight-selected-node {
+  box-shadow: 0 0 0 2px var(--highlight-depth-1-border);
+}
+
+/* Cross-highlighting: tree node hover → outline on matching phrases */
+.highlight-tree-hovered {
+  outline: 2px solid var(--color-status-info, #1e88e5);
+  outline-offset: 1px;
 }
 
 /* --- Segment card --- */

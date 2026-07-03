@@ -35,6 +35,7 @@ from app.models import (
     DictionaryCondition,
     DictionaryNode,
     DictionaryValidation,
+    DisplayToken,
     LogicNode,
     PhraseGroup,
     SavedState,
@@ -158,6 +159,10 @@ def _parse_saved_state(parent: etree._Element) -> Optional[SavedState]:
     rather than a SavedState with misleading defaults
     (total_found=0, is_actual=True).
 
+    When <SavedState> exists but <IsActual> sub-element is missing,
+    defaults is_actual to False (conservative: don't claim data exists
+    unless the XML explicitly says so).
+
     Args:
         parent: Parent element containing <SavedState>.
 
@@ -172,7 +177,7 @@ def _parse_saved_state(parent: etree._Element) -> Optional[SavedState]:
         total_found=int(_get_text_or_empty(ss_elem, "TotalFound") or "0"),
         last_update_time=_get_text_or_empty(ss_elem, "LastUpdateTime"),
         execution_time=_get_text_or_empty(ss_elem, "ExecutionTime"),
-        is_actual=_parse_bool(_get_text_or_empty(ss_elem, "IsActual") or "true"),
+        is_actual=_parse_bool(_get_text_or_empty(ss_elem, "IsActual") or "false"),
         is_cancelled=_parse_bool(_get_text_or_empty(ss_elem, "IsCancelled") or "false"),
     )
 
@@ -388,6 +393,8 @@ def _parse_speech_lab_request(
         is_remainder=is_remainder,
         phrase_groups=phrase_groups,
         attribute_tree=attribute_tree,
+        # SpeechLab: raw TokenSection for DisplayToken conversion
+        token_section=token_section if token_section.tokens else None,
     )
 
     # Validate
@@ -771,3 +778,222 @@ def _detect_cycles(node: DictionaryNode) -> List[str]:
         return []
 
     return dfs(node)
+
+
+# ---------------------------------------------------------------------------
+# DisplayToken conversion (SpeechLab UI)
+# ---------------------------------------------------------------------------
+
+
+def resolve_phrase_channel(channels: Set[str]) -> str:
+    """Determine the channel for a group of WORD tokens.
+
+    Rules (matches frontend resolvePhraseChannel):
+      - ANY in channels → ANY
+      - Both CLIENT and OPERATOR → ANY
+      - Only CLIENT → CLIENT
+      - Only OPERATOR → OPERATOR
+      - Empty set → ANY
+
+    Args:
+        channels: Set of channel strings from WORD token Properties.
+
+    Returns:
+        Resolved channel: "OPERATOR", "CLIENT", or "ANY".
+    """
+    if not channels:
+        return "ANY"
+    if "ANY" in channels:
+        return "ANY"
+    has_client = "CLIENT" in channels
+    has_operator = "OPERATOR" in channels
+    if has_client and has_operator:
+        return "ANY"
+    if has_client:
+        return "CLIENT"
+    if has_operator:
+        return "OPERATOR"
+    return "ANY"
+
+
+# LEXEME tokens that produce DisplayToken(type=LEXEME)
+_LEXEME_KEYWORDS = {"ИЛИ", "OR", "И", "AND", "НЕ", "NOT"}
+
+
+def group_into_display_tokens(token_section: TokenSection) -> List[DisplayToken]:
+    """Convert a TokenSection into a list of DisplayTokens for frontend rendering.
+
+    Algorithm (matches frontend groupIntoDisplayTokens):
+      1. Iterate TokenSection.tokens left to right.
+      2. TERMINAL '"' → toggle in_quotes flag (opens/closes exact phrase).
+      3. TERMINAL '(' or ')' → flush current group → DisplayToken(type=BRACKET).
+      4. WORD → accumulate into current group; track channels and word_distances.
+      5. LEXEME (ИЛИ/И/НЕ/OR/AND/NOT) → flush current group → DisplayToken(type=LEXEME, text lowercase).
+      6. WHITESPACE → skip.
+      7. On flush of WORD group:
+         - If in_quotes → type=PHRASE, is_exact=True
+         - If NOT in_quotes and single word → type=WORD
+         - If NOT in_quotes and multiple words → type=PHRASE
+         - Channel = resolve_phrase_channel(accumulated channels)
+         - word_distance = max of accumulated distances
+
+    Args:
+        token_section: Parsed TokenSection from the XML.
+
+    Returns:
+        List of DisplayToken instances ready for frontend rendering.
+    """
+    tokens = token_section.tokens
+    if not tokens:
+        return []
+
+    result: List[DisplayToken] = []
+    current_words: List[str] = []
+    current_channels: Set[str] = set()
+    current_distances: List[int] = []
+    current_has_error = False
+    in_quotes = False
+
+    def flush_group() -> None:
+        """Flush accumulated WORD tokens into DisplayToken(s)."""
+        nonlocal current_words, current_channels, current_distances, in_quotes
+        nonlocal current_has_error
+
+        if not current_words:
+            return
+
+        text = " ".join(current_words)
+        channel = resolve_phrase_channel(current_channels)
+        word_distance = max(current_distances) if current_distances else 2
+        is_exact = in_quotes
+
+        if is_exact:
+            token_type: str = "PHRASE"
+        elif len(current_words) == 1:
+            token_type = "WORD"
+        else:
+            token_type = "PHRASE"
+
+        result.append(
+            DisplayToken(
+                text=text,
+                type=token_type,  # type: ignore[arg-type]
+                channel=channel,  # type: ignore[arg-type]
+                word_distance=word_distance,
+                is_error=current_has_error,
+                is_exact=is_exact,
+            )
+        )
+
+        current_words = []
+        current_channels = set()
+        current_distances = []
+        current_has_error = False
+
+    for tok in tokens:
+        # WHITESPACE → skip
+        if tok.type == "WHITESPACE":
+            continue
+
+        # TERMINAL → quotes or brackets
+        if tok.type == "TERMINAL":
+            if tok.text == '"':
+                # Opening/closing quote
+                if in_quotes:
+                    # Closing quote — flush the exact phrase
+                    flush_group()
+                    in_quotes = False
+                else:
+                    # Opening quote
+                    in_quotes = True
+            elif tok.text in ("(", ")"):
+                # Bracket — flush any pending words, then add bracket token
+                flush_group()
+                result.append(
+                    DisplayToken(
+                        text=tok.text,
+                        type="BRACKET",
+                        channel="ANY",
+                        word_distance=2,
+                        is_error=False,
+                        is_exact=False,
+                    )
+                )
+            else:
+                # Other TERMINAL (rare) — treat as bracket
+                flush_group()
+                result.append(
+                    DisplayToken(
+                        text=tok.text,
+                        type="BRACKET",
+                        channel="ANY",
+                        word_distance=2,
+                        is_error=tok.is_error,
+                        is_exact=False,
+                    )
+                )
+            continue
+
+        # LEXEME → flush + LEXEME display token
+        if tok.type == "LEXEME" and tok.text.upper() in _LEXEME_KEYWORDS:
+            flush_group()
+            result.append(
+                DisplayToken(
+                    text=tok.text.lower(),
+                    type="LEXEME",
+                    channel="ANY",
+                    word_distance=2,
+                    is_error=tok.is_error,
+                    is_exact=False,
+                )
+            )
+            in_quotes = False
+            continue
+
+        # WORD → accumulate
+        if tok.type == "WORD":
+            current_words.append(tok.text)
+            if tok.channel and tok.channel.strip():
+                current_channels.add(tok.channel.strip().upper())
+            if tok.word_distance:
+                try:
+                    current_distances.append(int(tok.word_distance))
+                except (ValueError, TypeError):
+                    pass
+            if tok.is_error:
+                current_has_error = True
+            continue
+
+        # LEXEME not in keywords → treat as regular text (rare edge case)
+        if tok.type == "LEXEME":
+            flush_group()
+            result.append(
+                DisplayToken(
+                    text=tok.text.lower(),
+                    type="LEXEME",
+                    channel="ANY",
+                    word_distance=2,
+                    is_error=tok.is_error,
+                    is_exact=False,
+                )
+            )
+            continue
+
+        # Unknown token type → flush and add as WORD
+        flush_group()
+        if tok.text.strip():
+            result.append(
+                DisplayToken(
+                    text=tok.text,
+                    type="WORD",
+                    channel="ANY",
+                    word_distance=2,
+                    is_error=tok.is_error,
+                    is_exact=False,
+                )
+            )
+
+    # Flush any remaining group
+    flush_group()
+
+    return result

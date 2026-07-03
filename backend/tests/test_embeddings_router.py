@@ -165,9 +165,9 @@ def _register_session(session_id: str, dialog: ParsedDialog | None = None) -> No
     """Register a session with a dialogue in the session store."""
     from app.utils.session import session_store
 
-    session = session_store.create()
-    # Override the session ID (store creates its own; we patch it)
-    session.id = session_id
+    # Delete existing session first (SQLite persistence survives between tests)
+    session_store.delete(session_id)
+    session = session_store.create(session_id=session_id)
     session.dialog = dialog
     session_store.update(session)
 

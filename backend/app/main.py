@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.middleware.rate_limiter import limiter
 from app.middleware.structured_logging import StructuredLoggingMiddleware, setup_structured_logging
-from app.routers import upload, analysis, batch, providers, embeddings, feedback, dictionary, export, rag, health
+from app.routers import upload, analysis, batch, providers, embeddings, feedback, dictionary, export, rag, health, pii
 
 
 # ── Make smartlogger importable ──────────────────────────────
@@ -36,6 +36,7 @@ _OPENAPI_TAGS = [
     {"name": "export", "description": "Export analysis results (Excel, PDF)"},
     {"name": "rag", "description": "RAG Q&A over analyzed dialogues (retrieval + LLM generation)"},
     {"name": "health", "description": "System health check and monitoring (ID-15)"},
+    {"name": "pii", "description": "PII masking for 152-FZ compliance (Presidio + custom NER)"},
 ]
 
 
@@ -102,6 +103,26 @@ def _init_services() -> None:
         vector_store=vector_store,
     )
     app.state.rag_service = rag_service
+
+    # PIIMaskingService (ID-4) — 152-FZ compliance
+    if settings.pii_masking_enabled:
+        from app.services.pii_masking import PIIMaskingService
+
+        pii_service = PIIMaskingService(
+            language=settings.pii_masking_language,
+            min_score_threshold=settings.pii_masking_min_score,
+            circuit_reset_timeout=settings.pii_masking_circuit_reset_seconds,
+            failure_threshold=settings.pii_masking_failure_threshold,
+        )
+        app.state.pii_masking_service = pii_service
+
+        if not pii_service.is_available():
+            logger.warning(
+                "PII masking enabled but Presidio unavailable — processing will be blocked",
+            )
+    else:
+        app.state.pii_masking_service = None
+        logger.warning("PII masking DISABLED — not compliant with 152-FZ")
 
 
 @asynccontextmanager
@@ -171,6 +192,7 @@ app.include_router(dictionary.router, prefix="/api/dictionary", tags=["dictionar
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 app.include_router(health.router, prefix="/api/health", tags=["health"])
+app.include_router(pii.router, prefix="/api/pii", tags=["pii"])
 
 
 # ── Legacy healthcheck (kept for backward compatibility) ─────

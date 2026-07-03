@@ -8,7 +8,7 @@
  * and sets hoveredPhrase in HoverContext.
  */
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, memo } from 'react';
 import {
   Box,
   Card,
@@ -37,7 +37,7 @@ function pluralMatchCount(count: number): string {
   return 'совпадений';
 }
 
-export default function HighlightedTextView({
+export default memo(function HighlightedTextView({
   searchResult,
   hideNoMatch,
 }: HighlightedTextViewProps) {
@@ -78,7 +78,7 @@ export default function HighlightedTextView({
   const handleSegmentMouseOver = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (target.tagName === 'MARK' && target instanceof HTMLElement) {
+      if (target.tagName === 'MARK') {
         const phrase = target.getAttribute('data-phrase');
         if (phrase) {
           setHoveredPhrase(phrase);
@@ -182,4 +182,4 @@ export default function HighlightedTextView({
       </Stack>
     </Stack>
   );
-}
+});

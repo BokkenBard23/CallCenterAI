@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "chrome:debug": "powershell -ExecutionPolicy Bypass -File scripts/start-chrome-debug.ps1",
+    "openapi:dump": "powershell -ExecutionPolicy Bypass -File scripts/dump-openapi-spec.ps1"
   },
   "dependencies": {
     "@beeline/design-system-react": "^2.5.0",
@@ -19,13 +21,14 @@
     "motion": "^12.40.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-resizable-panels": "^4.12.0",
     "react-router-dom": "^7.17.0"
   },
   "devDependencies": {
     "@elsahafy/ux-mcp-server": "^5.0.0",
     "@eslint/js": "^9.39.1",
-    "@executeautomation/playwright-mcp-server": "^1.0.12",
     "@modelcontextprotocol/server-sequential-thinking": "^2025.12.18",
+    "@playwright/mcp": "^0.0.76",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
@@ -41,12 +44,10 @@
     "figma-developer-mcp": "^0.13.2",
     "globals": "^16.5.0",
     "jsdom": "^26.1.0",
-    "mcp-server-fetch": "^0.0.2",
+    "knip": "^6.23.0",
     "mcp-server-filesystem": "^0.6.2",
     "mcp-server-memory": "^1.0.3",
-    "playwright-mcp": "^0.0.19",
     "sass": "^1.101.0",
-    "tactual": "^0.5.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.61.1",
     "ui-ux-pro-mcp": "^1.5.0",

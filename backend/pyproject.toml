@@ -23,6 +23,9 @@ dependencies = [
     "natasha>=1.6.0",
     "slowapi>=0.1.9",
     "tenacity>=8.2.0",
+    # PII masking (ID-4: Presidio + NER for 152-ФЗ compliance)
+    "presidio-analyzer>=2.2.0",
+    "presidio-anonymizer>=2.2.0",
 ]
 
 [project.optional-dependencies]

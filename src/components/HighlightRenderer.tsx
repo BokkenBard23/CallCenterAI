@@ -5,25 +5,24 @@
  *   - Outer matches = border pattern (color-blindness-friendly)
  *   - Uses matched_text + matched_start/matched_end from backend for
  *     reliable positioning (no indexOf guesswork)
- *   - Falls back to matched_text indexOf if offsets are -1
  *
  * Display Rules (DR-1/DR-2/DR-3):
  *   DR-1: is_exact_match → guillemet quotes «» around matched text
  *   DR-2: word_distance === 0 → bold (fontWeight 600)
  *   DR-3: channel_constraint → CLIENT=blue, OPERATOR=light blue, ANY=default
- *   DR-1+DR-2+DR-3 COMBINE
  *
- * Enhancement (Chunk 2): subscribes to HoverContext for cross-highlighting
- * and selectedDictLevel for dim/bright filtering.
- * When hoveredPhrase matches match.phrase_text, adds 'highlight-hovered' CSS class.
- * When selectedDictLevel is set, non-matching levels get 'highlight-dim' CSS class.
+ * P0-2 Rework: Depth-based colors (5 levels) instead of Q1/Q2/Q3 levels.
+ * P0-1 Rework: Dim/bright filtering uses activePhrases Set instead of selectedDictLevel.
+ * P0-3 Rework: Hover → DS Tooltip with brief info; Click → PhrasePopover.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useCallback, useState, useRef } from 'react';
 import { Tooltip } from '@beeline/design-system-react';
 
 import type { DictMatch } from '../types/api';
 import { useHoverContext } from '../context/HoverContext';
+
+import './highlight.scss';
 
 interface HighlightRendererProps {
   text: string;
@@ -34,7 +33,8 @@ interface HighlightRendererProps {
 interface HighlightRange {
   start: number;
   end: number;
-  level: string;
+  /** depth level (1-5) — maps to highlight-depth-N CSS classes */
+  depth: number;
   match: DictMatch;
 }
 
@@ -42,18 +42,20 @@ interface HighlightRange {
 interface TextChunk {
   type: 'plain' | 'highlighted';
   text: string;
-  level: string;
+  depth: number;
   isInnermost: boolean;
   match: DictMatch | null;
 }
 
+/** Map cascade_order to depth (1-5, cycling if > 5) */
+function cascadeToDepth(cascadeOrder: number): number {
+  if (cascadeOrder <= 5) return cascadeOrder;
+  return ((cascadeOrder - 1) % 5) + 1;
+}
+
 /**
  * Build sorted, non-overlapping highlight ranges from matches.
- * When ranges overlap, all are kept but innermost/outermost is determined later.
- *
- * Position resolution strategy:
- * 1. If matched_start/matched_end are provided (>= 0), use them directly
- * 2. Otherwise, fall back to indexOf(matched_text) then indexOf(phrase_text)
+ * Uses depth-based classification instead of flat Q-levels.
  */
 function buildRanges(
   text: string,
@@ -65,20 +67,15 @@ function buildRanges(
     let start = -1;
     let end = -1;
 
-    // Strategy 1: Use backend-computed character offsets
     if (match.matched_start >= 0 && match.matched_end >= 0) {
       start = match.matched_start;
       end = match.matched_end;
-    }
-    // Strategy 2: Find matched_text in the turn text
-    else if (match.matched_text) {
+    } else if (match.matched_text) {
       start = text.indexOf(match.matched_text);
       if (start >= 0) {
         end = start + match.matched_text.length;
       }
-    }
-    // Strategy 3: Last resort — find phrase_text
-    else {
+    } else {
       start = text.indexOf(match.phrase_text);
       if (start >= 0) {
         end = start + match.phrase_text.length;
@@ -86,19 +83,17 @@ function buildRanges(
     }
 
     if (start < 0 || end < 0 || start >= text.length || end > text.length) {
-      continue; // Cannot locate this match in the text
+      continue;
     }
 
-    // Backend encodes hierarchy level in word_distance_used (see search.py line 160)
     ranges.push({
       start,
       end,
-      level: String(match.word_distance_used),
+      depth: cascadeToDepth(match.cascade_order),
       match,
     });
   }
 
-  // Sort by start position, then by length (shorter = innermost)
   ranges.sort((a, b) => {
     if (a.start !== b.start) return a.start - b.start;
     return a.end - b.end;
@@ -109,19 +104,16 @@ function buildRanges(
 
 /**
  * Split text into chunks based on highlight ranges.
- * Determines innermost vs outer for overlapping regions.
  */
 function splitIntoChunks(
   text: string,
   ranges: HighlightRange[],
 ): TextChunk[] {
   if (ranges.length === 0) {
-    return [{ type: 'plain', text, level: '', isInnermost: false, match: null }];
+    return [{ type: 'plain', text, depth: 0, isInnermost: false, match: null }];
   }
 
   const chunks: TextChunk[] = [];
-
-  // Collect all boundary points
   const points = new Set<number>();
   points.add(0);
   points.add(text.length);
@@ -138,7 +130,6 @@ function splitIntoChunks(
 
     if (!chunkText) continue;
 
-    // Find which ranges cover this chunk
     const coveringRanges = ranges.filter(
       (r) => r.start <= start && r.end >= end,
     );
@@ -147,17 +138,16 @@ function splitIntoChunks(
       chunks.push({
         type: 'plain',
         text: chunkText,
-        level: '',
+        depth: 0,
         isInnermost: false,
         match: null,
       });
     } else {
-      // Innermost = smallest range (most specific)
       const innermost = coveringRanges[coveringRanges.length - 1];
       chunks.push({
         type: 'highlighted',
         text: chunkText,
-        level: innermost.level,
+        depth: innermost.depth,
         isInnermost: true,
         match: innermost.match,
       });
@@ -167,66 +157,69 @@ function splitIntoChunks(
   return chunks;
 }
 
-/** Format match details for tooltip */
-function formatMatchTooltip(match: DictMatch): string {
-  const lines = [
-    `Фраза словаря: ${match.phrase_text}`,
-  ];
-  // Show matched text if different from phrase
-  if (match.matched_text && match.matched_text !== match.phrase_text) {
-    lines.push(`Совпадение в тексте: ${match.matched_text}`);
-  }
-  lines.push(
-    `Словарь: ${match.quarter}`,
-    `Уровень: ${match.word_distance_used}`,
-  );
-  // DR-3: channel
-  if (match.channel_constraint && match.channel_constraint !== 'ANY') {
-    const channelLabel = match.channel_constraint === 'CLIENT' ? 'Клиент' : 'Сотрудник';
-    lines.push(`Канал: ${channelLabel}`);
-  }
-  // DR-2: word_distance
-  if (match.word_distance !== undefined) {
-    const distLabel = match.word_distance === 0 ? 'смежные' : `${match.word_distance} пропусков`;
-    lines.push(`Расстояние: ${match.word_distance} (${distLabel})`);
-  }
-  // DR-1: exact
-  if (match.is_exact_match) {
-    lines.push('Точное совпадение: да');
-  }
-  return lines.join('\n');
-}
-
 /** Get DR-3 channel CSS variable for a match */
 function getMatchChannelColor(match: DictMatch | null): string {
   if (!match) return 'var(--color-status-neutral, #9e9e9e)';
-  // Use channel_constraint if available (DR-3), otherwise derive from speaker
   const channel = match.channel_constraint?.toUpperCase();
-  if (channel === 'CLIENT') {
-    return 'var(--dict-channel-client, #1e88e5)';
-  }
-  if (channel === 'OPERATOR') {
-    return 'var(--dict-channel-operator, #64b5f6)';
-  }
-  if (channel === 'ANY' || channel) {
-    return 'var(--dict-channel-any)';
-  }
-  // Fallback: derive from speaker
+  if (channel === 'CLIENT') return 'var(--dict-channel-client, #1e88e5)';
+  if (channel === 'OPERATOR') return 'var(--dict-channel-operator, #64b5f6)';
+  if (channel === 'ANY' || channel) return 'var(--dict-channel-any)';
   const speaker = match.speaker?.toLowerCase() ?? '';
-  if (speaker.includes('сотрудник') || speaker.includes('operator')) {
-    return 'var(--dict-channel-operator)';
-  }
-  if (speaker.includes('клиент') || speaker.includes('client')) {
-    return 'var(--dict-channel-client)';
-  }
+  if (speaker.includes('сотрудник') || speaker.includes('operator')) return 'var(--dict-channel-operator)';
+  if (speaker.includes('клиент') || speaker.includes('client')) return 'var(--dict-channel-client)';
   return 'var(--dict-channel-any)';
+}
+
+/** Depth name for Tooltip display */
+const DEPTH_NAMES: Record<number, string> = {
+  1: 'Критический',
+  2: 'Важный',
+  3: 'Умеренный',
+  4: 'Информационный',
+  5: 'Справочный',
+};
+
+/** Channel label for Tooltip */
+function getChannelLabel(channel: string | undefined): string {
+  switch (channel?.toUpperCase()) {
+    case 'CLIENT': return 'Клиент';
+    case 'OPERATOR': return 'Сотрудник';
+    case 'ANY': return 'Любой';
+    default: return channel ?? '—';
+  }
+}
+
+/** Distance label for Tooltip */
+function getDistanceLabel(distance: number | undefined): string {
+  if (distance === undefined) return '—';
+  if (distance === 0) return 'смежные';
+  return `${distance} ${distance === 1 ? 'пропуск' : distance < 5 ? 'пропуска' : 'пропусков'}`;
+}
+
+/** Build tooltip text for a match (P0-3) */
+function buildTooltipText(match: DictMatch): string {
+  const depthName = DEPTH_NAMES[cascadeToDepth(match.cascade_order)] ?? `Глубина ${match.cascade_order}`;
+  const channelLabel = getChannelLabel(match.channel_constraint);
+  const distanceLabel = getDistanceLabel(match.word_distance);
+  return `\u00AB${match.phrase_text}\u00BB · ${depthName} · Канал: ${channelLabel} · ${distanceLabel}`;
 }
 
 export default function HighlightRenderer({
   text,
   matches,
 }: HighlightRendererProps) {
-  const { hoveredPhrase, selectedDictLevel } = useHoverContext();
+  const {
+    hoveredPhrase,
+    selectedTreeNodeId,
+    activePhrases,
+    hoveredTreeNodeId,
+    setHoveredPhrase,
+  } = useHoverContext();
+
+  // P0-3: Tooltip hover state with 300ms delay
+  const [hoveredMarkKey, setHoveredMarkKey] = useState<string | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chunks = useMemo(
     () => {
@@ -236,6 +229,27 @@ export default function HighlightRenderer({
     [text, matches],
   );
 
+  // P0-3: 300ms delayed tooltip show
+  const handleMarkMouseEnter = useCallback((markKey: string) => {
+    setHoveredMarkKey(markKey);
+    if (hoverTimerRef.current !== null) {
+      clearTimeout(hoverTimerRef.current);
+    }
+    hoverTimerRef.current = setTimeout(() => {
+      setTooltipVisible(true);
+      hoverTimerRef.current = null;
+    }, 300);
+  }, []);
+
+  const handleMarkMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current !== null) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setTooltipVisible(false);
+    setHoveredMarkKey(null);
+  }, []);
+
   return (
     <span className="segment-text">
       {chunks.map((chunk, idx) => {
@@ -243,20 +257,35 @@ export default function HighlightRenderer({
           return <span key={idx}>{chunk.text}</span>;
         }
 
-        const levelClass = chunk.isInnermost
-          ? `highlight-match highlight-level-${chunk.level}`
-          : `highlight-match highlight-level-${chunk.level}-outer`;
+        // P0-2: Use depth-based CSS classes
+        const depthClass = chunk.isInnermost
+          ? `highlight-match highlight-depth-${chunk.depth}`
+          : `highlight-match highlight-depth-${chunk.depth}-outer`;
 
         // Cross-highlighting: add 'highlight-hovered' class when phrase matches
         const isHovered = chunk.match
           ? hoveredPhrase === chunk.match.phrase_text
           : false;
 
-        // DR-1: Exact match → guillemet quotes
-        const isExact = chunk.match?.is_exact_match === true;
-        const displayText = isExact
-          ? `\u00AB${chunk.text}\u00BB`
-          : chunk.text;
+        // P0-1: Dim/bright based on activePhrases (tree node selection)
+        const isInActivePhrases = chunk.match
+          ? activePhrases.size === 0 || activePhrases.has(chunk.match.phrase_text)
+          : true;
+        const isDimmed = selectedTreeNodeId !== null
+          && chunk.match !== null
+          && !isInActivePhrases;
+
+        // When a tree node is selected, matching highlights get glow
+        const isSelectedNode = selectedTreeNodeId !== null
+          && chunk.match !== null
+          && isInActivePhrases;
+
+        // Cross-highlighting: tree node hover → outline on matching phrases
+        const isTreeHovered = hoveredTreeNodeId !== null
+          && chunk.match !== null
+          && isInActivePhrases;
+
+        const displayText = chunk.text;
 
         // DR-2: word_distance === 0 → bold
         const isAdjacent = chunk.match?.word_distance === 0;
@@ -264,34 +293,33 @@ export default function HighlightRenderer({
         // DR-3: channel_constraint → text color
         const channelColor = getMatchChannelColor(chunk.match);
 
-        // Chunk 2: Dim/bright based on selectedDictLevel
-        const isDimmed = selectedDictLevel !== null
-          && chunk.match !== null
-          && chunk.match.cascade_order !== selectedDictLevel;
-
         // Build class names
         const drClasses: string[] = [];
-        if (isExact) drClasses.push('highlight-exact');
+        if (chunk.match?.is_exact_match) drClasses.push('highlight-exact');
         if (isAdjacent) drClasses.push('highlight-adjacent');
         if (chunk.match?.channel_constraint === 'CLIENT') drClasses.push('highlight-channel-client');
         else if (chunk.match?.channel_constraint === 'OPERATOR') drClasses.push('highlight-channel-operator');
         if (isDimmed) drClasses.push('highlight-dim');
+        if (isSelectedNode) drClasses.push('highlight-selected-node');
+        if (isTreeHovered) drClasses.push('highlight-tree-hovered');
 
-        const fullClassName = `${levelClass}${isHovered ? ' highlight-hovered' : ''}${drClasses.length > 0 ? ` ${drClasses.join(' ')}` : ''}`;
+        const fullClassName = `${depthClass}${isHovered ? ' highlight-hovered' : ''}${drClasses.length > 0 ? ` ${drClasses.join(' ')}` : ''}`;
 
         // Build inline styles
         const markStyle: React.CSSProperties = {};
         if (isAdjacent) {
           markStyle.fontWeight = 600;
         }
-        // DR-3: channel text color (only if channel is not ANY)
         if (chunk.match?.channel_constraint && chunk.match.channel_constraint !== 'ANY') {
           markStyle.color = channelColor;
         }
-        // Hovered outline color
         if (isHovered) {
           markStyle.outlineColor = channelColor;
         }
+
+        // Unique key for tooltip management
+        const markKey = chunk.match ? `${chunk.match.phrase_text}-${chunk.match.turn_index}-${idx}` : `plain-${idx}`;
+        const isTooltipTarget = hoveredMarkKey === markKey && tooltipVisible;
 
         const mark = (
           <mark
@@ -299,30 +327,61 @@ export default function HighlightRenderer({
             className={fullClassName}
             data-phrase={chunk.match?.phrase_text}
             data-dict={chunk.match?.quarter}
-            data-level={chunk.level}
+            data-depth={chunk.depth}
             data-cascade-order={chunk.match?.cascade_order}
             tabIndex={0}
             aria-label={
               chunk.match
-                ? `${chunk.match.phrase_text}, уровень ${chunk.level}`
+                ? `${chunk.match.phrase_text}, глубина ${chunk.depth}`
                 : undefined
             }
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              // Dispatch custom event for ResultsPage PhrasePopover
+              const event = new CustomEvent('highlight-click', {
+                detail: {
+                  phrase: chunk.match?.phrase_text,
+                  cascadeOrder: chunk.match?.cascade_order,
+                  element: e.currentTarget,
+                },
+                bubbles: true,
+                composed: true,
+              });
+              e.currentTarget.dispatchEvent(event);
+            }}
+            onMouseEnter={() => {
+              handleMarkMouseEnter(markKey);
+              // Cross-highlighting: set hovered phrase
+              if (chunk.match) {
+                setHoveredPhrase(chunk.match.phrase_text);
+              }
+            }}
+            onMouseLeave={() => {
+              handleMarkMouseLeave();
+              // Clear cross-highlighting
+              setHoveredPhrase(null);
+            }}
             style={Object.keys(markStyle).length > 0 ? markStyle : undefined}
           >
             {displayText}
           </mark>
         );
 
-        // Wrap with Tooltip if we have match details
+        // P0-3: Wrap in Tooltip for hover preview
+        // Wrap <mark> in <span> so Tooltip can attach ref to a stable host element
         if (chunk.match) {
           return (
             <Tooltip
               key={idx}
-              title={formatMatchTooltip(chunk.match)}
-              placement="top"
+              title={buildTooltipText(chunk.match)}
+              open={isTooltipTarget}
               triggerMode="hover"
+              closeMode="outside-click"
+              placement="top"
+              disableHover
+              transitionDuration={{ enter: 100, exit: 50 }}
             >
-              {mark}
+              <span>{mark}</span>
             </Tooltip>
           );
         }

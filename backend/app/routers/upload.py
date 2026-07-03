@@ -16,7 +16,7 @@ import os
 import re
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from app.config import settings
 from app.models import (
@@ -72,6 +72,7 @@ router = APIRouter()
 
 @router.post("/rtf", response_model=UploadRtfResponse, summary="Upload RTF dialog file")
 async def upload_rtf(
+    request: Request,
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
 ) -> UploadRtfResponse:
@@ -131,6 +132,20 @@ async def upload_rtf(
                    "The file may not contain valid RTF dialogue content.",
         )
 
+    # ── PII Masking (ID-4) — mask BEFORE session store ──────────
+    # INV-PII-1: PII masked BEFORE embedding/logging.
+    # INV-PII-2: unmasked data NEVER stored in session_store.
+    pii_masking_service = getattr(request.app.state, "pii_masking_service", None)
+    if pii_masking_service and settings.pii_masking_enabled:
+        masked_result = pii_masking_service.mask_dialogue(parsed)
+        if masked_result.error:
+            logger.error("PII masking failed for session: %s", masked_result.error)
+            raise HTTPException(
+                status_code=503,
+                detail="PII masking unavailable — processing blocked for compliance",
+            )
+        parsed = masked_result.masked_dialogue
+
     # ── Store in session ──────────────────────────────────────────
     if session_id:
         session = session_store.get(session_id)
@@ -170,6 +185,7 @@ BATCH_MAX_FILES = 10
     summary="Batch upload multiple RTF dialog files",
 )
 async def upload_rtf_batch(
+    request: Request,
     files: List[UploadFile] = File(..., description="RTF files to upload (1-10)"),
     session_id: Optional[str] = Form(None, description="Optional session to add dialogues to"),
 ) -> BatchUploadRtfResponse:
@@ -205,6 +221,15 @@ async def upload_rtf_batch(
                 status_code=404,
                 detail=f"Session '{session_id}' not found.",
             )
+
+    # ── PII Masking pre-check (ID-4) — block entire batch if unavailable ──
+    # INV-PII-2: partial batch processing without masking is FORBIDDEN.
+    pii_masking_service = getattr(request.app.state, "pii_masking_service", None)
+    if settings.pii_masking_enabled and pii_masking_service and not pii_masking_service.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="PII masking unavailable, batch processing blocked for compliance (152-FZ)",
+        )
 
     # ── Process each file independently ──────────────────────────
     results: list[UploadRtfResponse] = []
@@ -248,6 +273,16 @@ async def upload_rtf_batch(
                     "No dialogue could be extracted from the RTF file. "
                     "The file may not contain valid RTF dialogue content."
                 )
+
+            # ── PII Masking (ID-4) — mask BEFORE session store ────
+            # INV-PII-1: PII masked BEFORE embedding/logging.
+            # INV-PII-2: unmasked data NEVER stored in session_store.
+            if pii_masking_service and settings.pii_masking_enabled:
+                masked_result = pii_masking_service.mask_dialogue(parsed)
+                if masked_result.error:
+                    logger.error("PII masking failed for '%s': %s", filename, masked_result.error)
+                    raise ValueError("PII masking unavailable — processing blocked for compliance")
+                parsed = masked_result.masked_dialogue
 
             # ── Store in session ────────────────────────────────
             if session_id:

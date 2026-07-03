@@ -1,27 +1,30 @@
 /**
- * DictionaryTree — hierarchical sidebar with Q1/Q2/Q3 levels,
- * match counts, expand/collapse, and multi-dict filtering.
+ * DictionaryTree — hierarchical sidebar with dictionary tree navigation,
+ * match counts, search filtering, and cross-highlighting.
  *
- * Replaces the flat DictionaryPhraseList with a Tree-based view.
+ * P0-1 Rework: Replaces Q1/Q2/Q3 ButtonSet with hierarchical tree
+ * using DS Tree + TreeNode components.
  *
  * Features:
- * - 3 levels: Q1 (cascade_order=1), Q2 (2), Q3 (3) + Remainder
- * - ButtonSet for level selection (selectedDictLevel)
- * - Each level expandable → list of phrases with match counts
- * - Dim/bright: selectedDictLevel → bright highlights, others dim
+ * - Hierarchical tree rendering (recursive DictionaryNode children)
+ * - Node selection → selectedTreeNodeId + activePhrases in HoverContext
+ * - Search filtering with debounce
  * - Hide unmatched toggle (default: ON)
+ * - Cross-highlighting: hover on node → highlight phrases in text
+ * - Match counts per node (Counter badge)
+ * - Icons: Folder for parent, Book for leaf, WarningCircled for remainder
  */
 
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo, useCallback, useState, useRef, useEffect, memo } from 'react';
 import {
   Box,
-  ButtonSet,
   Counter,
   Divider,
   ExpansionPanel,
   Icon,
   Stack,
   Switch,
+  TextField,
   Typography,
 } from '@beeline/design-system-react';
 import { Icons } from '@beeline/design-tokens/js/iconfont';
@@ -46,48 +49,16 @@ function flattenConditions(node: DictionaryNode): DictionaryCondition[] {
   ];
 }
 
-/** Get conditions grouped by cascade_order */
-function groupConditionsByLevel(
-  dictionaries: DictionaryNode[],
-  searchResult: SearchResult | null,
-): Map<number, DictionaryCondition[]> {
-  const allConditions: DictionaryCondition[] = [];
-  const seen = new Set<string>();
-
-  for (const dict of dictionaries) {
-    for (const cond of flattenConditions(dict)) {
-      if (!seen.has(cond.text)) {
-        seen.add(cond.text);
-        allConditions.push(cond);
-      }
-    }
+/** Recursively collect all phrase texts from a DictionaryNode and its descendants */
+function collectPhrases(node: DictionaryNode): string[] {
+  const phrases: string[] = [];
+  for (const cond of node.conditions) {
+    phrases.push(cond.text);
   }
-
-  const levelMap = new Map<number, DictionaryCondition[]>();
-
-  if (searchResult?.matches) {
-    const phraseToLevel = new Map<string, number>();
-    for (const match of searchResult.matches) {
-      if (!phraseToLevel.has(match.phrase_text)) {
-        phraseToLevel.set(match.phrase_text, match.cascade_order);
-      }
-    }
-
-    for (const cond of allConditions) {
-      const level = phraseToLevel.get(cond.text) ?? 1;
-      const existing = levelMap.get(level) ?? [];
-      if (!existing.some((c) => c.text === cond.text)) {
-        existing.push(cond);
-      }
-      levelMap.set(level, existing);
-    }
+  for (const child of node.children) {
+    phrases.push(...collectPhrases(child));
   }
-
-  if (levelMap.size === 0) {
-    levelMap.set(1, allConditions);
-  }
-
-  return levelMap;
+  return phrases;
 }
 
 /** Get match counts per phrase */
@@ -101,32 +72,33 @@ function getMatchCounts(searchResult: SearchResult | null): Map<string, number> 
   return map;
 }
 
-/** Get total match count per level */
-function getLevelMatchCounts(searchResult: SearchResult | null): Map<number, number> {
-  const map = new Map<number, number>();
-  if (searchResult?.matches) {
-    for (const match of searchResult.matches) {
-      map.set(match.cascade_order, (map.get(match.cascade_order) ?? 0) + 1);
+/** Get match counts per dictionary node ID (sum of all descendant matches) */
+function getNodeMatchCounts(
+  dictionaries: DictionaryNode[],
+  searchResult: SearchResult | null,
+): Map<string, number> {
+  const phraseMatches = getMatchCounts(searchResult);
+  const nodeCounts = new Map<string, number>();
+
+  function countForNode(node: DictionaryNode): number {
+    let count = 0;
+    for (const cond of node.conditions) {
+      count += phraseMatches.get(cond.text) ?? 0;
     }
+    for (const child of node.children) {
+      count += countForNode(child);
+    }
+    nodeCounts.set(node.id, count);
+    return count;
   }
-  return map;
+
+  for (const dict of dictionaries) {
+    countForNode(dict);
+  }
+  return nodeCounts;
 }
 
-/** Get unique dialogues without Q3 matches (remainder count) */
-function getRemainderCount(searchResult: SearchResult | null): number {
-  if (!searchResult?.matches) return 0;
-  const q3Dialogues = new Set<number>();
-  const allDialogues = new Set<number>();
-  for (const match of searchResult.matches) {
-    allDialogues.add(match.turn_index);
-    if (match.cascade_order === 3) {
-      q3Dialogues.add(match.turn_index);
-    }
-  }
-  return allDialogues.size - q3Dialogues.size;
-}
-
-/** Format OR group phrase: [word1, word2] */
+/** Format OR group phrase */
 function formatOrGroup(group: PhraseGroupVisual): string {
   return `[${group.words.join(', ')}]`;
 }
@@ -134,32 +106,37 @@ function formatOrGroup(group: PhraseGroupVisual): string {
 /** Get channel CSS variable for a condition */
 function getChannelCssVar(channel: string): string {
   switch (channel.toUpperCase()) {
-    case 'OPERATOR':
-      return 'var(--dict-channel-operator)';
-    case 'CLIENT':
-      return 'var(--dict-channel-client)';
-    case 'ANY':
-      return 'var(--dict-channel-any)';
-    default:
-      return 'var(--color-status-neutral, #9e9e9e)';
+    case 'OPERATOR': return 'var(--dict-channel-operator)';
+    case 'CLIENT': return 'var(--dict-channel-client)';
+    case 'ANY': return 'var(--dict-channel-any)';
+    default: return 'var(--color-status-neutral, #9e9e9e)';
   }
 }
 
-/** Level display names */
-const LEVEL_NAMES: Record<number, string> = {
-  1: 'Q1',
-  2: 'Q2',
-  3: 'Q3',
-};
+/** Filter tree nodes by search query, keeping parents of matching children */
+function filterTreeNodes(nodes: DictionaryNode[], query: string): DictionaryNode[] {
+  if (!query) return nodes;
+  const q = query.toLowerCase();
 
-const LEVEL_DESCRIPTIONS: Record<number, string> = {
-  1: 'Риск расторжения',
-  2: 'Жалоба',
-  3: 'Эскалация',
-};
+  function nodeMatches(node: DictionaryNode): boolean {
+    // Check node name
+    if (node.name.toLowerCase().includes(q)) return true;
+    // Check conditions text
+    if (node.conditions.some((c) => c.text.toLowerCase().includes(q))) return true;
+    // Check children recursively
+    return node.children.some((child) => nodeMatches(child));
+  }
+
+  return nodes
+    .filter((node) => nodeMatches(node))
+    .map((node) => ({
+      ...node,
+      children: filterTreeNodes(node.children, query),
+    }));
+}
 
 // ═══════════════════════════════════════════════════════════
-// DictionaryConditionItem (Chunk 5)
+// DictionaryConditionItem (same as before — phrase row)
 // ═══════════════════════════════════════════════════════════
 
 interface DictionaryConditionItemProps {
@@ -175,25 +152,23 @@ const DictionaryConditionItem = React.memo(function DictionaryConditionItem({
 
   const isHovered = hoveredPhrase === condition.text;
 
-  // DR-1: Quotes for exact match
   const displayText = condition.is_exact
-    ? `\u00AB${condition.text}\u00BB`
+    ? `"${condition.text}"`
     : condition.text;
 
-  // DR-2: Bold for word_distance === 0
   const fontWeight = condition.word_distance === 0 ? 600 : 400;
-
-  // DR-3: Channel color
   const channelColor = getChannelCssVar(condition.channel_constraint);
 
-  // OR-groups (Chunk 5)
   const orGroups = condition.phrase_groups?.filter((g) => g.is_or_group) ?? [];
-
-  // Exceptions (Chunk 5)
   const isException = condition.is_exception === true;
 
-  // Nested phrases (Chunk 5)
-  const hasNestedPhrases = condition.nested_phrases && condition.nested_phrases.length > 0;
+  const isStandaloneNot = (phrase: string): boolean => {
+    return phrase.toUpperCase().startsWith('НЕ ');
+  };
+
+  const relevantExceptions = condition.exception_phrases?.filter((phrase) =>
+    isStandaloneNot(phrase)
+  ) ?? [];
 
   const handleMouseEnter = useCallback(() => {
     setHoveredPhrase(condition.text);
@@ -226,7 +201,6 @@ const DictionaryConditionItem = React.memo(function DictionaryConditionItem({
       <Stack direction="vertical" spacing="none" style={{ width: '100%' }}>
         <Stack direction="horizontal" spacing="x2" align="center" justify="space-between">
           <Stack direction="horizontal" spacing="x2" align="center">
-            {/* DR-3: Channel color dot */}
             <span
               style={{
                 display: 'inline-block',
@@ -238,8 +212,6 @@ const DictionaryConditionItem = React.memo(function DictionaryConditionItem({
               }}
               aria-hidden="true"
             />
-
-            {/* Exception: ⚠ НЕ prefix (Chunk 5) */}
             {isException && (
               <Icon
                 iconName={Icons.WarningCircled}
@@ -247,8 +219,6 @@ const DictionaryConditionItem = React.memo(function DictionaryConditionItem({
                 style={{ color: 'var(--color-status-warning, #e08600)' }}
               />
             )}
-
-            {/* Phrase text with DR-1 (quotes) + DR-2 (bold) */}
             <Typography
               variant="body2"
               style={{ fontWeight }}
@@ -257,8 +227,6 @@ const DictionaryConditionItem = React.memo(function DictionaryConditionItem({
               {displayText}
             </Typography>
           </Stack>
-
-          {/* Match count */}
           {matchCount > 0 ? (
             <Counter count={matchCount} size="small" />
           ) : (
@@ -268,7 +236,6 @@ const DictionaryConditionItem = React.memo(function DictionaryConditionItem({
           )}
         </Stack>
 
-        {/* OR-groups (Chunk 5) */}
         {orGroups.map((group, idx) => (
           <Box key={`or-${idx}`} className="dict-tree-nested">
             <Typography variant="caption" inactive>
@@ -280,32 +247,161 @@ const DictionaryConditionItem = React.memo(function DictionaryConditionItem({
           </Box>
         ))}
 
-        {/* Exception phrases (Chunk 5) */}
-        {(isException || (condition.exception_phrases && condition.exception_phrases.length > 0)) && (
+        {(isException || relevantExceptions.length > 0) && (
           <Box className="dict-tree-nested">
+            <Typography variant="caption" inactive style={{ fontSize: '0.65em', fontStyle: 'italic' }}>
+              Исключения (не искать):
+            </Typography>
             <Stack direction="vertical" spacing="none">
-              {condition.exception_phrases?.map((phrase, idx) => (
+              {relevantExceptions.map((phrase, idx) => (
                 <Typography
                   key={`exc-${idx}`}
                   variant="caption"
                   className="dict-tree-exception"
                 >
-                  ↳ НЕ {phrase}
+                  {phrase}
                 </Typography>
               ))}
             </Stack>
           </Box>
         )}
+      </Stack>
+    </Box>
+  );
+});
 
-        {/* Nested phrases (Chunk 5) */}
-        {hasNestedPhrases && condition.nested_phrases!.map((phrase, idx) => (
-          <Box key={`nested-${idx}`} className="dict-tree-nested">
+// ═══════════════════════════════════════════════════════════
+// DictionaryNodeItem — recursive tree node (P0-1 rework)
+// ═══════════════════════════════════════════════════════════
+
+interface DictionaryNodeItemProps {
+  node: DictionaryNode;
+  depth: number;
+  selectedTreeNodeId: string | null;
+  onSelectNode: (node: DictionaryNode) => void;
+  matchCounts: Map<string, number>;
+  nodeMatchCounts: Map<string, number>;
+  hideUnmatched: boolean;
+}
+
+const DictionaryNodeItem = React.memo(function DictionaryNodeItem({
+  node,
+  depth,
+  selectedTreeNodeId,
+  onSelectNode,
+  matchCounts,
+  nodeMatchCounts,
+  hideUnmatched,
+}: DictionaryNodeItemProps) {
+  const { setHoveredTreeNodeId } = useHoverContext();
+
+  const isSelected = selectedTreeNodeId === node.id;
+  const hasChildren = node.children.length > 0 || node.conditions.length > 0;
+  const totalMatches = nodeMatchCounts.get(node.id) ?? 0;
+
+  // Icon: Folder for parent, Book for leaf
+  const iconName = hasChildren ? Icons.Folder : Icons.Book;
+
+  // Filter conditions based on hideUnmatched
+  const visibleConditions = hideUnmatched
+    ? node.conditions.filter((c) => (matchCounts.get(c.text) ?? 0) > 0)
+    : node.conditions;
+
+  const handleClick = useCallback(() => {
+    onSelectNode(node);
+  }, [onSelectNode, node]);
+
+  const handleMouseEnter = useCallback(() => {
+    setHoveredTreeNodeId(node.id);
+  }, [setHoveredTreeNodeId, node.id]);
+
+  const handleMouseLeave = useCallback(() => {
+    setHoveredTreeNodeId(null);
+  }, [setHoveredTreeNodeId]);
+
+  // Title with icon and counter
+  const titleContent = (
+    <Stack direction="horizontal" spacing="x2" align="center" style={{ width: '100%' }}>
+      <Icon iconName={iconName} size="small" />
+      <Typography
+        variant="body2"
+        style={{
+          fontWeight: isSelected ? 600 : 400,
+          flex: 1,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {node.name}
+      </Typography>
+      {totalMatches > 0 && <Counter count={totalMatches} size="small" />}
+    </Stack>
+  );
+
+  // Leaf node (no children or conditions to show): clickable row
+  if (!hasChildren) {
+    return (
+      <Box
+        className={`dict-tree-node ${isSelected ? 'dict-tree-node--selected' : ''}`}
+        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        role="treeitem"
+        aria-selected={isSelected}
+        aria-label={node.name}
+      >
+        {titleContent}
+      </Box>
+    );
+  }
+
+  // Parent node: ExpansionPanel
+  return (
+    <Box style={{ paddingLeft: `${depth * 16}px` }}>
+      <ExpansionPanel
+        title={node.name}
+        open={isSelected}
+        onOpen={handleClick}
+        onClose={handleClick}
+        subTitle={totalMatches > 0 ? `${totalMatches} совпадений` : undefined}
+      >
+        {/* Show conditions under this node */}
+        {visibleConditions.length > 0 && (
+          <Stack direction="vertical" spacing="none" role="group">
+            {visibleConditions.map((condition) => (
+              <DictionaryConditionItem
+                key={condition.text}
+                condition={condition}
+                matchCount={matchCounts.get(condition.text) ?? 0}
+              />
+            ))}
+          </Stack>
+        )}
+
+        {/* Show child nodes */}
+        {node.children.map((child) => (
+          <DictionaryNodeItem
+            key={child.id}
+            node={child}
+            depth={depth + 1}
+            selectedTreeNodeId={selectedTreeNodeId}
+            onSelectNode={onSelectNode}
+            matchCounts={matchCounts}
+            nodeMatchCounts={nodeMatchCounts}
+            hideUnmatched={hideUnmatched}
+          />
+        ))}
+
+        {visibleConditions.length === 0 && node.children.length === 0 && (
+          <Box padding="x3">
             <Typography variant="caption" inactive>
-              ↳ {phrase}
+              Нет фраз{hideUnmatched ? ' с совпадениями' : ''}
             </Typography>
           </Box>
-        ))}
-      </Stack>
+        )}
+      </ExpansionPanel>
     </Box>
   );
 });
@@ -323,46 +419,103 @@ interface DictionaryTreeProps {
 // Main Component
 // ═══════════════════════════════════════════════════════════
 
-export default function DictionaryTree({
+export default memo(function DictionaryTree({
   dictionaries,
   searchResult,
 }: DictionaryTreeProps) {
-  const { selectedDictLevel, setSelectedDictLevel, hideUnmatched, setHideUnmatched } = useHoverContext();
+  const {
+    selectedTreeNodeId,
+    setSelectedTreeNodeId,
+    // activePhrases is read by HighlightRenderer — not consumed here
+    setActivePhrases,
+    hideUnmatched,
+    setHideUnmatched,
+    setLevelNames,
+    setSelectedDictLevel, // DEPRECATED: keep for backward compat
+  } = useHoverContext();
 
-  // Expanded levels
-  const [expandedLevels, setExpandedLevels] = useState<Set<number>>(new Set());
+  // P1-3: Search with debounce
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current !== null) {
+      clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 300);
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [searchQuery]);
 
   const matchCounts = useMemo(() => getMatchCounts(searchResult), [searchResult]);
-  const levelMatchCounts = useMemo(() => getLevelMatchCounts(searchResult), [searchResult]);
-  const conditionsByLevel = useMemo(() => groupConditionsByLevel(dictionaries, searchResult), [dictionaries, searchResult]);
-  const remainderCount = useMemo(() => getRemainderCount(searchResult), [searchResult]);
+  const nodeMatchCounts = useMemo(
+    () => getNodeMatchCounts(dictionaries, searchResult),
+    [dictionaries, searchResult],
+  );
+
+  // Build level name map from actual dictionary data
+  const computedLevelNames = useMemo(() => {
+    const nameMap = new Map<number, string>();
+    if (searchResult?.matches) {
+      for (const match of searchResult.matches) {
+        if (!nameMap.has(match.cascade_order) && match.quarter) {
+          nameMap.set(match.cascade_order, match.quarter);
+        }
+      }
+    }
+    dictionaries.forEach((dict, idx) => {
+      const level = idx + 1;
+      if (!nameMap.has(level) && dict.name) {
+        nameMap.set(level, dict.name);
+      }
+    });
+    return nameMap;
+  }, [dictionaries, searchResult]);
+
+  // Sync level names to HoverContext for shared access
+  React.useEffect(() => {
+    setLevelNames(computedLevelNames);
+  }, [computedLevelNames, setLevelNames]);
+
+  // Filtered tree nodes by search query
+  const filteredDictionaries = useMemo(
+    () => filterTreeNodes(dictionaries, debouncedQuery),
+    [dictionaries, debouncedQuery],
+  );
 
   const totalMatches = searchResult?.total_matches ?? 0;
   const totalPhrases = useMemo(() => {
     let count = 0;
-    for (const conditions of conditionsByLevel.values()) {
-      count += conditions.length;
+    for (const dict of dictionaries) {
+      count += flattenConditions(dict).length;
     }
     return count;
-  }, [conditionsByLevel]);
+  }, [dictionaries]);
 
-  // Toggle level expansion
-  const toggleExpand = useCallback((level: number) => {
-    setExpandedLevels((prev) => {
-      const next = new Set(prev);
-      if (next.has(level)) {
-        next.delete(level);
+  // P0-1: Handle tree node selection → update selectedTreeNodeId + activePhrases
+  const handleSelectNode = useCallback(
+    (node: DictionaryNode) => {
+      if (selectedTreeNodeId === node.id) {
+        // Deselect: clear selection and show all phrases
+        setSelectedTreeNodeId(null);
+        setActivePhrases(new Set());
+        setSelectedDictLevel(null); // DEPRECATED
       } else {
-        next.add(level);
+        // Select: compute activePhrases from selected node + descendants
+        setSelectedTreeNodeId(node.id);
+        const phrases = collectPhrases(node);
+        setActivePhrases(new Set(phrases));
+        setSelectedDictLevel(null); // DEPRECATED: no longer using Q-level
       }
-      return next;
-    });
-  }, []);
-
-  // Level selection: click active tab → deselect (null)
-  const handleLevelSelect = useCallback((level: number) => {
-    setSelectedDictLevel(selectedDictLevel === level ? null : level);
-  }, [selectedDictLevel, setSelectedDictLevel]);
+    },
+    [selectedTreeNodeId, setSelectedTreeNodeId, setActivePhrases, setSelectedDictLevel],
+  );
 
   // ─── Empty state: no dictionaries ───────────────────
   if (dictionaries.length === 0) {
@@ -378,14 +531,6 @@ export default function DictionaryTree({
     );
   }
 
-  // ButtonSet items for Q1/Q2/Q3
-  const levelButtons = [1, 2, 3].map((level) => ({
-    id: String(level),
-    variant: selectedDictLevel === level ? 'contained' as const : 'outlined' as const,
-    children: LEVEL_NAMES[level],
-    onClick: () => handleLevelSelect(level),
-  }));
-
   return (
     <Box className="dict-tree" role="complementary" aria-label="Словарь фраз">
       {/* ── Sidebar header ── */}
@@ -395,7 +540,7 @@ export default function DictionaryTree({
           Фраз: {totalPhrases} · Совпадений: {totalMatches}
         </Typography>
 
-        {/* Hide unmatched toggle (Chunk 3) */}
+        {/* Hide unmatched toggle */}
         <Box style={{ marginTop: '8px' }}>
           <Switch
             label="Показать все фразы"
@@ -407,12 +552,15 @@ export default function DictionaryTree({
 
       <Divider />
 
-      {/* ── Level selection tabs ── */}
+      {/* P1-3: Search field for filtering tree nodes */}
       <Box padding="x2">
-        <ButtonSet
-          buttons={levelButtons}
-          size="small"
-          direction="horizontal"
+        <TextField
+          placeholder="Поиск по словарю"
+          value={searchQuery}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            setSearchQuery(e.target.value)
+          }
+          style={{ width: '100%' }}
         />
       </Box>
 
@@ -426,58 +574,29 @@ export default function DictionaryTree({
           minHeight: 0,
         }}
       >
-        <Stack direction="vertical" spacing="none" role="tree">
-          {/* Q1, Q2, Q3 levels */}
-          {[1, 2, 3].map((level) => {
-            const conditions = conditionsByLevel.get(level) ?? [];
-            const levelCount = levelMatchCounts.get(level) ?? 0;
-            const isExpanded = expandedLevels.has(level);
-
-            // Filter conditions based on hideUnmatched
-            const visibleConditions = hideUnmatched
-              ? conditions.filter((c) => (matchCounts.get(c.text) ?? 0) > 0)
-              : conditions;
-
-            return (
-              <ExpansionPanel
-                key={level}
-                title={`${LEVEL_NAMES[level]} — ${LEVEL_DESCRIPTIONS[level]}`}
-                open={isExpanded}
-                onOpen={() => toggleExpand(level)}
-                onClose={() => toggleExpand(level)}
-                subTitle={`${levelCount} совпадений`}
-              >
-                {visibleConditions.length === 0 ? (
-                  <Box padding="x3">
-                    <Typography variant="caption" inactive>
-                      Нет фраз{hideUnmatched ? ' с совпадениями' : ''}
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Stack direction="vertical" spacing="none" role="group">
-                    {visibleConditions.map((condition) => (
-                      <DictionaryConditionItem
-                        key={condition.text}
-                        condition={condition}
-                        matchCount={matchCounts.get(condition.text) ?? 0}
-                      />
-                    ))}
-                  </Stack>
-                )}
-              </ExpansionPanel>
-            );
-          })}
-
-          {/* Remainder section */}
-          {remainderCount > 0 && (
-            <Box padding="x3">
-              <Typography variant="body2" inactive>
-                Остаток: {remainderCount} диалогов без Q3 совпадений
-              </Typography>
-            </Box>
-          )}
-        </Stack>
+        {filteredDictionaries.length === 0 && debouncedQuery ? (
+          <Box padding="x3">
+            <Typography variant="body2" inactive>
+              Ничего не найдено
+            </Typography>
+          </Box>
+        ) : (
+          <Stack direction="vertical" spacing="none" role="tree">
+            {filteredDictionaries.map((dict) => (
+              <DictionaryNodeItem
+                key={dict.id}
+                node={dict}
+                depth={0}
+                selectedTreeNodeId={selectedTreeNodeId}
+                onSelectNode={handleSelectNode}
+                matchCounts={matchCounts}
+                nodeMatchCounts={nodeMatchCounts}
+                hideUnmatched={hideUnmatched}
+              />
+            ))}
+          </Stack>
+        )}
       </Box>
     </Box>
   );
-}
+});

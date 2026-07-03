@@ -1,0 +1,125 @@
+/* ═══════════════════════════════════════════════════════════
+ * ResultsPage — responsive layout styles
+ * All values use DS tokens via CSS custom properties.
+ * No hard-coded color fallbacks.
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── Left sidebar (Dictionary) ── */
+.results-sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-background-secondary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.results-sidebar__collapse {
+  border-top: 1px solid var(--color-border);
+  padding: var(--sizeSpacingX2);
+}
+
+/* ── Main content area ── */
+.results-main {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* ── Semantic color classes (replacing inline styles) ── */
+.text-info {
+  color: var(--color-status-info);
+}
+
+.text-error {
+  color: var(--color-status-error);
+}
+
+.text-warning {
+  color: var(--color-status-warning);
+}
+
+.text-success {
+  color: var(--color-status-success);
+}
+
+/* ── Semantic panel: desktop side sheet ── */
+.results-semantic-panel {
+  width: 312px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-background-base);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--elevation-low);
+}
+
+/* ── Semantic panel: mobile fullscreen overlay ── */
+.results-semantic-panel--mobile {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  background: var(--color-background-base);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Match counter variants ── */
+.match-counter--default .match-counter__value {
+  color: var(--color-text-active);
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+.match-counter--success .match-counter__value {
+  color: var(--color-status-success);
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+.match-counter--warning .match-counter__value {
+  color: var(--color-status-warning);
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+.match-counter--danger .match-counter__value {
+  color: var(--color-status-error);
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+/* ── Tab panel a11y ── */
+.results-tabpanel {
+  padding-top: var(--sizeSpacingX4);
+}
+
+/* ── Responsive breakpoints ── */
+
+/* Tablet: hide sidebar by default, show burger */
+@media (max-width: 1023px) {
+  .results-sidebar {
+    display: none;
+  }
+
+  .results-sidebar--visible {
+    display: flex;
+  }
+}
+
+/* Mobile: single column */
+@media (max-width: 767px) {
+  .results-semantic-panel {
+    display: none;
+  }
+}
+
+/* ── Stats row ── */
+.results-stats {
+  display: flex;
+  gap: var(--sizeSpacingX4);
+  align-items: baseline;
+}

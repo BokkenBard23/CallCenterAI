@@ -32,7 +32,7 @@ describe('API client', () => {
       const result = await api.checkHealth();
       expect(result.status).toBe('ok');
       expect(result.version).toBe('1.0.0');
-      expect(mockFetch).toHaveBeenCalledWith('/health', { signal: undefined });
+      expect(mockFetch).toHaveBeenCalledWith('/api/health', { signal: undefined });
     });
   });
 
@@ -139,7 +139,7 @@ describe('API client', () => {
   });
 
   describe('getProviders', () => {
-    it('GETs /api/providers/', async () => {
+    it('GETs /api/providers', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -152,6 +152,12 @@ describe('API client', () => {
       const result = await api.getProviders();
       expect(result.providers).toHaveLength(1);
       expect(result.providers[0].id).toBe('ollama');
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/providers',
+        expect.objectContaining({
+          method: 'GET',
+        }),
+      );
     });
   });
 
@@ -219,7 +225,7 @@ describe('API client', () => {
       });
 
       await api.checkHealth(controller.signal);
-      expect(mockFetch).toHaveBeenCalledWith('/health', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/health', {
         signal: controller.signal,
       });
     });

@@ -3,12 +3,13 @@
  * Shows topic, sentiment, resolution, key points, and summary text.
  */
 
-import { useMemo } from 'react';
+import { useMemo, memo } from 'react';
 import {
   Badge,
   Box,
   Card,
   Divider,
+  Progress,
   Stack,
   Typography,
 } from '@beeline/design-system-react';
@@ -19,6 +20,8 @@ import RestructuredDialogue from './RestructuredDialogue';
 interface SummaryViewProps {
   llmResult: LLMResult | null;
   searchResult: SearchResult | null;
+  /** True while LLM analysis is in progress */
+  llmLoading?: boolean;
 }
 
 /** Map sentiment string to Badge props */
@@ -57,7 +60,7 @@ function resolutionBadgeProps(resolution: string): {
   }
 }
 
-export default function SummaryView({ llmResult, searchResult }: SummaryViewProps) {
+export default memo(function SummaryView({ llmResult, searchResult, llmLoading }: SummaryViewProps) {
   const sentiment = useMemo(
     () => (llmResult ? sentimentBadgeProps(llmResult.client_sentiment) : null),
     [llmResult],
@@ -67,6 +70,25 @@ export default function SummaryView({ llmResult, searchResult }: SummaryViewProp
     () => (llmResult ? resolutionBadgeProps(llmResult.resolution) : null),
     [llmResult],
   );
+
+  // ─── LLM Loading ────────────────────────────────────
+  if (llmLoading) {
+    return (
+      <Card>
+        <Box padding="x6">
+          <Stack direction="vertical" spacing="x4" align="center">
+            <Typography variant="h5" style={{ color: 'var(--color-status-info, #1e88e5)' }}>
+              LLM-анализ выполняется...
+            </Typography>
+            <Progress shape="animated" cycled />
+            <Typography variant="body2" inactive>
+              Результаты поиска текста доступны на вкладке «Выделенный текст».
+            </Typography>
+          </Stack>
+        </Box>
+      </Card>
+    );
+  }
 
   // ─── No LLM result ───────────────────────────────────
   if (!llmResult) {
@@ -186,4 +208,4 @@ export default function SummaryView({ llmResult, searchResult }: SummaryViewProp
       )}
     </Stack>
   );
-}
+});

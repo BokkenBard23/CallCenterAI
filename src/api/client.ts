@@ -22,6 +22,8 @@ import type {
   EmbeddingStatusResponse,
   FeedbackRequest,
   FeedbackResponse,
+  QualityScoreRequest,
+  QualityScoreResult,
 } from '../types/api';
 
 const API_BASE = '';
@@ -72,7 +74,7 @@ async function request<T>(
 export async function checkHealth(
   signal?: AbortSignal,
 ): Promise<HealthResponse> {
-  return request<HealthResponse>('/health', { signal });
+  return request<HealthResponse>('/api/health', { signal });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -145,7 +147,7 @@ export async function getResults(
 export async function getProviders(
   signal?: AbortSignal,
 ): Promise<ProvidersResponse> {
-  return request<ProvidersResponse>('/api/providers/', { signal });
+  return request<ProvidersResponse>('/api/providers', { signal });
 }
 
 export async function getProviderStatus(
@@ -208,6 +210,46 @@ export async function getBatchResults(
 }
 
 export { ApiError };
+
+// ═══════════════════════════════════════════════════════════
+// Export (Excel / PDF)
+// ═══════════════════════════════════════════════════════════
+
+export async function exportExcel(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const url = `${API_BASE}/api/export/${sessionId}/excel`;
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    let body: unknown;
+    try { body = await response.json(); } catch { /* ignore */ }
+    throw new ApiError(
+      (body as { detail?: string })?.detail ?? `HTTP ${response.status}`,
+      response.status,
+      body,
+    );
+  }
+  return response.blob();
+}
+
+export async function exportPdf(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const url = `${API_BASE}/api/export/${sessionId}/pdf`;
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    let body: unknown;
+    try { body = await response.json(); } catch { /* ignore */ }
+    throw new ApiError(
+      (body as { detail?: string })?.detail ?? `HTTP ${response.status}`,
+      response.status,
+      body,
+    );
+  }
+  return response.blob();
+}
 
 // ═══════════════════════════════════════════════════════════
 // FRIDA Embeddings
@@ -275,6 +317,22 @@ export async function submitFeedback(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(feedbackRequest),
+    signal,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// Quality Scoring
+// ═══════════════════════════════════════════════════════════
+
+export async function getQualityScore(
+  qualityRequest: QualityScoreRequest,
+  signal?: AbortSignal,
+): Promise<QualityScoreResult> {
+  return request<QualityScoreResult>('/api/analysis/quality-score', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(qualityRequest),
     signal,
   });
 }

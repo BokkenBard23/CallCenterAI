@@ -40,7 +40,9 @@
           "mcp-researcher": "allow"
         },
         "webfetch": "allow",
-        "websearch": "allow"
+        "websearch": "allow",
+        "chrome-devtools-mcp_*": "allow",
+        "chrome_devtools_mcp_*": "allow"
       }
     },
     "request-analyst": {
@@ -361,7 +363,6 @@
         "microsoft-learn_*": "allow",
         "context7_*": "allow",
         "pixso-remote-mcp_*": "allow",
-        "pixso-remote-mcp_*": "allow",
         "rag-knowledge_*": "allow",
         "gitlab-mcp_*": "allow",
         "atlassian-mcp_*": "allow",
@@ -452,10 +453,9 @@
     },
     "chrome-devtools-mcp": {
       "type": "local",
-      "command": ["node", "node_modules/chrome-devtools-mcp/build/src/index.js"],
-      "environment": { },
+      "command": ["npx", "-y", "chrome-devtools-mcp@latest"],
       "enabled": true,
-      "description": "Chrome DevTools MCP v1.4.0 — browser automation, screenshots, performance, network, debugging. Official Google package. Requires Chrome stable with --remote-debugging-port=9222."
+      "description": "Chrome DevTools MCP — browser automation, screenshots, performance, network, debugging. Official Google package. Requires Chrome stable with --remote-debugging-port=9222."
     },
     "context7": {
       "type": "remote",
@@ -572,10 +572,10 @@
     },
     "playwright-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "@executeautomation/playwright-mcp-server"],
+      "command": ["npx", "-y", "@playwright/mcp"],
       "environment": { },
       "enabled": true,
-      "description": "Playwright MCP Server — 143 device presets, DOM interaction, screenshots, JS execution, test codegen. E2E тестирование 5 страниц CCAI. Автоматически устанавливает браузеры."
+      "description": "Official Microsoft Playwright MCP — 143 device presets, DOM interaction, screenshots, JS execution, test codegen. E2E тестирование 5 страниц CCAI. Автоматически устанавливает браузеры."
     },
     "local-faiss-mcp": {
       "type": "local",
@@ -587,8 +587,8 @@
       "type": "local",
       "command": ["npx", "-y", "mcp-openapi-schema-explorer@latest", "http://localhost:8000/openapi.json", "--output-format", "json"],
       "environment": { },
-      "enabled": false,
-      "description": "MCP OpenAPI Schema Explorer v1.3.4 — token-efficient доступ к OpenAPI specs. DISABLED: требует запущенный backend на localhost:8000. Включить после запуска backend."
+      "enabled": true,
+      "description": "MCP OpenAPI Schema Explorer — подключён к FastAPI backend (auto-generated spec). Для работы нужен запущенный backend: cd backend && uvicorn app.main:app --port 8000. Если backend не запущен — MCP будет unavailable, но OpenCode не упадёт."
     },
     "ux-mcp-server": {
       "type": "local",

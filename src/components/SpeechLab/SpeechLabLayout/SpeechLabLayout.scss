@@ -1,0 +1,101 @@
+/**
+ * SpeechLabLayout styles — react-resizable-panels based layout.
+ *
+ * Wave UI-1: Replaced custom resize handle with react-resizable-panels.
+ */
+
+.speechlab-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  overflow: hidden;
+
+  // Group container — react-resizable-panels manages flex
+  &__group {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+  }
+
+  // Left panel
+  &__panel--left {
+    height: 100%;
+    overflow: hidden;
+    border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.48));
+    flex-shrink: 0;
+    min-width: 0; // allow flex to shrink
+  }
+
+  // Right panel
+  &__panel--right {
+    height: 100%;
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  // Separator — drag handle between panels
+  &__separator {
+    width: 4px;
+    cursor: col-resize;
+    background-color: var(--color-divider, rgba(255, 255, 255, 0.2));
+    flex-shrink: 0;
+    transition: background-color 150ms ease;
+
+    &:hover {
+      background-color: var(--color-border, rgba(255, 255, 255, 0.48));
+    }
+
+    &:active {
+      background-color: var(--color-background-brand, #fdd835);
+    }
+
+    // Accessibility: keyboard focus
+    &:focus-visible {
+      outline: 2px solid var(--color-border-focus, #ffffff);
+      outline-offset: -1px;
+    }
+  }
+
+  // Right panel content wrapper
+  &__right-content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+}
+
+/* Mobile: stack vertically (react-resizable-panels supports orientation switch) */
+@media (max-width: 767px) {
+  .speechlab-layout {
+    flex-direction: column;
+
+    &__group {
+      flex-direction: column;
+    }
+
+    &__panel--left {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 100% !important;
+      max-height: 40vh;
+      border-right: none;
+      border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.48));
+    }
+
+    &__panel--right {
+      flex: 1;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+
+    &__separator {
+      display: none;
+    }
+  }
+}

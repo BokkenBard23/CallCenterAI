@@ -1,25 +1,33 @@
 /**
  * ResultsPage — displays analysis results with:
- *   - Sidebar (DictionaryTree) on the left
- *   - Main content (Tabs: Сводка / Выделенный текст) in the center
- *   - SemanticSearchPanel sidebar on the right (toggleable)
+ *   - Responsive layout: 3-col desktop → 2-col tablet → 1-col mobile
+ *   - NavigationDrawer for mobile sidebar (DictionaryTree)
+ *   - Tabs with proper TabPanel a11y pattern
+ *   - NumberTicker for animated match counts
+ *   - BlurFade for smooth card appearance
+ *   - DS tokens for all colors/spacing (no inline hard-coded values)
+ *   - SemanticSearchPanel responsive (side-sheet desktop, overlay mobile)
  *   - Cross-highlighting via HoverContext
- *   - Collapsible sidebars
  *   - "Векторизовать" ProgressButton
  *   - FRIDA status Badge
- *   - Theme toggle
- *   - Phrase Popover integration
+ *   - LLM loading progress bar
+ *   - Phrase Popover integration (Chunk 4)
  *
  * Routes: /results
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Badge,
   Banner,
   Box,
+  Button,
+  Icon,
   IconButton,
+  InlineAlert,
+  NavigationDrawer,
+  Progress,
   ProgressButton,
   Stack,
   Switch,
@@ -30,18 +38,91 @@ import {
 } from '@beeline/design-system-react';
 import { Icons } from '@beeline/design-tokens/js/iconfont';
 
-import { indexDialogue, getEmbeddingStatus, ApiError } from '../api/client';
+import { indexDialogue, getEmbeddingStatus, exportExcel, exportPdf, ApiError } from '../api/client';
 import { useAnalysisContext } from '../context/AnalysisContext';
 import { HoverProvider } from '../context/HoverContext';
-import useTheme from '../hooks/useTheme';
 import SummaryView from '../components/SummaryView';
 import HighlightedTextView from '../components/HighlightedTextView';
 import DictionaryTree from '../components/DictionaryTree';
 import PhrasePopover from '../components/PhrasePopover';
 import SemanticSearchPanel from '../components/SemanticSearchPanel';
+import MatchCounter from '../components/MatchCounter/MatchCounter';
+import { QualityScorePanel } from '../components/QualityScorePanel';
+import { BlurFade } from '../components/ui/blur-fade';
 import type { DictMatch, DictionaryCondition } from '../types/api';
 
+import './ResultsPage.scss';
 import '../components/SemanticSearchPanel/SemanticSearchPanel.scss';
+
+// ═══════════════════════════════════════════════════════════
+// Responsive breakpoint hook
+// ═══════════════════════════════════════════════════════════
+
+interface BreakpointState {
+  isMobile: boolean;   // < 768px
+  isTablet: boolean;   // 768 – 1023px
+  isDesktop: boolean;  // >= 1024px
+}
+
+function useBreakpoints(): BreakpointState {
+  const [state, setState] = useState<BreakpointState>(() => ({
+    isMobile: window.innerWidth < 768,
+    isTablet: window.innerWidth >= 768 && window.innerWidth < 1024,
+    isDesktop: window.innerWidth >= 1024,
+  }));
+
+  useEffect(() => {
+    const handleResize = () => {
+      const w = window.innerWidth;
+      setState({
+        isMobile: w < 768,
+        isTablet: w >= 768 && w < 1024,
+        isDesktop: w >= 1024,
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return state;
+}
+
+// ═══════════════════════════════════════════════════════════
+// NavigationDrawer items for DictionaryTree
+// ═══════════════════════════════════════════════════════════
+
+interface NavItem {
+  name: string;
+  text: string;
+  iconName?: Icons;
+  items?: NavItem[];
+}
+
+function buildNavItems(
+  dictionaries: import('../types/api').DictionaryNode[],
+): NavItem[] {
+  return [
+    {
+      name: 'dictionary-root',
+      text: 'Словарь',
+      iconName: Icons.Book,
+      items: dictionaries.map((d) => ({
+        name: d.id,
+        text: d.name,
+        iconName: Icons.Folder,
+      })),
+    },
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════
+// Loading skeleton
+// ═══════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════
+// Main Component
+// ═══════════════════════════════════════════════════════════
 
 export default function ResultsPage() {
   return (
@@ -54,10 +135,14 @@ export default function ResultsPage() {
 function ResultsPageContent() {
   const { state, dispatch } = useAnalysisContext();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
+  const breakpoints = useBreakpoints();
+  const { isMobile, isTablet, isDesktop } = breakpoints;
 
   // Sidebar collapse state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Mobile drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Semantic search panel state
   const [semanticPanelOpen, setSemanticPanelOpen] = useState(false);
@@ -76,6 +161,12 @@ function ResultsPageContent() {
   // FRIDA status
   const [fridaStatus, setFridaStatus] = useState<import('../types/api').EmbeddingStatusResponse | null>(null);
 
+  // Export state
+  const [exportExcelLoading, setExportExcelLoading] = useState(false);
+  const [exportPdfLoading, setExportPdfLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
+
   const handleBack = useCallback(() => {
     navigate('/');
   }, [navigate]);
@@ -84,7 +175,7 @@ function ResultsPageContent() {
     (tabIndex: number) => {
       dispatch({
         type: 'SET_VIEW_MODE',
-        payload: tabIndex === 0 ? 'summary' : 'highlighted',
+        payload: tabIndex === 0 ? 'summary' : tabIndex === 1 ? 'highlighted' : 'structure',
       });
     },
     [dispatch],
@@ -113,7 +204,6 @@ function ResultsPageContent() {
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'MARK' && target instanceof HTMLElement) {
-        // Find the match data from the clicked mark
         const phrase = target.getAttribute('data-phrase');
         const cascadeOrder = target.getAttribute('data-cascade-order');
 
@@ -122,7 +212,6 @@ function ResultsPageContent() {
             (m) => m.phrase_text === phrase && m.cascade_order === Number(cascadeOrder),
           );
           if (match) {
-            // Find corresponding condition
             const dictNodes = state.dictionaries.map((d) => d.response.dictionary).filter(Boolean);
             let condition: DictionaryCondition | null = null;
             for (const dict of dictNodes) {
@@ -133,7 +222,6 @@ function ResultsPageContent() {
               }
             }
 
-            // Toggle popover — if clicking the same mark, close it
             if (popoverOpen && popoverAnchor === target) {
               setPopoverOpen(false);
             } else {
@@ -148,6 +236,39 @@ function ResultsPageContent() {
     },
     [state.searchResult, state.dictionaries, popoverOpen, popoverAnchor],
   );
+
+  // ── Handle highlight-click custom event (Chunk 4) ──
+  useEffect(() => {
+    const handleHighlightClick = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { phrase, cascadeOrder, element } = customEvent.detail;
+
+      if (phrase && state.searchResult) {
+        const match = state.searchResult.matches.find(
+          (m) => m.phrase_text === phrase && m.cascade_order === Number(cascadeOrder),
+        );
+        if (match) {
+          const dictNodes = state.dictionaries.map((d) => d.response.dictionary).filter(Boolean);
+          let condition: DictionaryCondition | null = null;
+          for (const dict of dictNodes) {
+            const found = findCondition(dict, phrase);
+            if (found) {
+              condition = found;
+              break;
+            }
+          }
+
+          setPopoverMatch(match);
+          setPopoverCondition(condition);
+          setPopoverAnchor(element as HTMLElement);
+          setPopoverOpen(true);
+        }
+      }
+    };
+
+    document.addEventListener('highlight-click', handleHighlightClick as EventListener);
+    return () => document.removeEventListener('highlight-click', handleHighlightClick as EventListener);
+  }, [state.searchResult, state.dictionaries]);
 
   const handlePopoverClose = useCallback(() => {
     setPopoverOpen(false);
@@ -174,7 +295,6 @@ function ResultsPageContent() {
   const handleVectorize = useCallback(async () => {
     if (!state.sessionId) return;
 
-    // Abort previous request
     if (indexAbortRef.current) {
       indexAbortRef.current.abort();
     }
@@ -190,7 +310,6 @@ function ResultsPageContent() {
         controller.signal,
       );
       setIndexState('success');
-      // Refresh FRIDA status after indexing
       try {
         const status = await getEmbeddingStatus();
         setFridaStatus(status);
@@ -215,15 +334,71 @@ function ResultsPageContent() {
     }
   }, [state.sessionId]);
 
+  // ── Export Excel handler ──
+  const handleExportExcel = useCallback(async () => {
+    if (!state.sessionId) return;
+
+    exportAbortRef.current?.abort();
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+
+    setExportExcelLoading(true);
+    setExportError(null);
+
+    try {
+      const blob = await exportExcel(state.sessionId, controller.signal);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `analysis_${state.sessionId}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setExportError(err instanceof ApiError ? err.message : 'Ошибка при экспорте Excel');
+    } finally {
+      if (!controller.signal.aborted) {
+        setExportExcelLoading(false);
+      }
+    }
+  }, [state.sessionId]);
+
+  // ── Export PDF handler ──
+  const handleExportPdf = useCallback(async () => {
+    if (!state.sessionId) return;
+
+    exportAbortRef.current?.abort();
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+
+    setExportPdfLoading(true);
+    setExportError(null);
+
+    try {
+      const blob = await exportPdf(state.sessionId, controller.signal);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `analysis_${state.sessionId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setExportError(err instanceof ApiError ? err.message : 'Ошибка при экспорте PDF');
+    } finally {
+      if (!controller.signal.aborted) {
+        setExportPdfLoading(false);
+      }
+    }
+  }, [state.sessionId]);
+
   // ── Cross-highlighting: result click → scroll to turn ──
   const handleResultClick = useCallback((_dialogueId: string, turnIndex: number) => {
-    // Scroll to the utterance in the dialog view
     const utteranceElement = document.querySelector(
       `[data-turn-index="${turnIndex}"]`,
     );
     if (utteranceElement) {
       utteranceElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Add temporary highlight class
       utteranceElement.classList.add('semantic-result-highlight');
       setTimeout(() => {
         utteranceElement.classList.remove('semantic-result-highlight');
@@ -231,11 +406,32 @@ function ResultsPageContent() {
     }
   }, []);
 
+  // ── NavigationDrawer item click ──
+  const handleDrawerItemClick = useCallback(
+    () => {
+      // Close drawer on mobile after item click
+      if (!isDesktop) {
+        setDrawerOpen(false);
+      }
+    },
+    [isDesktop],
+  );
+
+  // ─── Derived values ──────────────────────────────────
+  const activeTabIndex = state.viewMode === 'summary' ? 0 : state.viewMode === 'highlighted' ? 1 : 2;
+  const fridaAvailable = fridaStatus?.frida_available ?? false;
+  const dictionaryNodes = state.dictionaries.map((d) => d.response.dictionary).filter(Boolean);
+
+  const navItems = useMemo(
+    () => buildNavItems(dictionaryNodes as import('../types/api').DictionaryNode[]),
+    [dictionaryNodes],
+  );
+
   // ─── Empty state: no results yet ──────────────────────
   if (!state.searchResult && !state.llmResult) {
     return (
       <Stack direction="vertical" spacing="x6" align="center">
-        <Typography variant="h4">Результаты не найдены</Typography>
+        <Typography variant="h1" style={{ margin: 0 }}>Результаты не найдены</Typography>
         <Typography variant="body1" inactive>
           Сначала загрузите диалог и выполните анализ.
         </Typography>
@@ -249,38 +445,19 @@ function ResultsPageContent() {
     );
   }
 
-  const activeTabIndex = state.viewMode === 'summary' ? 0 : 1;
-  const fridaAvailable = fridaStatus?.frida_available ?? false;
-
-  // Extract dictionary nodes from uploaded dictionaries
-  const dictionaryNodes = state.dictionaries.map((d) => d.response.dictionary).filter(Boolean);
-
+  // ─── Main layout ─────────────────────────────────────
   return (
-    <Stack direction="horizontal" spacing="none" style={{ minHeight: 0, flex: '1 1 0' }}>
-      {/* ═══ Left Sidebar (Dictionary) ═══ */}
-      {!sidebarCollapsed && (
-        <Box
-          className="results-sidebar"
-          style={{
-            width: '300px',
-            flexShrink: 0,
-            borderRight: '1px solid var(--color-border-default, #e0e0e0)',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            backgroundColor: 'var(--color-background-secondary, #fafafa)',
-          }}
-        >
+    <Box style={{ display: 'flex', minHeight: 0, flex: '1 1 0' }} aria-label="Результаты анализа">
+      {/* ═══ Left Sidebar (Dictionary) — Desktop only ═══ */}
+      {isDesktop && !sidebarCollapsed && (
+        <Box className="results-sidebar">
           <DictionaryTree
             dictionaries={dictionaryNodes as import('../types/api').DictionaryNode[]}
             searchResult={state.searchResult}
           />
 
           {/* Collapse button */}
-          <Box
-            padding="x2"
-            style={{ borderTop: '1px solid var(--color-border-default, #e0e0e0)' }}
-          >
+          <Box className="results-sidebar__collapse">
             <IconButton
               iconName={Icons.Collapse}
               variant="plain"
@@ -292,14 +469,36 @@ function ResultsPageContent() {
         </Box>
       )}
 
-      {/* ═══ Main Content ═══ */}
-      <Box style={{ flex: '1 1 0', minWidth: 0, overflow: 'auto' }}>
-        <Stack direction="vertical" spacing="x4" style={{ padding: '0 0 0 16px' }}>
+      {/* ═══ NavigationDrawer for mobile/tablet ═══ */}
+      {!isDesktop && (
+        <NavigationDrawer
+          groups={navItems}
+          isOpen={drawerOpen}
+          onOpen={() => setDrawerOpen(true)}
+          onClose={() => setDrawerOpen(false)}
+          onClickItem={handleDrawerItemClick}
+          disableMobileView={false}
+        />
+      )}
+
+      {/* ═══ Main Content Area ═══ */}
+      <Box className="results-main">
+        <Stack direction="vertical" spacing="x4" style={{ padding: '0 0 0 var(--sizeSpacingX4, 16px)' }}>
           {/* ── Header row ── */}
           <Stack direction="horizontal" spacing="x3" align="center" justify="space-between">
             <Stack direction="horizontal" spacing="x3" align="center">
-              {/* Expand button (when sidebar collapsed) */}
-              {sidebarCollapsed && (
+              {/* Burger button — mobile/tablet only */}
+              {!isDesktop && (
+                <IconButton
+                  iconName={Icons.Menu}
+                  variant="plain"
+                  aria-label="Открыть панель словаря"
+                  onClick={() => setDrawerOpen(true)}
+                />
+              )}
+
+              {/* Expand button (when desktop sidebar collapsed) */}
+              {isDesktop && sidebarCollapsed && (
                 <IconButton
                   iconName={Icons.Expand}
                   variant="plain"
@@ -313,7 +512,7 @@ function ResultsPageContent() {
                 aria-label="Назад к загрузке"
                 onClick={handleBack}
               />
-              <Typography variant="h4">Результаты анализа</Typography>
+              <Typography variant="h1" style={{ margin: 0 }}>Результаты анализа</Typography>
             </Stack>
 
             {/* ── Action buttons ── */}
@@ -343,6 +542,32 @@ function ResultsPageContent() {
                 />
               </Tooltip>
 
+              {/* Export Excel button */}
+              {state.sessionId && !isMobile && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={exportExcelLoading}
+                  onClick={handleExportExcel}
+                  startIcon={<Icon iconName={Icons.Download} />}
+                >
+                  {exportExcelLoading ? 'Выгрузка…' : 'Excel'}
+                </Button>
+              )}
+
+              {/* Export PDF button */}
+              {state.sessionId && !isMobile && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={exportPdfLoading}
+                  onClick={handleExportPdf}
+                  startIcon={<Icon iconName={Icons.Download} />}
+                >
+                  {exportPdfLoading ? 'Выгрузка…' : 'PDF'}
+                </Button>
+              )}
+
               {/* FRIDA status indicator */}
               <Tooltip
                 title={
@@ -351,31 +576,71 @@ function ResultsPageContent() {
                     : 'FRIDA недоступна'
                 }
               >
-                <Badge
-                  type="tertiary"
-                  semantic={fridaAvailable ? 'success' : 'danger'}
-                  dot
-                >
-                  FRIDA
-                </Badge>
+                <span>
+                  <Badge
+                    type="tertiary"
+                    semantic={fridaAvailable ? 'success' : 'danger'}
+                    dot
+                  >
+                    FRIDA
+                  </Badge>
+                </span>
               </Tooltip>
             </Stack>
           </Stack>
 
           {/* ── Indexing error message ── */}
           {indexError && (
-            <Typography variant="caption" style={{ color: 'var(--color-text-danger, #e53935)' }}>
+            <Typography variant="caption" className="text-error">
               {indexError}
             </Typography>
           )}
 
-          {/* ── LLM warning banner ── */}
-          {!state.llmResult && state.searchResult && (
+          {/* ── Export error message ── */}
+          {exportError && (
+            <InlineAlert type="error" iconName={Icons.WarningCircled}>
+              {exportError}
+            </InlineAlert>
+          )}
+
+          {/* ── LLM loading state ── */}
+          {state.llmLoading && (
+            <Stack direction="vertical" spacing="x2">
+              <Typography variant="body2" className="text-info">
+                LLM-анализ выполняется...
+              </Typography>
+              <Progress shape="animated" cycled />
+            </Stack>
+          )}
+
+          {/* ── LLM result unavailable (after loading complete) ── */}
+          {!state.llmLoading && !state.llmResult && state.searchResult && (
             <Banner
-              title="Сводка недоступна — LLM-анализ не выполнен или завершился с ошибкой"
+              title="LLM-сводка недоступна — анализ не выполнен или завершился с ошибкой"
               color="warning"
               iconName={Icons.Alarm}
             />
+          )}
+
+          {/* ── Stats with NumberTicker ── */}
+          {state.searchResult && (
+            <BlurFade delay={0} duration={0.4} direction="up" inView={true}>
+              <Box className="results-stats">
+                <MatchCounter
+                  count={state.searchResult.total_matches}
+                  label="Совпадений:"
+                  variant={state.searchResult.total_matches > 0 ? 'success' : 'default'}
+                />
+                <Stack direction="horizontal" spacing="x1" align="baseline">
+                  <Typography variant="caption" inactive>
+                    Сегментов:
+                  </Typography>
+                  <Typography variant="body2">
+                    {state.searchResult.segments.length}
+                  </Typography>
+                </Stack>
+              </Box>
+            </BlurFade>
           )}
 
           {/* ── Tabs + controls ── */}
@@ -385,17 +650,32 @@ function ResultsPageContent() {
               onChange={handleViewModeChange}
             >
               <Tab label="Сводка" iconName={Icons.Chat}>
-                <SummaryView
-                  llmResult={state.llmResult}
-                  searchResult={state.searchResult}
-                />
+                <div
+                  role="tabpanel"
+                  aria-labelledby="tab-summary"
+                  className="results-tabpanel"
+                >
+                  <BlurFade delay={0.1} duration={0.4} direction="up" inView={true}>
+                    <SummaryView
+                      llmResult={state.llmResult}
+                      searchResult={state.searchResult}
+                      llmLoading={state.llmLoading}
+                    />
+                  </BlurFade>
+                </div>
               </Tab>
               <Tab label="Выделенный текст" iconName={Icons.Search}>
-                <div onClick={handleSegmentClick}>
-                  <HighlightedTextView
-                    searchResult={state.searchResult}
-                    hideNoMatch={state.hideNoMatch}
-                  />
+                <div
+                  role="tabpanel"
+                  aria-labelledby="tab-highlighted"
+                  className="results-tabpanel"
+                >
+                  <div onClick={handleSegmentClick} onPointerDown={(e) => e.stopPropagation()}>
+                    <HighlightedTextView
+                      searchResult={state.searchResult}
+                      hideNoMatch={state.hideNoMatch}
+                    />
+                  </div>
                 </div>
               </Tab>
             </Tabs>
@@ -408,33 +688,14 @@ function ResultsPageContent() {
                   onChange={handleHideNoMatchChange}
                 />
               )}
-              <Tooltip
-                title={theme === 'light' ? 'Тёмная тема' : 'Светлая тема'}
-              >
-                <IconButton
-                  iconName={
-                    theme === 'light' ? Icons.HalfMoon : Icons.Sun
-                  }
-                  variant="plain"
-                  aria-label={
-                    theme === 'light'
-                      ? 'Включить тёмную тему'
-                      : 'Включить светлую тему'
-                  }
-                  onClick={toggleTheme}
-                />
-              </Tooltip>
             </Stack>
           </Stack>
 
-          {/* ── Stats ── */}
-          {state.searchResult && (
-            <Box>
-              <Typography variant="caption" inactive>
-                Всего совпадений: {state.searchResult.total_matches} · Сегментов:{' '}
-                {state.searchResult.segments.length}
-              </Typography>
-            </Box>
+          {/* ── Quality Score Panel (load on demand) ── */}
+          {state.sessionId && (
+            <BlurFade delay={0.3} duration={0.4} direction="up" inView={true}>
+              <QualityScorePanel sessionId={state.sessionId} />
+            </BlurFade>
           )}
         </Stack>
       </Box>
@@ -450,23 +711,49 @@ function ResultsPageContent() {
       />
 
       {/* ═══ Right Sidebar (SemanticSearchPanel) ═══ */}
-      {semanticPanelOpen && (
-        <>
-          {/* Mobile backdrop */}
-          <Box
-            className="semantic-sidebar-backdrop"
-            onClick={toggleSemanticPanel}
+      {semanticPanelOpen && isDesktop && (
+        <Box className="results-semantic-panel">
+          <SemanticSearchPanel
+            sessionId={state.sessionId ?? undefined}
+            onResultClick={handleResultClick}
+            onClose={toggleSemanticPanel}
           />
-          <Box className="semantic-sidebar">
-            <SemanticSearchPanel
-              sessionId={state.sessionId ?? undefined}
-              onResultClick={handleResultClick}
-              onClose={toggleSemanticPanel}
-            />
-          </Box>
-        </>
+        </Box>
       )}
-    </Stack>
+
+      {/* Mobile semantic panel: fullscreen overlay */}
+      {semanticPanelOpen && isMobile && (
+        <Box className="results-semantic-panel--mobile">
+          <Box padding="x4">
+            <Stack direction="horizontal" spacing="x2" align="center" justify="space-between">
+              <Typography variant="h5">Семантический поиск</Typography>
+              <IconButton
+                iconName={Icons.Close}
+                variant="plain"
+                aria-label="Закрыть"
+                onClick={toggleSemanticPanel}
+              />
+            </Stack>
+          </Box>
+          <SemanticSearchPanel
+            sessionId={state.sessionId ?? undefined}
+            onResultClick={handleResultClick}
+            onClose={toggleSemanticPanel}
+          />
+        </Box>
+      )}
+
+      {/* Tablet semantic panel: side sheet (same as desktop but narrower context) */}
+      {semanticPanelOpen && isTablet && (
+        <Box className="results-semantic-panel">
+          <SemanticSearchPanel
+            sessionId={state.sessionId ?? undefined}
+            onResultClick={handleResultClick}
+            onClose={toggleSemanticPanel}
+          />
+        </Box>
+      )}
+    </Box>
   );
 }
 

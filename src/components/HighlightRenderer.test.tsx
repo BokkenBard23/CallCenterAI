@@ -60,21 +60,22 @@ describe('HighlightRenderer', () => {
 
     const highlight = container.querySelector('.highlight-match');
     expect(highlight).toBeTruthy();
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(highlight?.textContent).toBe('\u00ABрасторгнуть договор\u00BB');
-    expect(highlight?.classList.contains('highlight-level-1')).toBe(true);
+    // DR-1: NO quotes in text display — quotes only in dictionary sidebar
+    expect(highlight?.textContent).toBe('расторгнуть договор');
+    expect(highlight?.classList.contains('highlight-depth-1')).toBe(true);
   });
 
   it('applies innermost level class for single match', () => {
     const text = 'Привет мир';
-    const matches = [makeMatch({ phrase_text: 'мир', word_distance_used: 2 })];
+    const matches = [makeMatch({ phrase_text: 'мир', word_distance_used: 1, cascade_order: 2 })];
 
     const { container } = renderWithHover(
       <HighlightRenderer text={text} matches={matches} />,
     );
 
     const highlight = container.querySelector('.highlight-match');
-    expect(highlight?.classList.contains('highlight-level-2')).toBe(true);
+    // Level comes from cascade_order → depth, not word_distance_used
+    expect(highlight?.classList.contains('highlight-depth-2')).toBe(true);
   });
 
   it('renders multiple non-overlapping matches', () => {
@@ -90,16 +91,16 @@ describe('HighlightRenderer', () => {
 
     const highlights = container.querySelectorAll('.highlight-match');
     expect(highlights).toHaveLength(2);
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(highlights[0].textContent).toBe('\u00ABхочет\u00BB');
-    expect(highlights[1].textContent).toBe('\u00ABуйти\u00BB');
+    // DR-1: NO quotes in text display — quotes only in dictionary sidebar
+    expect(highlights[0].textContent).toBe('хочет');
+    expect(highlights[1].textContent).toBe('уйти');
   });
 
-  it('handles overlapping matches with innermost color', () => {
+  it('handles overlapping matches with different cascade_order levels', () => {
     const text = 'я хочу расторгнуть договор сейчас';
     const matches = [
-      makeMatch({ phrase_text: 'расторгнуть договор', word_distance_used: 1, turn_index: 0 }),
-      makeMatch({ phrase_text: 'расторгнуть договор сейчас', word_distance_used: 2, turn_index: 0 }),
+      makeMatch({ phrase_text: 'расторгнуть договор', word_distance_used: 1, cascade_order: 1, turn_index: 0 }),
+      makeMatch({ phrase_text: 'расторгнуть договор сейчас', word_distance_used: 2, cascade_order: 2, turn_index: 0 }),
     ];
 
     const { container } = renderWithHover(
@@ -108,7 +109,6 @@ describe('HighlightRenderer', () => {
 
     const highlights = container.querySelectorAll('.highlight-match');
     // Overlapping text splits into boundary chunks
-    // "расторгнуть договор" part belongs to both, "сейчас" only to the larger
     expect(highlights.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -123,9 +123,9 @@ describe('HighlightRenderer', () => {
     expect(container.querySelector('.highlight-match')).toBeNull();
   });
 
-  it('defaults to level from word_distance_used for unknown dictionary names', () => {
+  it('uses cascade_order for level class, not word_distance_used', () => {
     const text = 'тестовая фраза';
-    const matches = [makeMatch({ phrase_text: 'фраза', word_distance_used: 3, quarter: 'Неизвестный словарь' })];
+    const matches = [makeMatch({ phrase_text: 'фраза', word_distance_used: 5, cascade_order: 3, quarter: 'Неизвестный словарь' })];
 
     const { container } = renderWithHover(
       <HighlightRenderer text={text} matches={matches} />,
@@ -133,8 +133,8 @@ describe('HighlightRenderer', () => {
 
     const highlight = container.querySelector('.highlight-match');
     expect(highlight).toBeTruthy();
-    // Level comes from word_distance_used, not from quarter
-    expect(highlight?.classList.contains('highlight-level-3')).toBe(true);
+    // Level comes from cascade_order (depth), not from word_distance_used
+    expect(highlight?.classList.contains('highlight-depth-3')).toBe(true);
   });
 
   it('uses semantic <mark> element for highlighted text', () => {
@@ -147,13 +147,13 @@ describe('HighlightRenderer', () => {
 
     const mark = screen.getByRole('mark');
     expect(mark).toBeTruthy();
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(mark.textContent).toBe('\u00ABважный\u00BB');
+    // DR-1: NO quotes in text display
+    expect(mark.textContent).toBe('важный');
   });
 
-  it('adds aria-label with phrase and level', () => {
+  it('adds aria-label with phrase and depth', () => {
     const text = 'важный текст';
-    const matches = [makeMatch({ phrase_text: 'важный', word_distance_used: 2 })];
+    const matches = [makeMatch({ phrase_text: 'важный', word_distance_used: 1, cascade_order: 2 })];
 
     renderWithHover(
       <HighlightRenderer text={text} matches={matches} />,
@@ -161,7 +161,7 @@ describe('HighlightRenderer', () => {
 
     const mark = screen.getByRole('mark');
     expect(mark.getAttribute('aria-label')).toContain('важный');
-    expect(mark.getAttribute('aria-label')).toContain('2');
+    expect(mark.getAttribute('aria-label')).toContain('глубина 2');
   });
 
   it('makes highlighted spans keyboard-focusable', () => {
@@ -194,8 +194,8 @@ describe('HighlightRenderer', () => {
     );
 
     const highlight = container.querySelector('.highlight-match');
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(highlight?.textContent).toBe('\u00ABстартовая\u00BB');
+    // DR-1: NO quotes in text display
+    expect(highlight?.textContent).toBe('стартовая');
   });
 
   it('handles match at the end of text', () => {
@@ -207,8 +207,8 @@ describe('HighlightRenderer', () => {
     );
 
     const highlight = container.querySelector('.highlight-match');
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(highlight?.textContent).toBe('\u00ABфраза\u00BB');
+    // DR-1: NO quotes in text display
+    expect(highlight?.textContent).toBe('фраза');
   });
 
   it('matches only first occurrence of phrase', () => {
@@ -222,8 +222,8 @@ describe('HighlightRenderer', () => {
     const highlights = container.querySelectorAll('.highlight-match');
     // Only first "договор" should be highlighted
     expect(highlights).toHaveLength(1);
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(highlights[0].textContent).toBe('\u00ABдоговор\u00BB');
+    // DR-1: NO quotes in text display
+    expect(highlights[0].textContent).toBe('договор');
   });
 
   it('highlights matched_text when different from phrase_text (morph match)', () => {
@@ -244,8 +244,8 @@ describe('HighlightRenderer', () => {
 
     const highlight = container.querySelector('.highlight-match');
     expect(highlight).toBeTruthy();
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(highlight?.textContent).toBe('\u00ABне подключил хотел\u00BB');
+    // DR-1: NO quotes in text display — quotes only in dictionary sidebar
+    expect(highlight?.textContent).toBe('не подключил хотел');
   });
 
   it('uses character offsets for exact positioning', () => {
@@ -266,8 +266,8 @@ describe('HighlightRenderer', () => {
 
     const highlight = container.querySelector('.highlight-match');
     expect(highlight).toBeTruthy();
-    // DR-1: is_exact_match=true by default → «quotes»
-    expect(highlight?.textContent).toBe('\u00ABуйду на другого оператора\u00BB');
+    // DR-1: NO quotes in text display
+    expect(highlight?.textContent).toBe('уйду на другого оператора');
   });
 
   it('does not add highlight-hovered class when no phrase is hovered', () => {
@@ -300,7 +300,7 @@ describe('HighlightRenderer', () => {
   // DR-1 / DR-2 / DR-3 tests (Chunk 1)
   // ═══════════════════════════════════════════════════════════
 
-  it('DR-1: wraps exact match in guillemet quotes', () => {
+  it('DR-1: exact match has highlight-exact class (no quotes in text)', () => {
     const text = 'клиент хочет расторгнуть';
     const matches = [makeMatch({
       phrase_text: 'хочет',
@@ -313,7 +313,8 @@ describe('HighlightRenderer', () => {
     );
 
     const highlight = container.querySelector('.highlight-match');
-    expect(highlight?.textContent).toBe('\u00ABхочет\u00BB');
+    // DR-1: NO quotes in highlighted text — quotes only in dictionary sidebar
+    expect(highlight?.textContent).toBe('хочет');
     expect(highlight?.classList.contains('highlight-exact')).toBe(true);
   });
 
@@ -441,8 +442,8 @@ describe('HighlightRenderer', () => {
 
     const highlight = container.querySelector('.highlight-match');
     expect(highlight).toBeTruthy();
-    // DR-1: quotes
-    expect(highlight?.textContent).toBe('\u00ABхочет\u00BB');
+    // DR-1: NO quotes in text display
+    expect(highlight?.textContent).toBe('хочет');
     expect(highlight?.classList.contains('highlight-exact')).toBe(true);
     // DR-2: bold
     expect((highlight as HTMLElement)?.style.fontWeight).toBe('600');

@@ -2,9 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import {
   Box,
-  Button,
   Header,
-  Icon,
   IconButton,
   Skeleton,
   ThemeProvider,
@@ -13,15 +11,19 @@ import {
 import { Icons } from '@beeline/design-tokens/js/iconfont';
 
 import { AnalysisProvider } from './context/AnalysisContext';
+import { SnackbarProvider } from './context/SnackbarContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { AnimatedThemeToggler } from './components/ui/animated-theme-toggler';
 import useTheme from './hooks/useTheme';
 import './App.scss';
 
-export const APP_PRODUCT_NAME = 'Анализ диалогов';
+const APP_PRODUCT_NAME = 'Анализ диалогов';
 
 const UploadPage = lazy(() => import('./pages/UploadPage'));
 const ResultsPage = lazy(() => import('./pages/ResultsPage'));
 const BatchResultsPage = lazy(() => import('./pages/BatchResultsPage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
+const SpeechLabPage = lazy(() => import('./pages/SpeechLabPage'));
 
 function PageSkeleton() {
   return (
@@ -36,7 +38,7 @@ function PageSkeleton() {
 /** Duration (ms) to keep the theme-transition class active after a theme change. */
 const THEME_TRANSITION_DURATION = 250;
 
-/** Header icons + history nav — extracted to use useNavigate inside Router */
+/** Header icons + AnimatedThemeToggler — extracted to use useNavigate inside Router */
 function HeaderIcons({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
   const navigate = useNavigate();
 
@@ -50,22 +52,10 @@ function HeaderIcons({ theme, onToggleTheme }: { theme: string; onToggleTheme: (
           onClick={() => navigate('/history')}
         />
       </Tooltip>
-      <Button
-        variant="outlined"
-        size="small"
-        onClick={onToggleTheme}
-        aria-label={
-          theme === 'light'
-            ? 'Включить тёмную тему'
-            : 'Включить светлую тему'
-        }
-      >
-        {theme === 'light' ? (
-          <Icon iconName={Icons.HalfMoon} />
-        ) : (
-          <Icon iconName={Icons.Sun} />
-        )}
-      </Button>
+      <AnimatedThemeToggler
+        theme={theme as import('./hooks/useTheme').Theme}
+        onThemeChange={onToggleTheme}
+      />
     </>
   );
 }
@@ -73,6 +63,7 @@ function HeaderIcons({ theme, onToggleTheme }: { theme: string; onToggleTheme: (
 function App() {
   const { theme, toggleTheme } = useTheme();
   const prevThemeRef = useRef(theme);
+  const mainRef = useRef<HTMLElement>(null);
 
   // Add transient transition class on theme change
   useEffect(() => {
@@ -94,30 +85,55 @@ function App() {
     toggleTheme();
   }, [toggleTheme]);
 
+  /** Focus management: when skip-nav is used, focus the main content area */
+  const handleSkipToContent = useCallback(() => {
+    mainRef.current?.focus();
+  }, []);
+
   return (
     <ThemeProvider isRoot theme={theme}>
       <BrowserRouter>
-        <AnalysisProvider>
-          <div className="app-root" data-theme={theme}>
-            <Header
-              nameProduct={APP_PRODUCT_NAME}
-              nameLogo="logoThemeable"
-              iconsList={
-                <HeaderIcons theme={theme} onToggleTheme={handleThemeToggle} />
-              }
-            />
-            <main className="app-main">
-              <Suspense fallback={<PageSkeleton />}>
-                <Routes>
-                  <Route path="/" element={<UploadPage />} />
-                  <Route path="/results" element={<ResultsPage />} />
-                  <Route path="/batch-results/:batchId" element={<BatchResultsPage />} />
-                  <Route path="/history" element={<HistoryPage />} />
-                </Routes>
-              </Suspense>
-            </main>
-          </div>
-        </AnalysisProvider>
+        <SnackbarProvider>
+          <AnalysisProvider>
+            <div className="app-root" data-theme={theme}>
+              {/* Skip-to-content link — first focusable element */}
+              <a
+                href="#main-content"
+                className="skip-nav"
+                onClick={handleSkipToContent}
+              >
+                Перейти к основному содержимому
+              </a>
+
+              <Header
+                nameProduct={APP_PRODUCT_NAME}
+                nameLogo="logoThemeable"
+                iconsList={
+                  <HeaderIcons theme={theme} onToggleTheme={handleThemeToggle} />
+                }
+              />
+              <main
+                id="main-content"
+                role="main"
+                className="app-main"
+                tabIndex={-1}
+                ref={mainRef}
+                aria-label="Основное содержимое приложения"
+              >
+                <Suspense fallback={<PageSkeleton />}>
+                  <Routes>
+                    <Route path="/" element={<ErrorBoundary><UploadPage /></ErrorBoundary>} />
+                    <Route path="/results" element={<ErrorBoundary><ResultsPage /></ErrorBoundary>} />
+                    <Route path="/batch-results/:batchId" element={<ErrorBoundary><BatchResultsPage /></ErrorBoundary>} />
+                    <Route path="/history" element={<ErrorBoundary><HistoryPage /></ErrorBoundary>} />
+                    <Route path="/speechlab" element={<ErrorBoundary><SpeechLabPage /></ErrorBoundary>} />
+                    <Route path="/speechlab/:sessionId" element={<ErrorBoundary><SpeechLabPage /></ErrorBoundary>} />
+                  </Routes>
+                </Suspense>
+              </main>
+            </div>
+          </AnalysisProvider>
+        </SnackbarProvider>
       </BrowserRouter>
     </ThemeProvider>
   );

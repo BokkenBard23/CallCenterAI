@@ -6,6 +6,8 @@
  * Do NOT transform data from the API — pass as-is.
  */
 
+import type { DisplayToken } from './speechlab';
+
 // ═══════════════════════════════════════════════════════════
 // RTF Upload Models
 // ═══════════════════════════════════════════════════════════
@@ -75,6 +77,8 @@ export interface UploadDictionaryResponse {
   dictionary: DictionaryNode | null;
   validation: DictionaryValidation;
   error: string | null;
+  /** Pre-computed display tokens for the root dictionary (from backend group_into_display_tokens) */
+  display_tokens?: DisplayToken[] | null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -340,4 +344,85 @@ export interface FeedbackResponse {
   feedback_id: string;
   status: string;
   timestamp: string;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Quality Scoring Models (mirrors backend/app/models.py)
+// ═══════════════════════════════════════════════════════════
+
+/** Quality level enum — matches backend QualityLevel */
+export type QualityLevel = 'high' | 'medium' | 'low';
+
+/** Quality category enum — matches backend QualityCategory (12 categories) */
+export type QualityCategory =
+  | 'communication_skills'
+  | 'problem_solving'
+  | 'product_knowledge'
+  | 'responsiveness'
+  | 'professionalism'
+  | 'empathy'
+  | 'accuracy'
+  | 'efficiency'
+  | 'follow_up_procedures'
+  | 'conflict_resolution'
+  | 'compliance'
+  | 'customer_education';
+
+/** Russian labels for quality categories */
+export const QUALITY_CATEGORY_LABELS: Record<QualityCategory, string> = {
+  communication_skills: 'Навыки общения',
+  problem_solving: 'Решение проблем',
+  product_knowledge: 'Знание продукта',
+  responsiveness: 'Отзывчивость',
+  professionalism: 'Профессионализм',
+  empathy: 'Эмпатия',
+  accuracy: 'Точность',
+  efficiency: 'Эффективность',
+  follow_up_procedures: 'Порядок последующих действий',
+  conflict_resolution: 'Разрешение конфликтов',
+  compliance: 'Соблюдение стандартов',
+  customer_education: 'Обучение клиента',
+};
+
+/** All 12 quality categories in stable order for radar chart */
+export const QUALITY_CATEGORIES: QualityCategory[] = [
+  'communication_skills',
+  'problem_solving',
+  'product_knowledge',
+  'responsiveness',
+  'professionalism',
+  'empathy',
+  'accuracy',
+  'efficiency',
+  'follow_up_procedures',
+  'conflict_resolution',
+  'compliance',
+  'customer_education',
+];
+
+/** Score for a single quality category */
+export interface CategoryScore {
+  category: QualityCategory;
+  level: QualityLevel;
+  score: number;
+  justification: string;
+}
+
+/** Full quality scoring result */
+export interface QualityScoreResult {
+  session_id: string;
+  categories: CategoryScore[];
+  overall_score: number;
+  overall_level: QualityLevel;
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+  provider: string;
+  model: string;
+}
+
+/** Request body for quality scoring */
+export interface QualityScoreRequest {
+  session_id: string;
+  provider_id?: string;
 }
