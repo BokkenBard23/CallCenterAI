@@ -21,13 +21,18 @@ describe('resolvePhraseChannel', () => {
     expect(resolvePhraseChannel(new Set())).toBe('ANY');
   });
 
-  it('returns ANY when ANY is present in the set', () => {
+  it('returns ANY when only ANY is present in the set', () => {
     expect(resolvePhraseChannel(new Set<ChannelType>(['ANY']))).toBe('ANY');
-    expect(resolvePhraseChannel(new Set<ChannelType>(['ANY', 'CLIENT']))).toBe('ANY');
   });
 
-  it('returns ANY when both CLIENT and OPERATOR are present', () => {
-    expect(resolvePhraseChannel(new Set<ChannelType>(['CLIENT', 'OPERATOR']))).toBe('ANY');
+  it('returns first non-ANY when ANY and a concrete channel are present (new semantics: ANY does not override)', () => {
+    expect(resolvePhraseChannel(new Set<ChannelType>(['ANY', 'CLIENT']))).toBe('CLIENT');
+    expect(resolvePhraseChannel(new Set<ChannelType>(['CLIENT', 'ANY']))).toBe('CLIENT');
+  });
+
+  it('returns first non-empty non-ANY when both CLIENT and OPERATOR are present (new semantics: first wins, not ANY)', () => {
+    expect(resolvePhraseChannel(new Set<ChannelType>(['CLIENT', 'OPERATOR']))).toBe('CLIENT');
+    expect(resolvePhraseChannel(new Set<ChannelType>(['OPERATOR', 'CLIENT']))).toBe('OPERATOR');
   });
 
   it('returns CLIENT when only CLIENT is present', () => {
@@ -228,13 +233,13 @@ describe('groupIntoDisplayTokens', () => {
 
   // --- Channel resolution within groups ---
 
-  it('resolves channel to ANY when words have mixed CLIENT+OPERATOR channels', () => {
+  it('resolves channel to first non-ANY (CLIENT) when words have mixed CLIENT+OPERATOR channels (new semantics)', () => {
     const result = groupIntoDisplayTokens([
       { text: 'слово1', type: 'WORD', channel: 'CLIENT' as ChannelType, word_distance: 2, is_error: false },
       { text: 'слово2', type: 'WORD', channel: 'OPERATOR' as ChannelType, word_distance: 2, is_error: false },
     ]);
     expect(result).toHaveLength(1);
-    expect(result[0].channel).toBe('ANY');
+    expect(result[0].channel).toBe('CLIENT');
   });
 
   // --- word_distance default ---

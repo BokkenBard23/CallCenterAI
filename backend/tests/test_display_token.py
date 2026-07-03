@@ -106,17 +106,41 @@ class TestResolvePhraseChannel:
     def test_single_any(self):
         assert resolve_phrase_channel({"ANY"}) == "ANY"
 
-    def test_mixed_client_operator_returns_any(self):
-        assert resolve_phrase_channel({"CLIENT", "OPERATOR"}) == "ANY"
+    def test_mixed_client_operator_returns_first_non_any(self):
+        """NEW semantics (UI-2.5): first non-empty non-ANY value from the set.
 
-    def test_any_overrides_client(self):
-        assert resolve_phrase_channel({"CLIENT", "ANY"}) == "ANY"
+        Per SmartLogger spec [4]: all words in a phrase have the SAME channel.
+        resolve_phrase_channel takes the first non-empty, non-ANY value —
+        it does NOT downgrade CLIENT+OPERATOR mix to ANY.
+        Set iteration order is unspecified, so the result is one of CLIENT/OPERATOR.
+        """
+        result = resolve_phrase_channel({"CLIENT", "OPERATOR"})
+        assert result in ("CLIENT", "OPERATOR")
 
-    def test_any_overrides_operator(self):
-        assert resolve_phrase_channel({"OPERATOR", "ANY"}) == "ANY"
+    def test_any_does_not_override_client(self):
+        """NEW semantics (UI-2.5): ANY does NOT override — first non-ANY wins.
 
-    def test_all_three_returns_any(self):
-        assert resolve_phrase_channel({"CLIENT", "OPERATOR", "ANY"}) == "ANY"
+        resolve_phrase_channel skips ANY and returns the first real channel.
+        With {"CLIENT", "ANY"} the result is CLIENT (not ANY).
+        """
+        result = resolve_phrase_channel({"CLIENT", "ANY"})
+        assert result == "CLIENT"
+
+    def test_any_does_not_override_operator(self):
+        """NEW semantics (UI-2.5): ANY does NOT override — first non-ANY wins.
+
+        With {"OPERATOR", "ANY"} the result is OPERATOR (not ANY).
+        """
+        result = resolve_phrase_channel({"OPERATOR", "ANY"})
+        assert result == "OPERATOR"
+
+    def test_all_three_returns_first_non_any(self):
+        """NEW semantics (UI-2.5): {CLIENT, OPERATOR, ANY} → first non-ANY value.
+
+        Not ANY — takes the first non-empty, non-ANY channel from the set.
+        """
+        result = resolve_phrase_channel({"CLIENT", "OPERATOR", "ANY"})
+        assert result in ("CLIENT", "OPERATOR")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -219,8 +243,13 @@ class TestGroupIntoDisplayTokens:
         assert result[2].text == ")"
         assert result[2].type == "BRACKET"
 
-    def test_mixed_channels_resolves_to_any(self):
-        """WORD tokens with CLIENT + OPERATOR channels → channel=ANY."""
+    def test_mixed_channels_resolves_to_first_non_any(self):
+        """NEW semantics (UI-2.5): WORD tokens with CLIENT + OPERATOR channels → first non-ANY.
+
+        Per SmartLogger spec [4]: all words in a phrase have the SAME channel.
+        resolve_phrase_channel takes the first non-empty, non-ANY value —
+        does NOT downgrade mixed CLIENT+OPERATOR to ANY.
+        """
         ts = TokenSection(tokens=[
             TokenModel(text="клиентское", type="WORD", channel="CLIENT", word_distance="2"),
             TokenModel(text=" ", type="WHITESPACE"),
@@ -228,7 +257,7 @@ class TestGroupIntoDisplayTokens:
         ])
         result = group_into_display_tokens(ts)
         assert len(result) == 1
-        assert result[0].channel == "ANY"
+        assert result[0].channel in ("CLIENT", "OPERATOR")
 
     def test_word_distance_max(self):
         """word_distance = max of all WORD distances in group."""

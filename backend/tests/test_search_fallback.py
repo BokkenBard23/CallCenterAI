@@ -1,33 +1,26 @@
-"""Tests for _fallback_match else-branch (bag-of-words matching).
+"""Tests for _fallback_match (bag-of-words fallback matching).
 
-Covers acceptance criteria for IP-1.1:
-  - _fallback_match uses bag-of-words matching (not sequential)
-  - Existing tests don't break
-  - New test for the else-branch
+Covers acceptance criteria for UI-2.5 Parser Rewrite — Batch D:
+  - _fallback_match returns List[Tuple[int, str, dict]] (turn_idx, speaker, detail_dict)
+  - detail_dict contains matched_text, matched_start, matched_end
+  - BOW matching: free word order within the window
+  - Greedy one-to-one: each window word matches at most one phrase word
+  - Channel constraint filtering (CLIENT/OPERATOR/ANY)
+  - WordDistance: intermediate words allowed between phrase words
+  - Empty phrase, no match, single match per turn, multiple turns
 
-The else-branch of _fallback_match is triggered when:
-  1. match_phrase_morphological_detailed from morph_matcher raises ImportError
-  2. match_phrase_sliding_window from smartlogger.matcher raises ImportError
-  → _fallback_match is called
-  → If same_lemma from morph_matcher also raises ImportError → use_morph=False
+The _fallback_match is triggered when morph_matcher / smartlogger are unavailable.
+It uses simple bag-of-words with exact string comparison (no morphology).
+Word order is FREE (per SmartLogger spec [4]).
 
-BOW vs Sequential:
-  Sequential: phrase words must appear in ORDER within the window
-  BOW: phrase words can appear in ANY ORDER, each matches exactly one window word
-
-Key BOW behaviors tested:
-  - Word reordering: "не хочу" matches "хочу не" (different order)
-  - Greedy one-to-one: "не не" does NOT match "не" (one window word per phrase word)
-  - word_distance: extra words allowed between phrase words
-  - Channel constraint filtering
-  - is_exact=True branch (sequential) vs is_exact=False branch (BOW)
+NOTE: _fallback_match does NOT honour is_exact — it always uses BOW.
+The is_exact flag is only used by the morph_matcher path (match_phrase_morphological_detailed).
 """
 
 from __future__ import annotations
 
 import sys
 import os
-from unittest.mock import patch
 
 import pytest
 
@@ -61,7 +54,7 @@ def _make_condition(
 
 
 def _make_turns(*pairs: tuple[str, str]) -> list[dict]:
-    """Helper to create turns: list of (speaker, text) → [{'speaker': ..., 'text': ...}]."""
+    """Helper: list of (speaker, text) → [{'speaker': ..., 'text': ...}]."""
     return [{"speaker": speaker, "text": text} for speaker, text in pairs]
 
 
@@ -71,23 +64,94 @@ def _make_channel_map(turns: list[dict]) -> dict[int, str]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Tests: BOW word reordering (core BOW vs sequential distinction)
+# 1. Return signature: List[Tuple[int, str, dict]]
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestFallbackReturnSignature:
+    """Verify _fallback_match returns List[Tuple[int, str, dict]] with detail keys."""
+
+    def test_returns_list_of_tuples(self) -> None:
+        """Result is a list of (int, str, dict) tuples."""
+        condition = _make_condition("отказ", is_exact=False)
+        turns = _make_turns(("Клиент", "я отказ от услуги"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        turn_idx, speaker, detail = result[0]
+        assert isinstance(turn_idx, int)
+        assert isinstance(speaker, str)
+        assert isinstance(detail, dict)
+
+    def test_detail_has_matched_text(self) -> None:
+        """detail_dict contains 'matched_text' key."""
+        condition = _make_condition("отказ", is_exact=False)
+        turns = _make_turns(("Клиент", "я отказ от услуги"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        _idx, _sp, detail = result[0]
+        assert "matched_text" in detail
+        assert "отказ" in detail["matched_text"]
+
+    def test_detail_has_matched_start(self) -> None:
+        """detail_dict contains 'matched_start' (int >= 0 for a real match)."""
+        condition = _make_condition("отказ", is_exact=False)
+        turns = _make_turns(("Клиент", "я отказ от услуги"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        _idx, _sp, detail = result[0]
+        assert "matched_start" in detail
+        assert isinstance(detail["matched_start"], int)
+        assert detail["matched_start"] >= 0
+
+    def test_detail_has_matched_end(self) -> None:
+        """detail_dict contains 'matched_end' (int >= 0 for a real match)."""
+        condition = _make_condition("отказ", is_exact=False)
+        turns = _make_turns(("Клиент", "я отказ от услуги"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        _idx, _sp, detail = result[0]
+        assert "matched_end" in detail
+        assert isinstance(detail["matched_end"], int)
+        assert detail["matched_end"] >= 0
+
+    def test_matched_offsets_correct(self) -> None:
+        """matched_start/matched_end point to the actual matched substring."""
+        condition = _make_condition("отказ", is_exact=False)
+        turn_text = "я отказ от услуги"
+        turns = _make_turns(("Клиент", turn_text))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        _idx, _sp, detail = result[0]
+        start = detail["matched_start"]
+        end = detail["matched_end"]
+        assert turn_text[start:end] == detail["matched_text"]
+        assert "отказ" in turn_text[start:end]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 2. BOW match — free word order (core BOW behaviour)
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestFallbackBowReordering:
-    """BOW matching: phrase words can appear in ANY ORDER in the window.
-
-    This is the core distinction between BOW and sequential matching.
-    Sequential matching requires phrase words to appear in order.
-    BOW matching allows any order within the window.
-    """
+    """BOW matching: phrase words can appear in ANY ORDER in the window."""
 
     def test_reversed_order_bow_matches(self) -> None:
-        """BOW: 'не хочу' matches 'хочу не' (reversed order).
-
-        Sequential matching would FAIL this test because 'не' does not
-        appear before 'хочу' in the turn text.
-        """
+        """BOW: 'не хочу' matches 'хочу не' (reversed order)."""
         condition = _make_condition("не хочу", is_exact=False, word_distance=2)
         turns = _make_turns(("Клиент", "я хочу не подключать"))
         channel_map = _make_channel_map(turns)
@@ -95,7 +159,7 @@ class TestFallbackBowReordering:
         result = _fallback_match(condition, turns, channel_map)
 
         assert len(result) == 1
-        _turn_idx, _speaker, detail = result[0]
+        _idx, _sp, detail = result[0]
         assert "хочу" in detail["matched_text"]
         assert "не" in detail["matched_text"]
 
@@ -109,17 +173,30 @@ class TestFallbackBowReordering:
 
         assert len(result) == 1
 
-    def test_sequential_would_fail_but_bow_succeeds(self) -> None:
-        """Explicit test: phrase 'b a' matches turn 'a b' via BOW, not sequential.
-
-        With sequential matching, 'b' would be searched first in 'a b',
-        not found at position 0 ('a'), found at position 1 ('b').
-        Then 'a' would need to come AFTER 'b', but there's nothing left → fail.
-        With BOW, 'b' matches position 1, 'a' matches position 0 → success.
-        """
+    def test_bow_succeeds_where_sequential_fails(self) -> None:
+        """Explicit: phrase 'отказываюсь платить' matches 'платить отказываюсь' via BOW."""
         condition = _make_condition("отказываюсь платить", is_exact=False, word_distance=3)
-        # Turn has words in different order than phrase
         turns = _make_turns(("Клиент", "платить отказываюсь"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+
+    def test_word_reorder_russian(self) -> None:
+        """BOW: 'не устраивает меня' matches 'меня не устраивает' (reordered)."""
+        condition = _make_condition("не устраивает меня", is_exact=False, word_distance=3)
+        turns = _make_turns(("Клиент", "меня не устраивает"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+
+    def test_word_reorder_threat(self) -> None:
+        """BOW: 'риск расторжения' matches 'расторжения риск' (reordered)."""
+        condition = _make_condition("риск расторжения", is_exact=False, word_distance=2)
+        turns = _make_turns(("Клиент", "расторжения риск договора"))
         channel_map = _make_channel_map(turns)
 
         result = _fallback_match(condition, turns, channel_map)
@@ -128,31 +205,65 @@ class TestFallbackBowReordering:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Tests: Greedy one-to-one matching
+# 3. Exact string match (no morphology)
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestFallbackExactStringMatch:
+    """_fallback_match uses exact string comparison (no morphology / no same_lemma).
+
+    'подключил' does NOT match 'подключивать' because there is no lemmatization.
+    Only exact lowercase string equality is used.
+    """
+
+    def test_exact_form_matches(self) -> None:
+        """Exact form: 'отказ' matches 'отказ'."""
+        condition = _make_condition("отказ", is_exact=False)
+        turns = _make_turns(("Клиент", "я отказ от услуги"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+
+    def test_morphological_variant_not_matched(self) -> None:
+        """'подключил' does NOT match phrase 'подключивать' (no lemmatization in fallback)."""
+        condition = _make_condition("подключивать", is_exact=False)
+        turns = _make_turns(("Клиент", "я подключил услуги"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 0, "Fallback uses exact string match — no morphology"
+
+    def test_case_insensitive(self) -> None:
+        """Matching is case-insensitive (both lowercased)."""
+        condition = _make_condition("Отказ", is_exact=False)
+        turns = _make_turns(("Клиент", "я ОТКАЗ от услуги"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 4. Greedy one-to-one matching
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestFallbackBowGreedyOneToOne:
-    """Greedy one-to-one: each window word can only match ONE phrase word.
+    """Greedy one-to-one: each window word can only match ONE phrase word."""
 
-    Example: phrase 'не не' should NOT match 'не' (only one word, used twice).
-    """
-
-    def test_same_word_twice_in_phrase_needs_two_instances(self) -> None:
-        """Phrase 'не не' requires TWO instances of 'не' in the window.
-
-        A single 'не' in the turn should NOT match because greedy one-to-one
-        prevents the same window word from matching two phrase words.
-        """
+    def test_same_word_twice_needs_two_instances(self) -> None:
+        """Phrase 'не не' requires TWO instances of 'не' in the window."""
         condition = _make_condition("не не", is_exact=False, word_distance=2)
-        # Only one 'не' in the turn
         turns = _make_turns(("Клиент", "я не хочу"))
         channel_map = _make_channel_map(turns)
 
         result = _fallback_match(condition, turns, channel_map)
 
-        assert len(result) == 0, "Should not match: only one 'не' available for two 'не' in phrase"
+        assert len(result) == 0, "Should not match: only one 'не' for two 'не' in phrase"
 
-    def test_same_word_twice_in_phrase_with_two_instances(self) -> None:
+    def test_same_word_twice_with_two_instances(self) -> None:
         """Phrase 'не не' matches when TWO instances of 'не' exist in window."""
         condition = _make_condition("не не", is_exact=False, word_distance=4)
         turns = _make_turns(("Клиент", "я не хочу не подключать"))
@@ -163,9 +274,8 @@ class TestFallbackBowGreedyOneToOne:
         assert len(result) == 1, "Should match: two 'не' instances available"
 
     def test_partial_match_fails(self) -> None:
-        """Phrase with 3 words, only 2 match → no result."""
+        """Phrase with 3 words, only 2 present → no result."""
         condition = _make_condition("отказ от диагностики", is_exact=False, word_distance=2)
-        # Only 'отказ' and 'от' present, no 'диагностики'
         turns = _make_turns(("Клиент", "отказ от услуги"))
         channel_map = _make_channel_map(turns)
 
@@ -175,100 +285,7 @@ class TestFallbackBowGreedyOneToOne:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Tests: is_exact=True vs is_exact=False (BOW vs sequential)
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestFallbackExactVsBow:
-    """Verify that is_exact=True uses sequential matching,
-    while is_exact=False uses BOW matching.
-    """
-
-    def test_exact_reversed_order_fails(self) -> None:
-        """is_exact=True: 'не хочу' does NOT match 'хочу не' (ordered required)."""
-        condition = _make_condition("не хочу", is_exact=True, word_distance=2)
-        # Turn has reversed order
-        turns = _make_turns(("Клиент", "хочу не"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 0, "Exact match requires ordered subsequence"
-
-    def test_bow_reversed_order_succeeds(self) -> None:
-        """is_exact=False: 'не хочу' DOES match 'хочу не' (any order)."""
-        condition = _make_condition("не хочу", is_exact=False, word_distance=2)
-        turns = _make_turns(("Клиент", "хочу не"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1, "BOW match allows any word order"
-
-    def test_exact_ordered_succeeds(self) -> None:
-        """is_exact=True: 'не хочу' matches 'не хочу' (correct order)."""
-        condition = _make_condition("не хочу", is_exact=True, word_distance=2)
-        turns = _make_turns(("Клиент", "я не хочу подключать"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Tests: word_distance
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestFallbackWordDistance:
-    """word_distance allows extra words between phrase words in the window."""
-
-    def test_word_distance_allows_gap(self) -> None:
-        """phrase 'не хочу' with word_distance=2 matches 'не очень хочу'."""
-        condition = _make_condition("не хочу", is_exact=False, word_distance=2)
-        # 'очень' is between 'не' and 'хочу', but within window
-        turns = _make_turns(("Клиент", "не очень хочу"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-    def test_word_distance_zero_still_bow(self) -> None:
-        """word_distance=0: window = exactly phrase words, but BOW still applies."""
-        condition = _make_condition("не хочу", is_exact=False, word_distance=0)
-        # Exact same words in same order — BOW still works
-        turns = _make_turns(("Клиент", "не хочу"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-    def test_word_distance_zero_reversed_bow(self) -> None:
-        """word_distance=0: reversed 'хочу не' still matches BOW with distance=0."""
-        condition = _make_condition("не хочу", is_exact=False, word_distance=0)
-        # Reversed order but window is exactly 2 words
-        turns = _make_turns(("Клиент", "хочу не"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1, "BOW with distance=0: window is exactly the phrase words"
-
-    def test_word_distance_too_small_no_match(self) -> None:
-        """word_distance=0: 'не очень хочу' doesn't match because window too small."""
-        condition = _make_condition("не хочу", is_exact=False, word_distance=0)
-        # 'очень' between them, window of 2 can't cover 3 words
-        turns = _make_turns(("Клиент", "не очень хочу"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 0, "window_size=2, turn has 3 words, gap too large"
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Tests: Channel constraint filtering
+# 5. Channel constraint filtering
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestFallbackChannelConstraint:
@@ -304,6 +321,16 @@ class TestFallbackChannelConstraint:
 
         assert len(result) == 1
 
+    def test_operator_constraint_skips_client(self) -> None:
+        """channel_constraint=OPERATOR: skips when speaker is 'Клиент'."""
+        condition = _make_condition("отказ", is_exact=False, channel="OPERATOR")
+        turns = _make_turns(("Клиент", "я отказ"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 0
+
     def test_any_constraint_matches_both(self) -> None:
         """channel_constraint=ANY: matches any speaker."""
         condition = _make_condition("отказ", is_exact=False, channel="ANY")
@@ -317,9 +344,81 @@ class TestFallbackChannelConstraint:
 
         assert len(result) == 2
 
+    def test_channel_filter_skips_non_matching_turns(self) -> None:
+        """CLIENT constraint: only CLIENT turns are searched."""
+        condition = _make_condition("отказ", is_exact=False, channel="CLIENT")
+        turns = _make_turns(
+            ("Сотрудник", "отказ"),
+            ("Клиент", "отказ"),
+        )
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        assert result[0][0] == 1  # turn index 1 (Клиент)
+
 
 # ═══════════════════════════════════════════════════════════════════════
-# Tests: Edge cases
+# 6. WordDistance — intermediate words allowed
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestFallbackWordDistance:
+    """word_distance allows extra words between phrase words in the window."""
+
+    def test_word_distance_allows_gap(self) -> None:
+        """phrase 'не хочу' with word_distance=2 matches 'не очень хочу'."""
+        condition = _make_condition("не хочу", is_exact=False, word_distance=2)
+        turns = _make_turns(("Клиент", "не очень хочу"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+
+    def test_word_distance_zero_same_order(self) -> None:
+        """word_distance=0: window = exactly phrase words (same order)."""
+        condition = _make_condition("не хочу", is_exact=False, word_distance=0)
+        turns = _make_turns(("Клиент", "не хочу"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+
+    def test_word_distance_zero_reversed_bow(self) -> None:
+        """word_distance=0: reversed 'хочу не' still matches via BOW (free order)."""
+        condition = _make_condition("не хочу", is_exact=False, word_distance=0)
+        turns = _make_turns(("Клиент", "хочу не"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1, "BOW with distance=0: window is exactly the phrase words"
+
+    def test_word_distance_too_small_no_match(self) -> None:
+        """word_distance=0: 'не очень хочу' doesn't match (window too small)."""
+        condition = _make_condition("не хочу", is_exact=False, word_distance=0)
+        turns = _make_turns(("Клиент", "не очень хочу"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 0, "window_size=2, turn has 3 words, gap too large"
+
+    def test_phrase_with_gap(self) -> None:
+        """BOW: 'не буду платить' matches 'не буду я платить' (gap with 'я')."""
+        condition = _make_condition("не буду платить", is_exact=False, word_distance=2)
+        turns = _make_turns(("Клиент", "не буду я платить"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 7. Edge cases
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestFallbackEdgeCases:
@@ -336,7 +435,7 @@ class TestFallbackEdgeCases:
         assert len(result) == 0
 
     def test_single_word_phrase(self) -> None:
-        """Single-word phrase matches correctly (exact token match in BOW mode)."""
+        """Single-word phrase matches correctly."""
         condition = _make_condition("отказ", is_exact=False)
         turns = _make_turns(("Клиент", "я отказ от услуги"))
         channel_map = _make_channel_map(turns)
@@ -358,7 +457,6 @@ class TestFallbackEdgeCases:
     def test_one_match_per_turn(self) -> None:
         """BOW: only one match per turn (break after first match)."""
         condition = _make_condition("не", is_exact=False)
-        # Turn contains 'не' multiple times
         turns = _make_turns(("Клиент", "не хочу не буду не знаю"))
         channel_map = _make_channel_map(turns)
 
@@ -382,7 +480,6 @@ class TestFallbackEdgeCases:
     def test_turn_too_short_skipped(self) -> None:
         """Turn with fewer words than phrase → skipped."""
         condition = _make_condition("не хочу подключивать", is_exact=False, word_distance=0)
-        # Turn has only 2 words, phrase has 3
         turns = _make_turns(("Клиент", "не хочу"))
         channel_map = _make_channel_map(turns)
 
@@ -390,139 +487,18 @@ class TestFallbackEdgeCases:
 
         assert len(result) == 0
 
-    def test_detail_has_offsets(self) -> None:
-        """Match detail includes matched_text, matched_start, matched_end."""
+    def test_empty_turns_list(self) -> None:
+        """Empty turns list → empty result."""
         condition = _make_condition("отказ", is_exact=False)
-        turns = _make_turns(("Клиент", "я отказ от услуги"))
-        channel_map = _make_channel_map(turns)
+        channel_map: dict[int, str] = {}
 
-        result = _fallback_match(condition, turns, channel_map)
+        result = _fallback_match(condition, [], channel_map)
 
-        assert len(result) == 1
-        _turn_idx, _speaker, detail = result[0]
-        assert "matched_text" in detail
-        assert "matched_start" in detail
-        assert "matched_end" in detail
-        assert detail["matched_start"] >= 0
-        assert detail["matched_end"] >= 0
+        assert len(result) == 0
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# Tests: use_morph=False path (no pymorphy3/same_lemma)
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestFallbackNoMorph:
-    """Tests with use_morph=False (same_lemma unavailable).
-
-    When pymorphy3 is not available, _fallback_match falls back to
-    exact token comparison (==) instead of morphological matching (same_lemma).
-
-    In this mode, BOW matching still applies — words can be in any order,
-    but each word must match EXACTLY (lowercase string equality).
-    """
-
-    @patch.dict("sys.modules", {"app.services.morph_matcher": None})
-    def test_bow_reordering_without_morph(self) -> None:
-        """BOW: word reordering works even without morphological matching.
-
-        'хочу не' matches phrase 'не хочу' — different order, exact tokens.
-        """
-        condition = _make_condition("не хочу", is_exact=False, word_distance=2)
-        turns = _make_turns(("Клиент", "хочу не"))
-        channel_map = _make_channel_map(turns)
-
-        with patch("app.services.search._fallback_match", wraps=_fallback_match) as spy:
-            # We call the original, but the import inside will fail due to sys.modules patch
-            # Actually, we need to make the import fail INSIDE _fallback_match
-            pass
-
-        # Since morph_matcher IS available in the test environment,
-        # we test the BOW behavior directly (use_morph=True also does BOW)
-        result = _fallback_match(condition, turns, channel_map)
-        assert len(result) == 1
-
-    def test_bow_greedy_one_to_one_without_morph_simulated(self) -> None:
-        """Simulate use_morph=False by using words that don't need lemmatization.
-
-        Without morph, 'не' == 'не' and 'хочу' == 'хочу' are exact matches.
-        BOW + greedy one-to-one still applies.
-        """
-        condition = _make_condition("не хочу", is_exact=False, word_distance=2)
-        # Reversed order — BOW should match
-        turns = _make_turns(("Клиент", "хочу не"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-    def test_morphological_variants_not_matched_without_same_lemma(self) -> None:
-        """Without same_lemma, 'подключил' does NOT match 'подключивать'.
-
-        This verifies that use_morph=False uses exact string comparison,
-        not morphological matching. With same_lemma, 'подключил' would
-        match 'подключивать' because they share the same lemma.
-        Without same_lemma, they're different tokens.
-        """
-        # We test this indirectly: if morph_matcher is available,
-        # 'подключил' matches 'подключивать'. Without it, it wouldn't.
-        # Since we can't easily disable morph_matcher in the test env,
-        # we verify the behavior difference with exact vs non-exact forms.
-        condition = _make_condition("отказ", is_exact=False)
-        # Exact form match — should work with or without morph
-        turns = _make_turns(("Клиент", "я отказ"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Tests: Russian BOW scenarios (realistic SmartLogger cases)
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestFallbackRussianBowScenarios:
-    """Realistic Russian-language BOW matching scenarios from SmartLogger.
-
-    These tests verify the core SmartLogger use case: phrase matching
-    in Russian dialogue where word order may vary.
-    """
-
-    def test_word_reorder_russian(self) -> None:
-        """BOW: 'не устраивает меня' matches 'меня не устраивает' (reordered)."""
-        condition = _make_condition("не устраивает меня", is_exact=False, word_distance=3)
-        turns = _make_turns(("Клиент", "меня не устраивает"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-    def test_word_reorder_threat(self) -> None:
-        """BOW: 'риск расторжения' matches 'расторжения риск' (reordered)."""
-        condition = _make_condition("риск расторжения", is_exact=False, word_distance=2)
-        turns = _make_turns(("Клиент", "расторжения риск договора"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-    def test_phrase_with_gap(self) -> None:
-        """BOW: 'не буду платить' matches 'не буду я платить' (gap with 'я')."""
-        condition = _make_condition("не буду платить", is_exact=False, word_distance=2)
-        turns = _make_turns(("Клиент", "не буду я платить"))
-        channel_map = _make_channel_map(turns)
-
-        result = _fallback_match(condition, turns, channel_map)
-
-        assert len(result) == 1
-
-    def test_same_word_repeated_in_phrase(self) -> None:
-        """Phrase 'не хочу не буду' requires TWO instances of 'не'."""
+    def test_same_word_repeated_in_phrase_sufficient(self) -> None:
+        """Phrase 'не хочу не буду' with two 'не' in turn → match."""
         condition = _make_condition("не хочу не буду", is_exact=False, word_distance=3)
-        # Two 'не' instances in the turn — should match
         turns = _make_turns(("Клиент", "я не хочу я не буду"))
         channel_map = _make_channel_map(turns)
 
@@ -540,17 +516,81 @@ class TestFallbackRussianBowScenarios:
 
         assert len(result) == 0
 
-    def test_sequential_fails_bow_succeeds_russian(self) -> None:
-        """Explicit: 'меня не устраивает' vs phrase 'не устраивает меня'.
 
-        Sequential: 'не' not found at start → would scan forward.
-        BOW: 'не' matches anywhere, 'устраивает' matches anywhere, 'меня' matches anywhere.
-        """
-        condition = _make_condition("не устраивает меня", is_exact=False, word_distance=3)
-        # Reversed order in turn
-        turns = _make_turns(("Клиент", "меня не устраивает"))
+# ═══════════════════════════════════════════════════════════════════════
+# 8. matched_text / matched_start / matched_end correctness
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestFallbackMatchDetailCorrectness:
+    """Verify matched_text, matched_start, matched_end are geometrically correct."""
+
+    def test_single_word_offsets(self) -> None:
+        """Single word 'отказ' at position 2 in 'я отказ от услуги'."""
+        condition = _make_condition("отказ", is_exact=False)
+        turn_text = "я отказ от услуги"
+        turns = _make_turns(("Клиент", turn_text))
         channel_map = _make_channel_map(turns)
 
         result = _fallback_match(condition, turns, channel_map)
 
-        assert len(result) == 1, "BOW should match reversed word order"
+        assert len(result) == 1
+        _idx, _sp, detail = result[0]
+        assert detail["matched_text"] == "отказ"
+        assert turn_text[detail["matched_start"]:detail["matched_end"]] == "отказ"
+
+    def test_multi_word_phrase_span(self) -> None:
+        """Two-word phrase span covers from first to last matched word."""
+        condition = _make_condition("не хочу", is_exact=False, word_distance=2)
+        turn_text = "я не очень хочу подключать"
+        turns = _make_turns(("Клиент", turn_text))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        _idx, _sp, detail = result[0]
+        # matched_text spans from 'не' to 'хочу' inclusive
+        assert "не" in detail["matched_text"]
+        assert "хочу" in detail["matched_text"]
+        assert turn_text[detail["matched_start"]:detail["matched_end"]] == detail["matched_text"]
+
+    def test_reversed_order_span_correct(self) -> None:
+        """Reversed order 'хочу не' → span covers 'хочу' to 'не'."""
+        condition = _make_condition("не хочу", is_exact=False, word_distance=2)
+        turn_text = "хочу не"
+        turns = _make_turns(("Клиент", turn_text))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        _idx, _sp, detail = result[0]
+        assert turn_text[detail["matched_start"]:detail["matched_end"]] == detail["matched_text"]
+
+    def test_speaker_returned_correctly(self) -> None:
+        """The speaker string in the tuple matches channel_map."""
+        condition = _make_condition("отказ", is_exact=False)
+        turns = _make_turns(("Клиент", "я отказ"))
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        _idx, speaker, _detail = result[0]
+        assert speaker == "Клиент"
+
+    def test_turn_index_returned_correctly(self) -> None:
+        """The turn index in the tuple is correct for multi-turn dialogues."""
+        condition = _make_condition("отказ", is_exact=False)
+        turns = _make_turns(
+            ("Клиент", "привет"),
+            ("Сотрудник", "здравствуйте"),
+            ("Клиент", "я отказ"),
+        )
+        channel_map = _make_channel_map(turns)
+
+        result = _fallback_match(condition, turns, channel_map)
+
+        assert len(result) == 1
+        turn_idx, _sp, _detail = result[0]
+        assert turn_idx == 2

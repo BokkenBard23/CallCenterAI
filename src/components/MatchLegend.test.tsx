@@ -15,10 +15,10 @@ const searchResultWithLevels: SearchResult = {
   segments: [],
   total_matches: 5,
   matches: [
-    { phrase_text: 'a', matched_text: 'a', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
-    { phrase_text: 'b1', matched_text: 'b1', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
-    { phrase_text: 'b2', matched_text: 'b2', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
-    { phrase_text: 'b3', matched_text: 'b3', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
+    { phrase_text: 'a', matched_text: 'a', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
+    { phrase_text: 'b1', matched_text: 'b1', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
+    { phrase_text: 'b2', matched_text: 'b2', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
+    { phrase_text: 'b3', matched_text: 'b3', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
   ],
   matches_by_level: { '1': 1, '2': 3 },
 };
@@ -67,12 +67,12 @@ describe('MatchLegend', () => {
       segments: [],
       total_matches: 6,
       matches: [
-        { phrase_text: 'a', matched_text: 'a', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q3', cascade_order: 3, is_exact_match: false },
-        { phrase_text: 'b1', matched_text: 'b1', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
-        { phrase_text: 'b2', matched_text: 'b2', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
-        { phrase_text: 'b3', matched_text: 'b3', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
-        { phrase_text: 'c1', matched_text: 'c1', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
-        { phrase_text: 'c2', matched_text: 'c2', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
+        { phrase_text: 'a', matched_text: 'a', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q3', cascade_order: 3, is_exact_match: false },
+        { phrase_text: 'b1', matched_text: 'b1', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
+        { phrase_text: 'b2', matched_text: 'b2', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
+        { phrase_text: 'b3', matched_text: 'b3', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q1', cascade_order: 1, is_exact_match: false },
+        { phrase_text: 'c1', matched_text: 'c1', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
+        { phrase_text: 'c2', matched_text: 'c2', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q2', cascade_order: 2, is_exact_match: false },
       ],
       matches_by_level: { '3': 1, '1': 3, '2': 2 },
     };
@@ -99,7 +99,7 @@ describe('MatchLegend', () => {
       segments: [],
       total_matches: 1,
       matches: [
-        { phrase_text: 'x', matched_text: 'x', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q4', cascade_order: 4, is_exact_match: false },
+        { phrase_text: 'x', matched_text: 'x', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q4', cascade_order: 4, is_exact_match: false },
       ],
       matches_by_level: { '4': 1 },
     };
@@ -113,7 +113,7 @@ describe('MatchLegend', () => {
       segments: [],
       total_matches: 1,
       matches: [
-        { phrase_text: 'x', matched_text: 'x', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'exact', word_distance_used: 1, quarter: 'Q99', cascade_order: 99, is_exact_match: false },
+        { phrase_text: 'x', matched_text: 'x', matched_start: -1, matched_end: -1, turn_index: 0, speaker: 'Клиент', match_type: 'morph_bow', word_distance_used: 1, quarter: 'Q99', cascade_order: 99, is_exact_match: false },
       ],
       matches_by_level: { '99': 1 },
     };

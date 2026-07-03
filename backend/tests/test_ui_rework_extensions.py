@@ -384,7 +384,13 @@ class TestXmlParserExtendedConditions:
 
     @pytest.mark.asyncio
     async def test_is_exception_detected_for_ne_prefix(self):
-        """Phrases starting with NE must set is_exception=True."""
+        """Phrases preceded by NOT (LEXEME) must set is_exception=True.
+
+        Per UI-2.5 new semantics: NE/НЕ/NOT is a LEXEME negation operator,
+        NOT a WORD. The recognized Latin negation operator is 'NOT' (not 'NE').
+        When it precedes a phrase, is_negated=True is set on the next
+        PhraseGroup, which xml_parser maps to is_exception=True.
+        """
         from app.services.xml_parser import parse_xml_bytes
 
         xml = (
@@ -393,7 +399,7 @@ class TestXmlParserExtendedConditions:
             '<Id>test-ne</Id>'
             '<Name>NE Test</Name>'
             '<Tokens>'
-            '<Token><Text>NE</Text><Type>WORD</Type><IsError>false</IsError>'
+            '<Token><Text>NOT</Text><Type>LEXEME</Type><IsError>false</IsError>'
             '<Properties Channel="ANY" WordDistance="2" />'
             '</Token>'
             '<Token><Text>ustraivaet</Text><Type>WORD</Type><IsError>false</IsError>'
@@ -474,7 +480,11 @@ class TestXmlParserExtendedConditions:
 
     @pytest.mark.asyncio
     async def test_is_exception_with_russian_ne(self):
-        """Russian 'НЕ' prefix must also set is_exception=True."""
+        """Russian 'НЕ' (LEXEME) prefix must also set is_exception=True.
+
+        Per UI-2.5 new semantics: НЕ must be a LEXEME token (not WORD) to act
+        as a negation operator. As a WORD it would be part of the phrase.
+        """
         from app.services.xml_parser import parse_xml_bytes
 
         xml = (
@@ -483,7 +493,7 @@ class TestXmlParserExtendedConditions:
             '<Id>test-rus-ne</Id>'
             '<Name>Rus NE Test</Name>'
             '<Tokens>'
-            '<Token><Text>\u043d\u0435</Text><Type>WORD</Type><IsError>false</IsError>'
+            '<Token><Text>\u043d\u0435</Text><Type>LEXEME</Type><IsError>false</IsError>'
             '<Properties Channel="ANY" WordDistance="2" />'
             '</Token>'
             '<Token><Text>ustraivaet</Text><Type>WORD</Type><IsError>false</IsError>'
@@ -692,7 +702,7 @@ class TestBackwardCompatibility:
             quarter="Q1",
             turn_index=0,
             speaker="Client",
-            match_type="sliding_window",
+            match_type="morph_bow",
             word_distance_used=1,
             cascade_order=1,
             is_exact_match=False,

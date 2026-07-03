@@ -24,7 +24,7 @@ const sampleSearchResult: SearchResult = {
       quarter: 'Словарь 1',
       turn_index: 1,
       speaker: 'Клиент',
-      match_type: 'exact',
+      match_type: 'morph_bow',
       word_distance_used: 0,
       cascade_order: 1,
       is_exact_match: true,

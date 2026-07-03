@@ -122,12 +122,18 @@ class PhraseGroup(BaseModel):
     channel:       Channel value (CLIENT / OPERATOR / ANY / "")
     word_distance: WordDistance from token Properties (max per group)
     is_exact:      True if phrase is inside TERMINAL quotes (exact match)
+    is_negated:    True if preceded by НЕ (LEXEME operator). NOT the same as word 'не' (WORD) in the phrase.
     """
 
     words: List[str] = Field(default_factory=list)
     channel: str = ""
     word_distance: int = 0
     is_exact: bool = False
+    is_negated: bool = Field(
+        False,
+        description="True if preceded by НЕ (LEXEME operator). "
+        "NOT the same as word 'не' (WORD) in the phrase.",
+    )
 
 
 class DisplayToken(BaseModel):
@@ -206,7 +212,9 @@ class DictionaryCondition(BaseModel):
     )
     is_exact: bool = Field(
         False,
-        description="If True, phrase must match EXACTLY (no morphological variation, no word reordering)",
+        description="If True, phrase words must match by EXACT string form "
+        "(no morphological variation). Word order is ALWAYS free. "
+        "WordDistance controls intermediate words as usual.",
     )
     # --- Extended fields for UI/UX rework (AG-UIREWORK-5) ---
     phrase_groups: List[List[str]] = Field(
@@ -348,7 +356,11 @@ class DictMatch(BaseModel):
     quarter: str = Field(..., description="Dictionary name that found this match")
     turn_index: int = Field(..., description="Turn where the match was found")
     speaker: str = Field(..., description="Speaker of the matched turn")
-    match_type: str = Field("sliding_window", description="Match algorithm used")
+    match_type: str = Field(
+        "morph_bow",
+        description="Match algorithm used: 'morph_bow' (morphological bag-of-words) "
+        "or 'exact_bow' (exact form, free order)",
+    )
     word_distance_used: int = Field(0, description="Hierarchy level within dictionary (1=root, 2=child, ...)")
     cascade_order: int = Field(1, description="Dictionary position in cascade sequence (1-based)")
     is_exact_match: bool = Field(

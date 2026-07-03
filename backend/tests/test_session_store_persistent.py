@@ -101,7 +101,7 @@ def _make_analysis(analysis_id: str = "ana1", session_id: str = "sess1") -> Anal
                     quarter="TestDict",
                     turn_index=0,
                     speaker="Клиент",
-                    match_type="sliding_window",
+                    match_type="morph_bow",
                     cascade_order=1,
                     is_exact_match=True,
                     channel_constraint="ANY",

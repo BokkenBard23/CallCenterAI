@@ -272,7 +272,7 @@ class TestMorphOnlySearch:
             quarter="Test Dict",
             turn_index=0,
             speaker="Клиент",
-            match_type="sliding_window",
+            match_type="morph_bow",
             word_distance_used=1,
             cascade_order=1,
             is_exact_match=False,

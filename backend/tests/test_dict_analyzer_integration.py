@@ -38,7 +38,6 @@ from app.services.logic_builder import (
     detect_warnings,
 )
 from app.services.morph_matcher import (
-    match_phrase_exact,
     match_phrase_morphological,
     match_phrase_morphological_detailed,
 )
@@ -332,11 +331,11 @@ class TestPerTokenProperties:
         # CLIENT is the most common non-ANY channel
         assert groups[0].channel == "CLIENT"
 
-    def test_phrase_group_word_distance_min(self):
-        """PhraseGroup word_distance must be the min of per-token distances.
+    def test_phrase_group_word_distance_first_nonzero(self):
+        """PhraseGroup word_distance = first non-zero per-token distance (per SmartLogger spec).
 
-        Rationale: if any word requires WordDistance=0 (strict contiguous),
-        the entire phrase must be contiguous. min() is the strictest constraint.
+        Rationale: all words in a phrase have the SAME WordDistance per spec [4].
+        The parser takes the first WORD token's WordDistance value (not min()).
         """
         token_section = TokenSection(tokens=[
             TokenModel(text="перейти", type="WORD", channel="CLIENT", word_distance="2"),
@@ -347,7 +346,7 @@ class TestPerTokenProperties:
         ])
         groups = build_phrase_groups(token_section)
         assert len(groups) == 1
-        assert groups[0].word_distance == 1  # min(2,5,1) = 1
+        assert groups[0].word_distance == 2  # first non-zero value (not min)
 
     def test_condition_uses_phrase_group_wd(self):
         """DictionaryCondition.word_distance must come from PhraseGroup."""
@@ -567,8 +566,13 @@ class TestExactMatching:
         # Turn 1 has "переходить" not "перейти" — should NOT match in exact mode
         assert 1 not in turn_indices
 
-    def test_exact_no_reordering(self):
-        """Exact mode must NOT match reordered words."""
+    def test_exact_bow_allows_reordering(self):
+        """exact_bow mode (is_exact=True) allows free word order (BOW).
+
+        NEW semantics (UI-2.5): exact_bow = exact form (no morphology) + free order.
+        Turn 2 'мтс перейти на' has the exact words 'перейти', 'на', 'мтс' —
+        reordered but still matches via BOW (no morphology, free order).
+        """
         matches = match_phrase_morphological_detailed(
             phrase_text="перейти на мтс",
             word_distance=1,
@@ -578,8 +582,8 @@ class TestExactMatching:
             is_exact=True,
         )
         turn_indices = [idx for idx, _, _ in matches]
-        # Turn 2 has "мтс перейти на" — reordered, must NOT match
-        assert 2 not in turn_indices
+        # Turn 2: "мтс перейти на" — reordered, exact words → matches via BOW
+        assert 2 in turn_indices
 
     def test_morphological_mode_matches_variants(self):
         """Non-exact (morphological) mode must match variants."""
@@ -609,14 +613,19 @@ class TestExactMatching:
         # Turn 0: "перейти на мтс" — "на" is 1 extra word, WD=1 allows it
         assert 0 in turn_indices
 
-    def test_match_phrase_exact_function(self):
-        """Direct call to match_phrase_exact must work identically."""
-        matches = match_phrase_exact(
+    def test_match_phrase_morphological_detailed_exact_passthrough(self):
+        """match_phrase_morphological_detailed with is_exact=True must enforce ordered subsequence.
+
+        This replaces the old match_phrase_exact test — match_phrase_exact was removed
+        in UI-2.5 (merged into match_phrase_morphological_detailed via is_exact flag).
+        """
+        matches = match_phrase_morphological_detailed(
             phrase_text="перейти на мтс",
             word_distance=0,
             channel_constraint="CLIENT",
             turns=self.EXACT_TURNS,
             channel_map=self.EXACT_CHANNEL,
+            is_exact=True,
         )
         turn_indices = [idx for idx, _, _ in matches]
         assert 0 in turn_indices
@@ -885,10 +894,10 @@ class TestBackwardCompatibility:
             turn_index=0,
             speaker="Клиент",
             is_exact_match=True,
-            match_type="exact",
+            match_type="exact_bow",
         )
         assert match.is_exact_match is True
-        assert match.match_type == "exact"
+        assert match.match_type == "exact_bow"
 
     @pytest.mark.asyncio
     async def test_dictionary_condition_is_exact_default(self):

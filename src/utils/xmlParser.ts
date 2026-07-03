@@ -32,20 +32,16 @@ import type {
  * Determine the channel for a group of WORD tokens.
  *
  * Rules (matches backend xml_parser.resolve_phrase_channel):
- *   - ANY in channels → ANY
- *   - Both CLIENT and OPERATOR → ANY
- *   - Only CLIENT → CLIENT
- *   - Only OPERATOR → OPERATOR
- *   - Empty set → ANY
+ *   - First non-empty non-ANY channel wins.
+ *   - Empty set / only ANY → ANY.
  */
 export function resolvePhraseChannel(channels: Set<ChannelType>): ChannelType {
   if (channels.size === 0) return 'ANY';
-  if (channels.has('ANY')) return 'ANY';
-  const hasClient = channels.has('CLIENT');
-  const hasOperator = channels.has('OPERATOR');
-  if (hasClient && hasOperator) return 'ANY';
-  if (hasClient) return 'CLIENT';
-  if (hasOperator) return 'OPERATOR';
+  for (const ch of channels) {
+    if (ch && ch !== 'ANY') {
+      return ch;
+    }
+  }
   return 'ANY';
 }
 
@@ -84,6 +80,7 @@ export function groupIntoDisplayTokens(rawTokens: RawToken[]): DisplayToken[] {
   let currentWords: string[] = [];
   let currentChannels: Set<ChannelType> = new Set();
   let currentDistances: number[] = [];
+  let currentHasError = false;
   let inQuotes = false;
 
   function flushGroup(): void {
@@ -108,13 +105,14 @@ export function groupIntoDisplayTokens(rawTokens: RawToken[]): DisplayToken[] {
       type: tokenType,
       channel,
       word_distance: wordDistance,
-      is_error: false,
+      is_error: currentHasError,
       is_exact: isExact,
     });
 
     currentWords = [];
     currentChannels = new Set();
     currentDistances = [];
+    currentHasError = false;
   }
 
   for (const tok of rawTokens) {
@@ -126,6 +124,7 @@ export function groupIntoDisplayTokens(rawTokens: RawToken[]): DisplayToken[] {
           flushGroup();
           inQuotes = false;
         } else {
+          flushGroup();
           inQuotes = true;
         }
       } else if (tok.text === '(' || tok.text === ')') {
@@ -162,7 +161,6 @@ export function groupIntoDisplayTokens(rawTokens: RawToken[]): DisplayToken[] {
         is_error: tok.is_error,
         is_exact: false,
       });
-      inQuotes = false;
       continue;
     }
 
@@ -173,6 +171,9 @@ export function groupIntoDisplayTokens(rawTokens: RawToken[]): DisplayToken[] {
       }
       if (tok.word_distance > 0) {
         currentDistances.push(tok.word_distance);
+      }
+      if (tok.is_error) {
+        currentHasError = true;
       }
       continue;
     }
@@ -234,7 +235,7 @@ function parseTokensFromElement(container: Element): DisplayToken[] {
 
       const wdStr = wdAttr || wdText;
       const wd = parseInt(wdStr, 10);
-      if (!isNaN(wd) && wd > 0) {
+      if (!isNaN(wd) && wd >= 0) {
         wordDistance = wd;
       }
     }

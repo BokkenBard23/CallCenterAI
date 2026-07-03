@@ -150,7 +150,7 @@ describe('history storage', () => {
           matched_end: -1,
           turn_index: 0,
           speaker: 'Клиент',
-          match_type: 'exact',
+          match_type: 'morph_bow',
           word_distance_used: 1,
           quarter: 'Словарь',
           cascade_order: 1,
