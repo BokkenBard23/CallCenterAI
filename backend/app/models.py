@@ -32,6 +32,17 @@ class DialogueTurn(BaseModel):
     speaker: str = Field(..., description="Speaker role: 'Клиент' or 'Сотрудник'")
     text: str = Field(..., description="Verbatim text of the turn")
     timestamp: Optional[str] = Field(None, description="Timestamp if available in RTF")
+    # Time-gap filtering (UI-2.6 ExtraLimitations): seconds from the start
+    # of the dialogue. None when RTF does not carry reliable timing — in that
+    # case _apply_time_gap_filter is a no-op (filtering skipped).
+    start_offset: Optional[float] = Field(
+        None,
+        description="Turn start offset in seconds from dialogue start (None if RTF lacks timing)",
+    )
+    end_offset: Optional[float] = Field(
+        None,
+        description="Turn end offset in seconds from dialogue start (None if RTF lacks timing)",
+    )
 
 
 class ParsedDialog(BaseModel):
@@ -482,6 +493,16 @@ class DictMatch(BaseModel):
     dict_level: int = Field(
         1,
         description="Dictionary level in hierarchy (1=Q1, 2=Q2, 3=Q3). Alias for word_distance_used, explicit for frontend.",
+    )
+    # --- Extended field for Remainder catch-all fallback (UI-2.6) ---
+    # Adding a new optional field with a default does NOT break the existing
+    # frontend contract (FE simply ignores unknown/false fields). Remainder
+    # matches are still included in `matches[]` like any other match — the
+    # `is_remainder` flag lets the FE render them distinctly if desired.
+    is_remainder: bool = Field(
+        False,
+        description="True if this match came from a <SpeechLabRemainderRequest> "
+        "catch-all fallback node. Always included in matches[] (does not affect GATE).",
     )
 
 
