@@ -36,6 +36,7 @@ from app.models import (
     SearchResult,
     TextSegment,
 )
+from app.services.logic_builder import build_phrase_logic_tree
 
 logger = logging.getLogger(__name__)
 
@@ -162,25 +163,16 @@ def _search_recursive(
     if node.conditions:
         # This node has conditions — it owns this level
         matched_original_indices: Set[int] = set()
+        matched_phrase_texts: Set[str] = set()
         node_matches: List[DictMatch] = []
         suppressed = False
 
         for condition in node.conditions:
-            # Check if this is a negated condition (НЕ operator)
-            is_negated = getattr(condition, 'is_exception', False)
-
-            # Also check PhraseGroup.is_negated if available
-            # (from corrected logic_builder)
-            pg_negated = False
-            if node.phrase_groups:
-                for pg in node.phrase_groups:
-                    if hasattr(pg, 'is_negated') and pg.is_negated:
-                        phrase_text = " ".join(pg.words)
-                        if phrase_text == condition.text:
-                            pg_negated = True
-                            break
-
-            condition_is_negated = is_negated or pg_negated
+            # Single source of truth for НЕ: condition.is_exception
+            # (set in xml_parser._parse_tokens_enriched from pg.is_negated).
+            # The redundant PhraseGroup.is_negated re-scan loop (RISK-1/N2)
+            # has been removed — is_exception already captures the same signal.
+            condition_is_negated = getattr(condition, "is_exception", False)
 
             condition_matches = _match_condition(
                 condition=condition,
@@ -223,6 +215,11 @@ def _search_recursive(
                     dict_level=level,
                 ))
 
+            # Track which positive phrase texts matched — used by the
+            # phrase_logic_tree GATE below (N15).
+            if condition_matches:
+                matched_phrase_texts.add(condition.text)
+
         # Apply suppression
         if not suppressed:
             all_matches.extend(node_matches)
@@ -230,9 +227,23 @@ def _search_recursive(
         level_key = str(level)
         level_counts[level_key] = len(node_matches) if not suppressed else 0
 
-        # GATE for children: if this node matched → children search ALL turns
+        # GATE for children (N15): the gate opens iff the phrase_logic_tree
+        # of this node evaluates True (ALL AND-children match, ANY OR-child
+        # matches, NOT-child not matched) AND the node was not suppressed by
+        # an explicit НЕ-condition.
+        #
+        # Backward-compat: when node.phrase_groups is empty (e.g. manually
+        # constructed test fixtures without phrase_groups, or legacy parsed
+        # nodes), fall back to the legacy "any positive match" semantics —
+        # gate opens iff at least one positive condition matched.
+        if node.phrase_groups:
+            node_matched = evaluate_phrase_logic_tree(
+                node.phrase_groups, matched_phrase_texts
+            )
+        else:
+            node_matched = bool(matched_original_indices)
         child_allowed: Optional[Set[int]] = (
-            None if (matched_original_indices and not suppressed) else set()
+            None if (node_matched and not suppressed) else set()
         )
 
         for child in node.children:
@@ -279,10 +290,15 @@ def _match_condition(
 ) -> List[Tuple[int, str, dict]]:
     """Match a single condition against dialogue turns.
 
-    CHANGES from original:
+    CHANGES from original [1][2][4]:
       1. INV-8 REMOVED: is_exact from XML is now passed through [1][2][4].
          Quotes mean exact word form (no lemmatization) but FREE word order.
-      2. WITHOUT filter applied from condition.without_list [1][3].
+      2. V3: WITHOUT filter from condition.without_list is NO LONGER applied —
+         real SmartLogger dictionaries store time-gap limits in
+         <ExtraLimitations> as EventType/SearchSpecifier/Limits, not as
+         <Tokens>. without_list is always [] for real dictionaries.
+         Time-gap filtering (OnlyInGaps / ExcludeGaps) against real turn
+         timestamps is TODO; see _check_without for the deprecation comment.
 
     Args:
         condition: The phrase condition to search for.
@@ -292,14 +308,7 @@ def _match_condition(
     Returns:
         List of (turn_index, speaker, detail_dict) tuples.
     """
-    matches = _do_match(condition, turns, channel_map)
-
-    # Apply WITHOUT filter from XML <ExtraLimitations>
-    if matches and condition.without_list:
-        if _check_without(turns, condition.without_list):
-            return []
-
-    return matches
+    return _do_match(condition, turns, channel_map)
 
 
 def _do_match(
@@ -346,12 +355,24 @@ def _do_match(
 
 
 def _check_without(turns: List[dict], without_list: List[str]) -> bool:
-    """Check if any WITHOUT phrase appears in the dialogue.
+    """DEPRECATED: without_list always [] for real dictionaries.
+
+    V3 (smartlogger-xml-verification.md): real <ExtraLimitations> stores
+    EventType/SearchSpecifier/Settings/Limits — NEVER <Tokens>. Therefore
+    condition.without_list is always [] in production, and this function
+    is never called from _match_condition.
+
+    Time-gap filtering (OnlyInGaps / ExcludeGaps) against real turn
+    timestamps is a TODO — only the ExtraLimitation model + parser exist.
+
+    Kept for legacy test fixtures that synthesise without_list manually.
 
     Uses morphological BOW matching (same as main search) to avoid
     asymmetry where main search finds morphological variants but
     WITHOUT check misses them [1].
     """
+    if not without_list:
+        return False
     try:
         from app.services.morph_matcher import match_phrase_morphological
         for phrase in without_list:
@@ -377,6 +398,73 @@ def _check_without(turns: List[dict], without_list: List[str]) -> bool:
         pass
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# phrase_logic_tree GATE (N15)
+# ---------------------------------------------------------------------------
+
+
+def _eval_logic_node(node, matched_phrase_texts: Set[str]) -> bool:
+    """Recursively evaluate a LogicNode against matched phrase texts.
+
+    - PHRASE: True iff its phrase_text is in matched_phrase_texts
+    - NOT:    True iff child evaluates False
+    - AND:    True iff ALL children evaluate True
+    - OR:     True iff ANY child evaluates True
+    - ATTRIBUTE / GROUP / leaf without recognised type: True (vacuous)
+    """
+    nt = node.node_type
+    if nt == "PHRASE":
+        text = node.payload.get("text", "") if node.payload else ""
+        return text in matched_phrase_texts
+    if nt == "NOT":
+        if not node.children:
+            return True
+        return not _eval_logic_node(node.children[0], matched_phrase_texts)
+    if nt == "AND":
+        if not node.children:
+            # Empty AND = no conditions = gate open (container semantics)
+            return True
+        return all(
+            _eval_logic_node(c, matched_phrase_texts) for c in node.children
+        )
+    if nt == "OR":
+        if not node.children:
+            return False
+        return any(
+            _eval_logic_node(c, matched_phrase_texts) for c in node.children
+        )
+    # ATTRIBUTE / GROUP / unknown leaf — treat as vacuously True
+    return True
+
+
+def evaluate_phrase_logic_tree(
+    phrase_groups, matched_phrase_texts: Set[str]
+) -> bool:
+    """Evaluate the AND/OR/NOT phrase_logic_tree as a GATE (N15).
+
+    Builds the logic tree via build_phrase_logic_tree and evaluates it:
+      - ALL AND-children must match
+      - ANY OR-child must match
+      - NOT-child must NOT match
+
+    For an empty phrase_groups list (no conditions / container node),
+    returns True — the gate is open (consistent with prior behaviour where
+    a node without positive conditions was treated as a passthrough).
+
+    Args:
+        phrase_groups: List[PhraseGroup] from the dictionary node.
+        matched_phrase_texts: Set of condition.text strings that matched
+            the dialogue for this node.
+
+    Returns:
+        True iff the phrase_logic_tree evaluates True.
+    """
+    if not phrase_groups:
+        return True
+    tree = build_phrase_logic_tree(phrase_groups)
+    return _eval_logic_node(tree, matched_phrase_texts)
 
 
 # ---------------------------------------------------------------------------

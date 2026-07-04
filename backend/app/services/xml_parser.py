@@ -40,8 +40,11 @@ from app.models import (
     DictionaryNode,
     DictionaryValidation,
     DisplayToken,
+    ExtraLimitation,
+    ExtraLimitationLimit,
     LogicNode,
     PhraseGroup,
+    PhraseGroupVisual,
     SavedState,
     SearchAttribute,
     TokenModel,
@@ -357,12 +360,26 @@ def _parse_tokens_enriched(
     if not phrase_groups:
         return conditions, warnings
 
-    without_list = _parse_without_list(element)
+    # V2/V3: parse real <ExtraLimitations> structure (EventType/SearchSpecifier/
+    # Settings/Limits). without_list is kept [] for legacy compat — real
+    # dictionaries never contain <Tokens> inside <ExtraLimitation>.
+    extra_limitations = _parse_extra_limitations(element)
+    without_list: List[str] = []  # DEPRECATED — kept for legacy model field
 
     # Compute once, share across all conditions of this node
     nested_phrases = _extract_nested_phrases(element)
-    all_group_words: List[List[str]] = [
-        pg.words for pg in phrase_groups if pg.words
+    # UI-2.6 BUG-2: build PhraseGroupVisual-compatible objects so the FE contract
+    # (src/types/api.ts PhraseGroupVisual: {words, is_or_group, is_exception}) is
+    # satisfied directly by the API response. Each PhraseGroup is a separate
+    # OR-alternative by definition (operator ИЛИ separates groups); is_exception
+    # mirrors pg.is_negated so the FE can render a warning icon per group.
+    phrase_groups_visual: List[PhraseGroupVisual] = [
+        PhraseGroupVisual(
+            words=list(pg.words),
+            is_or_group=True,
+            is_exception=bool(getattr(pg, "is_negated", False)),
+        )
+        for pg in phrase_groups if pg.words
     ]
 
     for pg in phrase_groups:
@@ -387,9 +404,11 @@ def _parse_tokens_enriched(
         # Do NOT check words[0].upper() — that confuses WORD "не" with LEXEME "НЕ"
         is_exception = getattr(pg, "is_negated", False)
 
-        exception_phrases: List[str] = []
-        if is_exception:
-            exception_phrases.append(phrase_text)
+        # UI-2.6 BUG-8: exception_phrases previously appended phrase_text to itself
+        # (self-referential) when is_exception was True — this duplicated the phrase
+        # as its own exception. Suppression now works solely through is_exception
+        # on the matching PhraseGroup; exception_phrases stays [] for FE compat.
+        exception_phrases: List[str] = []  # DEPRECATED: suppression via is_exception
 
         conditions.append(
             DictionaryCondition(
@@ -399,10 +418,11 @@ def _parse_tokens_enriched(
                 channel_constraint=channel,
                 without_list=without_list,
                 is_exact=pg.is_exact,
-                phrase_groups=list(all_group_words),
+                phrase_groups=phrase_groups_visual,
                 nested_phrases=nested_phrases,
                 is_exception=is_exception,
                 exception_phrases=exception_phrases,
+                extra_limitations=extra_limitations,
             )
         )
 
@@ -460,45 +480,124 @@ def _extract_nested_phrases(element: etree._Element) -> List[str]:
     return nested
 
 
-def _parse_without_list(element: etree._Element) -> List[str]:
-    """Parse <ExtraLimitations> for WITHOUT phrases.
+def _parse_extra_limitations(element: etree._Element) -> List[ExtraLimitation]:
+    """Parse <ExtraLimitations> for time-gap limits (V2/V3 real format).
 
-    FIXED: Now splits by ALL LEXEME separators within ExtraLimitations,
-    not just accumulating all WORD tokens into one string.
+    Real SmartLogger dictionaries store:
+      <ExtraLimitations>
+        <ExtraLimitation>
+          <EventType>StartEnd | Parent</EventType>
+          <SearchSpecifier>OnlyInGaps | ExcludeGaps | ...</SearchSpecifier>
+          <Settings />               (always self-closing in real dicts)
+          <Limits>
+            <Limit>
+              <Value>{int}</Value>
+              <ValueType>Seconds | Words | ...</ValueType>
+              <Channel>CLIENT | OPERATOR | ANY</Channel>
+              <Enabled>true | false</Enabled>
+              <LimitType>First | Last</LimitType>           <!-- StartEnd only -->
+              <EventSelector>Each | First | ...</EventSelector>  <!-- Parent only -->
+              <SearchDirection>Before | After</SearchDirection>  <!-- Parent only -->
+            </Limit>
+          </Limits>
+        </ExtraLimitation>
+      </ExtraLimitations>
+
+    There is NO <Tokens> inside <ExtraLimitation> in real dictionaries
+    (verified against 10 real samples in smartlogger-xml-verification.md).
+    Legacy <Tokens>-based WITHOUT parsing is preserved by _parse_without_list
+    (kept for backward compat with synthetic test fixtures) but the result
+    is NOT applied to DictionaryCondition.without_list (always []).
+
+    Args:
+        element: The SpeechLabRequest XML element.
+
+    Returns:
+        List of ExtraLimitation instances. Empty if <ExtraLimitations>
+        is missing or self-closing.
+    """
+    limitations: List[ExtraLimitation] = []
+    extra_elem = element.find("ExtraLimitations")
+    if extra_elem is None:
+        return limitations
+
+    for limitation in extra_elem.findall("ExtraLimitation"):
+        event_type = _get_text_or_empty(limitation, "EventType")
+        search_specifier = _get_text_or_empty(limitation, "SearchSpecifier")
+
+        # <Settings /> — collect any sub-keys (defensive: real dicts have none)
+        settings: Dict[str, Any] = {}
+        settings_elem = limitation.find("Settings")
+        if settings_elem is not None:
+            for child in settings_elem:
+                tag = _get_local_tag(child)
+                if child.text:
+                    settings[tag] = child.text.strip()
+
+        limits: List[ExtraLimitationLimit] = []
+        limits_elem = limitation.find("Limits")
+        if limits_elem is not None:
+            for limit_elem in limits_elem.findall("Limit"):
+                value_text = _get_text_or_empty(limit_elem, "Value")
+                try:
+                    value = int(value_text) if value_text else 0
+                except ValueError:
+                    value = 0
+
+                channel = _get_text_or_empty(limit_elem, "Channel") or "ANY"
+                channel = channel.upper() if channel else "ANY"
+                if channel not in _VALID_CHANNELS:
+                    channel = "ANY"
+
+                enabled_text = _get_text_or_empty(limit_elem, "Enabled")
+                enabled = _parse_bool(enabled_text) if enabled_text else False
+
+                limit_type = _get_text(limit_elem, "LimitType")
+                event_selector = _get_text(limit_elem, "EventSelector")
+                search_direction = _get_text(limit_elem, "SearchDirection")
+
+                limits.append(
+                    ExtraLimitationLimit(
+                        value=value,
+                        value_type=_get_text_or_empty(limit_elem, "ValueType") or "Seconds",
+                        channel=channel,
+                        enabled=enabled,
+                        limit_type=limit_type,
+                        event_selector=event_selector,
+                        search_direction=search_direction,
+                    )
+                )
+
+        limitations.append(
+            ExtraLimitation(
+                event_type=event_type,
+                search_specifier=search_specifier,
+                settings=settings,
+                limits=limits,
+            )
+        )
+
+    return limitations
+
+
+def _parse_without_list(element: etree._Element) -> List[str]:
+    """DEPRECATED: real dictionaries have NO <Tokens> inside <ExtraLimitations>.
+
+    V2/V3 (smartlogger-xml-verification.md): real <ExtraLimitation> stores
+    EventType/SearchSpecifier/Settings/Limits, never <Tokens>. Therefore
+    this function ALWAYS returns [] for real dictionaries.
+
+    Kept only for legacy test fixtures that synthesise <Tokens> inside
+    <ExtraLimitations>. New code MUST use _parse_extra_limitations instead.
 
     Args:
         element: The SpeechLabRequest element.
 
     Returns:
-        List of WITHOUT phrase strings.
+        Always [] (V2/V3 behaviour). WITHOUT filtering is dead —
+        see search._check_without for the deprecation comment.
     """
-    without_list: List[str] = []
-    extra_elem = element.find("ExtraLimitations")
-    if extra_elem is None:
-        return without_list
-
-    for limitation in extra_elem.findall("ExtraLimitation"):
-        tokens_elem = limitation.find("Tokens")
-        if tokens_elem is None:
-            continue
-
-        phrase_words: List[str] = []
-        for token_elem in tokens_elem.findall("Token"):
-            text = _get_text(token_elem, "Text") or ""
-            token_type = _get_text(token_elem, "Type") or ""
-
-            if token_type == "WORD" and text:
-                phrase_words.append(text)
-            elif token_type == "LEXEME" and text.upper() in _ALL_LEXEME_SEPARATORS:
-                # Flush: each LEXEME-separated group is a separate WITHOUT phrase
-                if phrase_words:
-                    without_list.append(" ".join(phrase_words))
-                    phrase_words = []
-
-        if phrase_words:
-            without_list.append(" ".join(phrase_words))
-
-    return without_list
+    return []
 
 
 # ---------------------------------------------------------------------------

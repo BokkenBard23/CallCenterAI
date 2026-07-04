@@ -27,8 +27,13 @@ import pytest
 # Ensure backend app is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.models import DictionaryCondition
-from app.services.search import _fallback_match
+from app.models import DictionaryCondition, DictionaryNode, PhraseGroup, \
+    ParsedDialog, DialogueTurn
+from app.services.search import (
+    _fallback_match,
+    evaluate_phrase_logic_tree,
+    run_hierarchical_search,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -594,3 +599,210 @@ class TestFallbackMatchDetailCorrectness:
         assert len(result) == 1
         turn_idx, _sp, _detail = result[0]
         assert turn_idx == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 9. phrase_logic_tree GATE (N15) — logic-tree-driven cascade GATE
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _make_dialog(turns: list[tuple[str, str]]) -> ParsedDialog:
+    return ParsedDialog(
+        filename="test.rtf",
+        turns=[
+            DialogueTurn(turn_index=i, text=text, speaker=speaker)
+            for i, (speaker, text) in enumerate(turns)
+        ],
+    )
+
+
+class TestPhraseLogicTreeGate:
+    """UI-2.6 N15: the GATE for child nodes now uses the phrase_logic_tree
+    (ALL AND-children must match, ANY OR-child must match), instead of the
+    legacy "any positive match opens the gate" semantics.
+    """
+
+    @pytest.mark.asyncio
+    async def test_and_gate_requires_both_phrases_to_open(self) -> None:
+        """Node with A И B: child searched only if BOTH A and B matched.
+
+        With the legacy "any match" semantics, matching just A would open
+        the GATE. With the new logic-tree GATE, AND requires both.
+        """
+        dialog = _make_dialog([
+            ("Клиент", "alpha"),  # only A matches
+            ("Клиент", "child_search_marker"),
+        ])
+
+        child = DictionaryNode(
+            id="child", name="Child",
+            conditions=[_make_condition("child_search_marker", channel="CLIENT")],
+            children=[],
+        )
+        # Parent has phrase_groups encoding A И B (operator=AND on B)
+        parent = DictionaryNode(
+            id="parent", name="Parent",
+            conditions=[
+                _make_condition("alpha", channel="CLIENT"),
+                _make_condition("beta", channel="CLIENT"),
+            ],
+            phrase_groups=[
+                PhraseGroup(words=["alpha"]),
+                PhraseGroup(words=["beta"], operator="AND"),
+            ],
+            children=[child],
+        )
+
+        result = await run_hierarchical_search(
+            dialog=dialog, dictionaries=[parent], cascade=False,
+        )
+
+        # Only A matched → AND gate NOT satisfied → child NOT searched
+        child_matches = [m for m in result.matches if m.quarter == "Child"]
+        assert len(child_matches) == 0, (
+            "AND gate must require BOTH phrases — child should not be searched"
+        )
+
+    @pytest.mark.asyncio
+    async def test_and_gate_opens_when_both_phrases_matched(self) -> None:
+        """Node with A И B: when both A and B matched somewhere, child is searched."""
+        dialog = _make_dialog([
+            ("Клиент", "alpha beta"),  # both match here
+            ("Клиент", "child_marker"),
+        ])
+
+        child = DictionaryNode(
+            id="child", name="Child",
+            conditions=[_make_condition("child_marker", channel="CLIENT")],
+            children=[],
+        )
+        parent = DictionaryNode(
+            id="parent", name="Parent",
+            conditions=[
+                _make_condition("alpha", channel="CLIENT"),
+                _make_condition("beta", channel="CLIENT"),
+            ],
+            phrase_groups=[
+                PhraseGroup(words=["alpha"]),
+                PhraseGroup(words=["beta"], operator="AND"),
+            ],
+            children=[child],
+        )
+
+        result = await run_hierarchical_search(
+            dialog=dialog, dictionaries=[parent], cascade=False,
+        )
+
+        child_matches = [m for m in result.matches if m.quarter == "Child"]
+        assert len(child_matches) == 1, (
+            "AND gate satisfied (both matched) → child should be searched"
+        )
+
+    @pytest.mark.asyncio
+    async def test_or_gate_opens_with_either_phrase(self) -> None:
+        """Node with A ИЛИ B: matching just A is enough to open the gate."""
+        dialog = _make_dialog([
+            ("Клиент", "alpha"),  # only A
+            ("Клиент", "child_marker"),
+        ])
+
+        child = DictionaryNode(
+            id="child", name="Child",
+            conditions=[_make_condition("child_marker", channel="CLIENT")],
+            children=[],
+        )
+        parent = DictionaryNode(
+            id="parent", name="Parent",
+            conditions=[
+                _make_condition("alpha", channel="CLIENT"),
+                _make_condition("beta", channel="CLIENT"),
+            ],
+            phrase_groups=[
+                PhraseGroup(words=["alpha"]),
+                PhraseGroup(words=["beta"], operator="OR"),
+            ],
+            children=[child],
+        )
+
+        result = await run_hierarchical_search(
+            dialog=dialog, dictionaries=[parent], cascade=False,
+        )
+
+        child_matches = [m for m in result.matches if m.quarter == "Child"]
+        assert len(child_matches) == 1, (
+            "OR gate opens with EITHER phrase — A alone is enough"
+        )
+
+    @pytest.mark.asyncio
+    async def test_or_gate_does_not_open_when_neither_matched(self) -> None:
+        """Node with A ИЛИ B: if neither A nor B matched, child is NOT searched."""
+        dialog = _make_dialog([
+            ("Клиент", "gamma"),  # neither A nor B
+            ("Клиент", "child_marker"),
+        ])
+
+        child = DictionaryNode(
+            id="child", name="Child",
+            conditions=[_make_condition("child_marker", channel="CLIENT")],
+            children=[],
+        )
+        parent = DictionaryNode(
+            id="parent", name="Parent",
+            conditions=[
+                _make_condition("alpha", channel="CLIENT"),
+                _make_condition("beta", channel="CLIENT"),
+            ],
+            phrase_groups=[
+                PhraseGroup(words=["alpha"]),
+                PhraseGroup(words=["beta"], operator="OR"),
+            ],
+            children=[child],
+        )
+
+        result = await run_hierarchical_search(
+            dialog=dialog, dictionaries=[parent], cascade=False,
+        )
+
+        child_matches = [m for m in result.matches if m.quarter == "Child"]
+        assert len(child_matches) == 0, (
+            "OR gate stays closed when no operand matched"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 10. evaluate_phrase_logic_tree — direct unit-level contract
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEvaluatePhraseLogicTreeContract:
+    """Direct tests for evaluate_phrase_logic_tree (no run_hierarchical_search)."""
+
+    def test_empty_phrase_groups_returns_true(self) -> None:
+        assert evaluate_phrase_logic_tree([], set()) is True
+
+    def test_single_phrase(self) -> None:
+        groups = [PhraseGroup(words=["a"])]
+        assert evaluate_phrase_logic_tree(groups, {"a"}) is True
+        assert evaluate_phrase_logic_tree(groups, set()) is False
+
+    def test_and_combination(self) -> None:
+        groups = [
+            PhraseGroup(words=["a"]),
+            PhraseGroup(words=["b"], operator="AND"),
+        ]
+        assert evaluate_phrase_logic_tree(groups, {"a", "b"}) is True
+        assert evaluate_phrase_logic_tree(groups, {"a"}) is False
+
+    def test_or_combination(self) -> None:
+        groups = [
+            PhraseGroup(words=["a"]),
+            PhraseGroup(words=["b"], operator="OR"),
+        ]
+        assert evaluate_phrase_logic_tree(groups, {"a"}) is True
+        assert evaluate_phrase_logic_tree(groups, {"b"}) is True
+        assert evaluate_phrase_logic_tree(groups, set()) is False
+
+    def test_not_combination(self) -> None:
+        groups = [PhraseGroup(words=["x"], is_negated=True)]
+        assert evaluate_phrase_logic_tree(groups, set()) is True
+        assert evaluate_phrase_logic_tree(groups, {"x"}) is False

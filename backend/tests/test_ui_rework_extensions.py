@@ -29,6 +29,7 @@ from app.models import (
     FeedbackRequest,
     FeedbackResponse,
     PhraseGroup,
+    PhraseGroupVisual,
     ParsedDialog,
     DialogueTurn,
     SearchResult,
@@ -130,14 +131,20 @@ class TestDictionaryConditionExtendedFields:
         assert cond.exception_phrases == []
 
     def test_phrase_groups_or_alternatives(self):
-        """phrase_groups must store OR-group word lists."""
+        """phrase_groups must store OR-group PhraseGroupVisual objects."""
         cond = DictionaryCondition(
             text="test1",
-            phrase_groups=[["word1", "word2"], ["word3", "word4", "word5"]],
+            phrase_groups=[
+                PhraseGroupVisual(words=["word1", "word2"], is_or_group=True, is_exception=False),
+                PhraseGroupVisual(words=["word3", "word4", "word5"], is_or_group=True, is_exception=False),
+            ],
         )
         assert len(cond.phrase_groups) == 2
-        assert cond.phrase_groups[0] == ["word1", "word2"]
-        assert cond.phrase_groups[1] == ["word3", "word4", "word5"]
+        assert cond.phrase_groups[0].words == ["word1", "word2"]
+        assert cond.phrase_groups[1].words == ["word3", "word4", "word5"]
+        # FE contract fields preserved
+        assert cond.phrase_groups[0].is_or_group is True
+        assert cond.phrase_groups[0].is_exception is False
 
     def test_nested_phrases(self):
         """nested_phrases must store phrases from child dictionaries."""
@@ -148,14 +155,18 @@ class TestDictionaryConditionExtendedFields:
         assert cond.nested_phrases == ["child phrase 1", "child phrase 2"]
 
     def test_is_exception_true(self):
-        """is_exception=True for negation-marked phrases."""
+        """is_exception=True for negation-marked phrases.
+
+        Note: exception_phrases is DEPRECATED (UI-2.6 BUG-8) — always [].
+        Suppression works via is_exception on the matching PhraseGroup.
+        """
         cond = DictionaryCondition(
             text="NE ustraivaet",
             is_exception=True,
-            exception_phrases=["ustraivaet"],
+            # exception_phrases omitted — defaults to [] (deprecated field)
         )
         assert cond.is_exception is True
-        assert cond.exception_phrases == ["ustraivaet"]
+        assert cond.exception_phrases == []
 
     def test_is_exception_default_false(self):
         """is_exception defaults to False for normal phrases."""
@@ -181,7 +192,7 @@ class TestDictionaryConditionExtendedFields:
             channel_constraint="CLIENT",
             without_list=["cancel"],
             is_exact=True,
-            phrase_groups=[["test"]],
+            phrase_groups=[PhraseGroupVisual(words=["test"])],
             nested_phrases=["child"],
             is_exception=False,
             exception_phrases=[],
@@ -194,7 +205,9 @@ class TestDictionaryConditionExtendedFields:
         assert cond.without_list == ["cancel"]
         assert cond.is_exact is True
         # New fields
-        assert cond.phrase_groups == [["test"]]
+        assert len(cond.phrase_groups) == 1
+        assert cond.phrase_groups[0].words == ["test"]
+        assert cond.phrase_groups[0].is_or_group is True
         assert cond.nested_phrases == ["child"]
         assert cond.is_exception is False
         assert cond.exception_phrases == []
@@ -375,12 +388,18 @@ class TestXmlParserExtendedConditions:
         node, validation = await parse_xml_bytes(xml, "test.xml")
         assert len(node.conditions) == 2
 
-        # Both conditions should have phrase_groups reflecting all OR alternatives
+        # Both conditions should have phrase_groups reflecting all OR alternatives.
+        # UI-2.6 BUG-2: each group is now a PhraseGroupVisual object with
+        # {words, is_or_group=True, is_exception=False} (no exception marker in
+        # this OR test — НЕ not present).
         for cond in node.conditions:
             assert len(cond.phrase_groups) == 2, f"Expected 2 OR groups, got {len(cond.phrase_groups)}"
-            group_words = [w for g in cond.phrase_groups for w in g]
+            group_words = [w for g in cond.phrase_groups for w in g.words]
             assert "word1" in group_words
             assert "word2" in group_words
+            for g in cond.phrase_groups:
+                assert g.is_or_group is True
+                assert g.is_exception is False
 
     @pytest.mark.asyncio
     async def test_is_exception_detected_for_ne_prefix(self):
@@ -413,7 +432,13 @@ class TestXmlParserExtendedConditions:
         assert len(node.conditions) == 1
         cond = node.conditions[0]
         assert cond.is_exception is True, f"Expected is_exception=True, got {cond.is_exception}"
-        assert cond.exception_phrases == ["ustraivaet"]
+        # UI-2.6 BUG-8: exception_phrases is DEPRECATED — always [].
+        # Suppression now works via is_exception on the matching PhraseGroup.
+        assert cond.exception_phrases == []
+        # The phrase_group visual must carry is_exception=True so the FE renders
+        # the warning icon per group (not via exception_phrases).
+        assert len(cond.phrase_groups) >= 1
+        assert any(g.is_exception is True for g in cond.phrase_groups)
 
     @pytest.mark.asyncio
     async def test_nested_phrases_from_child_requests(self):
@@ -726,14 +751,21 @@ class TestBackwardCompatibility:
             channel_constraint="CLIENT",
             without_list=["cancel"],
             is_exact=False,
-            phrase_groups=[["NE", "ustraivaet"], ["ustraivaet"]],
+            phrase_groups=[
+                PhraseGroupVisual(words=["NE", "ustraivaet"], is_or_group=True, is_exception=True),
+                PhraseGroupVisual(words=["ustraivaet"], is_or_group=True, is_exception=False),
+            ],
             nested_phrases=["details"],
             is_exception=True,
-            exception_phrases=["ustraivaet"],
+            # exception_phrases intentionally omitted — deprecated (UI-2.6 BUG-8)
         )
         json_str = cond.model_dump_json()
         restored = DictionaryCondition.model_validate_json(json_str)
-        assert restored.phrase_groups == [["NE", "ustraivaet"], ["ustraivaet"]]
+        assert len(restored.phrase_groups) == 2
+        assert restored.phrase_groups[0].words == ["NE", "ustraivaet"]
+        assert restored.phrase_groups[0].is_exception is True
+        assert restored.phrase_groups[1].words == ["ustraivaet"]
         assert restored.nested_phrases == ["details"]
         assert restored.is_exception is True
-        assert restored.exception_phrases == ["ustraivaet"]
+        # DEPRECATED field — always []
+        assert restored.exception_phrases == []

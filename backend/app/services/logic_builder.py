@@ -97,6 +97,7 @@ def build_phrase_groups(token_section: TokenSection) -> List[PhraseGroup]:
                 word_distance=wd,
                 is_exact=in_quotes,
                 is_negated=next_is_negated,
+                operator=next_operator,
             )
         )
         # Reset accumulator
@@ -167,6 +168,113 @@ def build_phrase_groups(token_section: TokenSection) -> List[PhraseGroup]:
         _flush()
 
     return groups
+
+
+# ---------------------------------------------------------------------------
+# build_phrase_logic_tree
+# ---------------------------------------------------------------------------
+
+
+def _make_phrase_leaf(pg: PhraseGroup) -> LogicNode:
+    """Build a PHRASE leaf (wrapped in NOT if pg.is_negated)."""
+    leaf = LogicNode(
+        node_type="PHRASE",
+        children=[],
+        payload={
+            "text": " ".join(pg.words),
+            "words": list(pg.words),
+            "channel": pg.channel,
+            "word_distance": pg.word_distance,
+            "is_exact": pg.is_exact,
+        },
+    )
+    if pg.is_negated:
+        # НЕ binds tightest — wrap in NOT
+        return LogicNode(node_type="NOT", children=[leaf], payload={})
+    return leaf
+
+
+def _parse_phrase_or(
+    operands: List[LogicNode], operators: List[str], index: int
+) -> Tuple[LogicNode, int]:
+    """Parse: phrase_and (OR phrase_and)*.
+
+    operands[index] is the current left operand; operators[index] is the
+    operator that PRECEDES operands[index+1] (i.e. between operands[index]
+    and operands[index+1]).
+    """
+    left, index = _parse_phrase_and(operands, operators, index)
+    or_children: List[LogicNode] = [left]
+    while index + 1 < len(operands) and operators[index] == "OR":
+        # consume operator, advance to next operand
+        index += 1
+        right, index = _parse_phrase_and(operands, operators, index)
+        or_children.append(right)
+    if len(or_children) == 1:
+        return or_children[0], index
+    return (
+        LogicNode(node_type="OR", children=or_children, payload={}),
+        index,
+    )
+
+
+def _parse_phrase_and(
+    operands: List[LogicNode], operators: List[str], index: int
+) -> Tuple[LogicNode, int]:
+    """Parse: phrase_atom (AND phrase_atom)*."""
+    left = operands[index]
+    and_children: List[LogicNode] = [left]
+    while index + 1 < len(operands) and operators[index] == "AND":
+        index += 1
+        right = operands[index]
+        and_children.append(right)
+    if len(and_children) == 1:
+        return and_children[0], index
+    return (
+        LogicNode(node_type="AND", children=and_children, payload={}),
+        index,
+    )
+
+
+def build_phrase_logic_tree(phrase_groups: List[PhraseGroup]) -> LogicNode:
+    """Build an AND/OR/NOT logic tree from a list of PhraseGroups.
+
+    Precedence (same as build_attribute_tree): NOT > AND > OR.
+
+    Each PhraseGroup carries:
+      - is_negated:  if True, the leaf is wrapped in NOT (НЕ)
+      - operator:    the logical operator preceding this group:
+                     '' (first/none) | 'AND' | 'OR'
+
+    Because _flush() already flushes on '(' / ')', parentheses do NOT create
+    nested PhraseGroups; grouping is encoded purely via the `operator` field.
+
+    Args:
+        phrase_groups: List of PhraseGroup (output of build_phrase_groups).
+
+    Returns:
+        LogicNode tree. For empty input returns AND([]) (evaluates True —
+        treated as "no conditions / gate open" by evaluate_phrase_logic_tree).
+    """
+    if not phrase_groups:
+        return LogicNode(node_type="AND", children=[], payload={})
+
+    # Build flat operand list (each operand is PHRASE or NOT[PHRASE])
+    # and the operator that PRECEDES the next operand.
+    operands: List[LogicNode] = []
+    operators: List[str] = []  # operators[i] precedes operands[i+1]
+    for i, pg in enumerate(phrase_groups):
+        operands.append(_make_phrase_leaf(pg))
+        if i + 1 < len(phrase_groups):
+            # operator of the NEXT group is the operator between this and next
+            next_op = (phrase_groups[i + 1].operator or "").upper()
+            operators.append(next_op if next_op in ("AND", "OR") else "AND")
+
+    if not operands:
+        return LogicNode(node_type="AND", children=[], payload={})
+
+    tree, _ = _parse_phrase_or(operands, operators, 0)
+    return tree
 
 
 # ---------------------------------------------------------------------------

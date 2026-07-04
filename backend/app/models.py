@@ -123,6 +123,8 @@ class PhraseGroup(BaseModel):
     word_distance: WordDistance from token Properties (max per group)
     is_exact:      True if phrase is inside TERMINAL quotes (exact match)
     is_negated:    True if preceded by НЕ (LEXEME operator). NOT the same as word 'не' (WORD) in the phrase.
+    operator:      Logical operator preceding this group: 'OR' (ИЛИ), 'AND' (И), or '' (none/first).
+                   НЕ is NOT stored here — use is_negated instead.
     """
 
     words: List[str] = Field(default_factory=list)
@@ -133,6 +135,11 @@ class PhraseGroup(BaseModel):
         False,
         description="True if preceded by НЕ (LEXEME operator). "
         "NOT the same as word 'не' (WORD) in the phrase.",
+    )
+    operator: str = Field(
+        "",
+        description="Logical operator preceding this group: 'OR' (ИЛИ), 'AND' (И), or '' (none/first). "
+        "НЕ is NOT stored here — use is_negated instead.",
     )
 
 
@@ -184,7 +191,90 @@ class DecodedAttribute(BaseModel):
     operator: str = ""
 
 
+# --- ExtraLimitations (time-gap limits from <ExtraLimitations>) ---
+
+
+class ExtraLimitationLimit(BaseModel):
+    """Single time-gap limit from <Limit> element.
+
+    Maps from <Limit> inside <Limits> inside <ExtraLimitation>.
+    Fields Value/ValueType/Channel/Enabled are universal; LimitType is only
+    for EventType=StartEnd; EventSelector/SearchDirection only for EventType=Parent.
+    """
+
+    value: int = Field(0, description="<Value> (int seconds/words)")
+    value_type: str = Field(
+        "Seconds",
+        description="<ValueType>: Seconds | Words | ...",
+    )
+    channel: str = Field(
+        "ANY",
+        description="<Channel>: CLIENT | OPERATOR | ANY",
+    )
+    enabled: bool = Field(False, description="<Enabled> boolean")
+    # Only for EventType=StartEnd:
+    limit_type: Optional[str] = Field(
+        None, description="<LimitType>: 'First' | 'Last' (EventType=StartEnd only)"
+    )
+    # Only for EventType=Parent:
+    event_selector: Optional[str] = Field(
+        None,
+        description="<EventSelector>: 'Each' | 'First' | ... (EventType=Parent only)",
+    )
+    search_direction: Optional[str] = Field(
+        None,
+        description="<SearchDirection>: 'Before' | 'After' (EventType=Parent only)",
+    )
+
+
+class ExtraLimitation(BaseModel):
+    """Time-gap limitation from <ExtraLimitations>.
+
+    V1 (smartlogger-xml-verification.md): real dictionaries store
+    EventType + SearchSpecifier + Settings + Limits/Limit, NOT <Tokens>.
+    Time-gap FILTERING (OnlyInGaps / ExcludeGaps) against real turn timestamps
+    is a TODO — only the model + parser are implemented here.
+    """
+
+    event_type: str = Field(
+        "",
+        description="<EventType>: 'StartEnd' | 'Parent' | ''",
+    )
+    search_specifier: str = Field(
+        "",
+        description="<SearchSpecifier>: 'OnlyInGaps' | 'ExcludeGaps' | ...",
+    )
+    settings: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="<Settings> sub-keys (always empty in real dictionaries)",
+    )
+    limits: List[ExtraLimitationLimit] = Field(
+        default_factory=list,
+        description="List of <Limit> elements under <Limits>",
+    )
+
+
 # --- Main dictionary models ---
+
+
+class PhraseGroupVisual(BaseModel):
+    """FE-compatible phrase group for visualization (OR-groups, exceptions).
+
+    Mirrors the frontend contract `PhraseGroupVisual` in src/types/api.ts:
+      - words:        list of WORD token texts in this OR-group
+      - is_or_group:  True — each PhraseGroup is a separate OR-alternative
+                      by definition (operator ИЛИ separates groups).
+      - is_exception: True if this group was preceded by НЕ (negation/exclusion).
+
+    The legacy `DictionaryCondition.phrase_groups: List[List[str]]` shape has
+    been replaced with `List[PhraseGroupVisual]` so the FE can render OR-group
+    badges and exception icons directly without reshaping.
+    """
+
+    words: List[str] = Field(default_factory=list)
+    is_or_group: bool = True
+    is_exception: bool = False
+
 
 class DictionaryCondition(BaseModel):
     """A single search condition extracted from XML dictionary tokens.
@@ -193,10 +283,14 @@ class DictionaryCondition(BaseModel):
     Consecutive WORD tokens form a single phrase.
 
     Extended fields (AG-UIREWORK-5):
-      phrase_groups:   OR groups of words — [[w1, w2], [w3, w4]] from ИЛИ-separated tokens.
+      phrase_groups:   OR groups as PhraseGroupVisual objects — one per ИЛИ-separated
+                       PhraseGroup, with {words, is_or_group=True, is_exception=pg.is_negated}.
+                       (Previously List[List[str]]; changed to List[PhraseGroupVisual] in
+                       UI-2.6 BUG-2 to match the FE contract PhraseGroupVisual in api.ts.)
       nested_phrases:  Phrases after the main phrase (from parent-child token structure).
       is_exception:    Whether the phrase is prefixed with НЕ (negation/exclusion).
-      exception_phrases: Phrases that come after НЕ (exception keywords).
+      exception_phrases: DEPRECATED — always []. Kept for FE compat; suppression
+                         now works via is_exception on the matching PhraseGroup.
     """
 
     text: str = Field(..., description="Phrase text to search for (from concatenated WORD tokens)")
@@ -217,9 +311,11 @@ class DictionaryCondition(BaseModel):
         "WordDistance controls intermediate words as usual.",
     )
     # --- Extended fields for UI/UX rework (AG-UIREWORK-5) ---
-    phrase_groups: List[List[str]] = Field(
+    phrase_groups: List[PhraseGroupVisual] = Field(
         default_factory=list,
-        description="OR groups of words: [[w1, w2], [w3, w4]] — each inner list is an alternative",
+        description="OR-group visualization objects: one PhraseGroupVisual per "
+        "ИЛИ-separated PhraseGroup ({words, is_or_group=True, is_exception}). "
+        "FE contract: src/types/api.ts PhraseGroupVisual.",
     )
     nested_phrases: List[str] = Field(
         default_factory=list,
@@ -231,7 +327,14 @@ class DictionaryCondition(BaseModel):
     )
     exception_phrases: List[str] = Field(
         default_factory=list,
-        description="Exception phrases (words/phrases after НЕ — exclusion keywords)",
+        description="DEPRECATED — always []. Kept for FE compat; suppression now "
+        "works via is_exception on the matching PhraseGroup. UI-2.6 BUG-8.",
+    )
+    extra_limitations: List[ExtraLimitation] = Field(
+        default_factory=list,
+        description="Time-gap limits from <ExtraLimitations> (V2/V3). "
+        "without_list is kept empty [] for legacy compatibility; "
+        "real time-gap filtering via extra_limitations is TODO.",
     )
 
 
