@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import List, Optional
@@ -21,6 +22,86 @@ from typing import List, Optional
 from app.models import DialogueTurn, ParsedDialog
 
 logger = logging.getLogger(__name__)
+
+
+# Module-level compiled regex for timestamp parsing (UI-2.6 BE timestamps).
+# SmartLogger RTF (Transcrib/smartlogger/rtf_parser.py:extract_dialogue)
+# writes the third cell of each table row as a string like "0:00:01"
+# (H:MM:SS, single-digit hour). The cleanup in smartlogger's clean_rtf_text
+# collapses whitespace so the canonical production format is "H:MM:SS".
+#
+# Accepted formats (best-effort, resilient to variations):
+#   "H:MM:SS" / "HH:MM:SS"  — typical SmartLogger output
+#   "MM:SS"                 — short form
+#   "SSS" / "SS" / float    — bare seconds
+_TIME_HMS_RE = re.compile(
+    r"^\s*(?P<h>\d{1,2}):(?P<m>\d{1,2}):(?P<s>\d{1,2})(?:[.,]\d+)?\s*$"
+)
+_TIME_MS_RE = re.compile(r"^\s*(?P<m>\d{1,2}):(?P<s>\d{1,2})(?:[.,]\d+)?\s*$")
+_TIME_SECONDS_RE = re.compile(r"^\s*(?P<sec>\d+(?:[.,]\d+)?)\s*$")
+
+
+def _parse_timestamp_to_seconds(value: Optional[str]) -> Optional[float]:
+    """Parse a SmartLogger RTF turn timestamp into seconds from dialogue start.
+
+    SmartLogger's extract_dialogue returns `time` as a string from the third
+    table cell of each RTF row (see Transcrib/smartlogger/rtf_parser.py).
+    The empirically observed production format is ``"H:MM:SS"`` (single-digit
+    hour), e.g. ``"0:00:01"``, ``"0:05:48"``.
+
+    Accepted formats (best-effort, never raises):
+      - ``"H:MM:SS"`` / ``"HH:MM:SS"`` (and with optional fractional part)
+      - ``"MM:SS"``
+      - bare seconds: ``"15"``, ``"15.5"``, ``"15,5"``
+      - ``None`` / empty / unparseable → ``None`` (logged at WARNING)
+
+    Args:
+        value: Raw timestamp string from smartlogger turn dict (turn["time"]).
+
+    Returns:
+        Float seconds from dialogue start, or ``None`` if absent/unparseable.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+
+    match = _TIME_HMS_RE.match(text)
+    if match is not None:
+        h = int(match.group("h"))
+        m = int(match.group("m"))
+        s = int(match.group("s"))
+        if m > 59 or s > 59:
+            logger.warning(
+                "Unparseable RTF timestamp (invalid HMS components): %r", value
+            )
+            return None
+        return float(h * 3600 + m * 60 + s)
+
+    match = _TIME_MS_RE.match(text)
+    if match is not None:
+        m = int(match.group("m"))
+        s = int(match.group("s"))
+        if m > 59 or s > 59:
+            logger.warning(
+                "Unparseable RTF timestamp (invalid MS components): %r", value
+            )
+            return None
+        return float(m * 60 + s)
+
+    match = _TIME_SECONDS_RE.match(text)
+    if match is not None:
+        try:
+            return float(match.group("sec").replace(",", "."))
+        except (ValueError, TypeError):
+            logger.warning(
+                "Unparseable RTF timestamp (numeric conversion failed): %r", value
+            )
+            return None
+
+    logger.warning("Unparseable RTF timestamp (unknown format): %r", value)
+    return None
 
 
 async def parse_rtf_bytes(rtf_bytes: bytes, filename: str) -> ParsedDialog:
@@ -165,19 +246,54 @@ def _map_turns(raw_turns: List[dict]) -> List[DialogueTurn]:
                           "text": str, "time": str}
 
     Color code invariant (INV-4): \\cf1 = Клиент, \\cf2 = Сотрудник
+
+    UI-2.6 BE timestamps:
+        `start_offset` is parsed from the raw `time` string (smartlogger
+        writes the third cell of each RTF table row as "H:MM:SS"). When the
+        string is absent or unparseable, `start_offset` stays None.
+        `end_offset` is derived from the NEXT turn's `start_offset` when
+        available, otherwise it equals `start_offset` (point-in-time marker).
+        For plain-text fallback dialogues (`_parse_plain_text_dialogue`),
+        `time` is always "" → both offsets stay None — time-gap filtering
+        in search.py is then a no-op (per UI-2.6 contract).
     """
     mapped: List[DialogueTurn] = []
+
+    # Pre-parse every turn's start_offset ONCE so we can also compute
+    # end_offset = next turn's start_offset in a single pass.
+    start_offsets: List[Optional[float]] = [
+        _parse_timestamp_to_seconds(t.get("time") or t.get("timestamp"))
+        for t in raw_turns
+    ]
+
     for i, turn in enumerate(raw_turns):
         speaker = turn.get("speaker", "Неизвестный")
         # Normalize unknown speaker
         if speaker not in ("Клиент", "Сотрудник"):
             speaker = "Неизвестный"
+
+        start_offset = start_offsets[i]
+
+        # end_offset = next turn's start_offset (best estimate of when this
+        # turn's speech ended). The last turn has no successor → fall back
+        # to its own start_offset (point marker). When start_offset is None,
+        # end_offset is also None — search._has_timestamps then reports False
+        # and time-gap filtering becomes a no-op for the whole dialogue.
+        if start_offset is None:
+            end_offset: Optional[float] = None
+        elif i + 1 < len(start_offsets) and start_offsets[i + 1] is not None:
+            end_offset = start_offsets[i + 1]
+        else:
+            end_offset = start_offset
+
         mapped.append(
             DialogueTurn(
                 turn_index=i,
                 speaker=speaker,
                 text=turn.get("text", ""),
                 timestamp=turn.get("time") or turn.get("timestamp"),
+                start_offset=start_offset,
+                end_offset=end_offset,
             )
         )
     return mapped

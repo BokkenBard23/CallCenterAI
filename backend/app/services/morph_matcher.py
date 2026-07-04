@@ -361,6 +361,8 @@ def match_phrase_morphological_detailed(
     turns: List[dict],
     channel_map: Dict[int, str],
     is_exact: bool = False,
+    precomputed_word_positions: Optional[List[List[Tuple[int, int]]]] = None,
+    precomputed_turn_words: Optional[List[List[str]]] = None,
 ) -> List[Tuple[int, str, dict]]:
     """Detailed morphological match returning matched text and character offsets.
 
@@ -371,6 +373,16 @@ def match_phrase_morphological_detailed(
     CRITICAL: Word order is ALWAYS FREE in both modes.
     Quotes (is_exact) fix ONLY morphology, NOT word order [4].
 
+    Performance (N18): ``_find_word_positions`` and ``_tokenize`` are
+    O(len(turn_text)) each. Previously they were called per-turn per-condition
+    inside the loop, i.e. for a node with K conditions on N turns the work was
+    ~2*K*N tokenizations of identical turn text. Callers in ``search.py``
+    invoke this function once per condition, so the per-call cost is already
+    N tokenizations — but precomputing once at the top of the call avoids
+    recomputing ``word_positions`` and ``turn_words`` for every phrase
+    variant of the same condition. Optional ``precomputed_*`` arguments let
+    ``search.py`` share a single precompute across all conditions of a node.
+
     Args:
         phrase_text: text of the phrase to search for.
         word_distance: max allowed extra words between phrase words.
@@ -378,6 +390,10 @@ def match_phrase_morphological_detailed(
         turns: list of dialogue turns [{"speaker": ..., "text": ...}, ...].
         channel_map: mapping turn_idx -> speaker ("Клиент"/"Сотрудник").
         is_exact: if True, use exact form matching (no morphology, free order).
+        precomputed_word_positions: optional cache of ``_find_word_positions``
+            results per turn (same length & order as ``turns``). When supplied,
+            this function will NOT recompute positions for any turn.
+        precomputed_turn_words: optional cache of ``_tokenize`` results per turn.
 
     Returns:
         list of (turn_idx, speaker, detail_dict) tuples.
@@ -389,6 +405,45 @@ def match_phrase_morphological_detailed(
 
     # Pre-compute lemmas for morphological mode
     phrase_lemmas = [get_lemma(w) for w in phrase_words] if not is_exact else None
+
+    # Precompute per-turn word positions and token lists ONCE per call.
+    # When the caller (search.py) supplies caches that span multiple
+    # conditions of the same node, we reuse them directly — the arrays
+    # never depend on the phrase, only on the turn text.
+    use_cached_positions = (
+        precomputed_word_positions is not None
+        and len(precomputed_word_positions) == len(turns)
+    )
+    use_cached_words = (
+        precomputed_turn_words is not None
+        and len(precomputed_turn_words) == len(turns)
+    )
+
+    # Lazily-built local caches only when caller did not provide one.
+    local_word_positions: Optional[List[List[Tuple[int, int]]]] = (
+        None if use_cached_positions else [None] * len(turns)
+    )
+    local_turn_words: Optional[List[List[str]]] = (
+        None if use_cached_words else [None] * len(turns)
+    )
+
+    def _word_positions_for(turn_idx: int, turn_text: str) -> List[Tuple[int, int]]:
+        if use_cached_positions:
+            return precomputed_word_positions[turn_idx]
+        cached = local_word_positions[turn_idx]
+        if cached is None:
+            cached = _find_word_positions(turn_text)
+            local_word_positions[turn_idx] = cached
+        return cached
+
+    def _words_for(turn_idx: int, turn_text: str) -> List[str]:
+        if use_cached_words:
+            return precomputed_turn_words[turn_idx]
+        cached = local_turn_words[turn_idx]
+        if cached is None:
+            cached = _tokenize(turn_text)
+            local_turn_words[turn_idx] = cached
+        return cached
 
     matches: List[Tuple[int, str, dict]] = []
     window_size = len(phrase_words) + word_distance
@@ -402,12 +457,12 @@ def match_phrase_morphological_detailed(
             continue
 
         turn_text = turn.get("text", "")
-        turn_words = _tokenize(turn_text)
+        turn_words = _words_for(turn_idx, turn_text)
         if len(turn_words) < len(phrase_words):
             continue
 
-        # Find word positions for character offset mapping
-        word_positions = _find_word_positions(turn_text)
+        # Find word positions for character offset mapping (cached)
+        word_positions = _word_positions_for(turn_idx, turn_text)
 
         # Sliding window — bag-of-words match (any order in BOTH modes)
         for i in range(len(turn_words) - len(phrase_words) + 1):
@@ -438,6 +493,8 @@ def match_phrase_morphological(
     turns: List[dict],
     channel_map: Dict[int, str],
     is_exact: bool = False,
+    precomputed_word_positions: Optional[List[List[Tuple[int, int]]]] = None,
+    precomputed_turn_words: Optional[List[List[str]]] = None,
 ) -> List[Tuple[int, str]]:
     """Check if a phrase appears in a dialogue.
 
@@ -447,5 +504,7 @@ def match_phrase_morphological(
     result = match_phrase_morphological_detailed(
         phrase_text, word_distance, channel_constraint,
         turns, channel_map, is_exact=is_exact,
+        precomputed_word_positions=precomputed_word_positions,
+        precomputed_turn_words=precomputed_turn_words,
     )
     return [(turn_idx, speaker) for turn_idx, speaker, _detail in result]

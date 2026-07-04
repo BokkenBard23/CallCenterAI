@@ -193,6 +193,34 @@ def _search_recursive(
         # EventType=Parent time-gap filtering.
         node_match_times: List[float] = []
 
+        # N18 perf optimization: tokenize each search turn + compute word
+        # (start,end) char positions ONCE for the whole node. Every condition
+        # of this node sees the same `search_turns`, so the per-turn work
+        # does not depend on the phrase and is reused across all conditions.
+        # For typical production dictionaries (~5 conditions per node,
+        # ~50 turns per dialogue) this cuts tokenizer calls from
+        # ~5*50*2 = 500 down to ~50*2 = 100 per node.
+        precomputed_turn_words: Optional[List[List[str]]] = None
+        precomputed_word_positions: Optional[
+            List[List[Tuple[int, int]]]
+        ] = None
+        try:
+            from app.services.morph_matcher import (
+                _find_word_positions,
+                _tokenize,
+            )
+
+            precomputed_turn_words = [
+                _tokenize(t.get("text", "")) for t in search_turns
+            ]
+            precomputed_word_positions = [
+                _find_word_positions(t.get("text", "")) for t in search_turns
+            ]
+        except ImportError:
+            # morph_matcher unavailable — _do_match will fall back to
+            # smartlogger or _fallback_match, which tokenize internally.
+            pass
+
         for condition in node.conditions:
             # Single source of truth for НЕ: condition.is_exception
             # (set in xml_parser._parse_tokens_enriched from pg.is_negated).
@@ -208,6 +236,8 @@ def _search_recursive(
                     else {ni: channel_map[oi] for ni, oi in index_mapping.items()}
                 ),
                 parent_match_times=parent_match_times,
+                precomputed_word_positions=precomputed_word_positions,
+                precomputed_turn_words=precomputed_turn_words,
             )
 
             if condition_is_negated:
@@ -294,10 +324,25 @@ def _search_recursive(
             for k, v in child_counts.items():
                 level_counts[k] = level_counts.get(k, 0) + v
     else:
-        # INV-6: Container node — children inherit same level.
-        # Container nodes have no matches of their own, so children inherit
-        # parent_match_times unchanged (their "parent" is still the nearest
-        # ancestor that produced matches).
+        # ────────────────────────────────────────────────────────────────
+        # INV-6 (verified UI-2.6 BE-timestamps iteration):
+        # Container node — children inherit same `level` (no level
+        # consumed), `allowed_turn_indices` (GATE inheritance) and
+        # `parent_match_times` (their "parent" is still the nearest
+        # ancestor that produced matches — container passthrough).
+        # Container nodes have NO conditions, so they:
+        #   (1) do NOT increase `level` — children stay at parent's level;
+        #   (2) produce NO matches of their own;
+        #   (3) inherit allowed_turn_indices verbatim (open / closed / None);
+        #   (4) node_matched is implicitly True via
+        #       evaluate_phrase_logic_tree([], set()) == True — gate stays
+        #       open for children exactly when it was open for this node.
+        # Real SmartLogger dictionaries have not been observed with pure
+        # container nodes (see docs/specs/smartlogger-xml-verification.md
+        # V7: all 31 SpeechLabRequest nodes carry non-empty <Tokens>), but
+        # the code path is intentionally supported for synthetic test
+        # fixtures and forward compatibility.
+        # ────────────────────────────────────────────────────────────────
         for child in node.children:
             child_matches, child_counts = _search_recursive(
                 node=child,
@@ -644,6 +689,8 @@ def _match_condition(
     turns: List[dict],
     channel_map: Dict[int, str],
     parent_match_times: Optional[List[float]] = None,
+    precomputed_word_positions: Optional[List[List[Tuple[int, int]]]] = None,
+    precomputed_turn_words: Optional[List[List[str]]] = None,
 ) -> List[Tuple[int, str, dict]]:
     """Match a single condition against dialogue turns.
 
@@ -660,6 +707,9 @@ def _match_condition(
          parent_match_times (parent node's matched turn offsets); when
          parent_match_times is None (root-level node), Parent-type limits
          are skipped.
+      4. N18 perf: ``precomputed_word_positions`` / ``precomputed_turn_words``
+         let callers reuse a single per-turn tokenize across all conditions
+         of the same node (the canonical case from ``_search_recursive``).
 
     Args:
         condition: The phrase condition to search for.
@@ -668,11 +718,20 @@ def _match_condition(
         parent_match_times: Optional list of parent node match timestamps
             (seconds from dialogue start). Used by EventType=Parent limits.
             None for root-level nodes (Parent limits then skipped).
+        precomputed_word_positions: optional cache of word (start,end) char
+            positions per turn — see ``match_phrase_morphological_detailed``.
+        precomputed_turn_words: optional cache of token lists per turn.
 
     Returns:
         List of (turn_index, speaker, detail_dict) tuples.
     """
-    matches = _do_match(condition, turns, channel_map)
+    matches = _do_match(
+        condition=condition,
+        turns=turns,
+        channel_map=channel_map,
+        precomputed_word_positions=precomputed_word_positions,
+        precomputed_turn_words=precomputed_turn_words,
+    )
 
     # Apply time-gap filter from real <ExtraLimitations> (UI-2.6).
     # Filter is a no-op when extra_limitations is empty or when turns
@@ -699,6 +758,8 @@ def _do_match(
     condition: DictionaryCondition,
     turns: List[dict],
     channel_map: Dict[int, str],
+    precomputed_word_positions: Optional[List[List[Tuple[int, int]]]] = None,
+    precomputed_turn_words: Optional[List[List[str]]] = None,
 ) -> List[Tuple[int, str, dict]]:
     """Execute the actual matching algorithm."""
     try:
@@ -711,6 +772,8 @@ def _do_match(
             turns=turns,
             channel_map=channel_map,
             is_exact=condition.is_exact,
+            precomputed_word_positions=precomputed_word_positions,
+            precomputed_turn_words=precomputed_turn_words,
         )
     except ImportError:
         logger.warning("morph_matcher unavailable — trying smartlogger")
