@@ -444,7 +444,7 @@
       "type": "remote",
       "url": "http://127.0.0.1:8765/mcp",
       "enabled": true,
-      "description": "Beeline AI RAG Knowledge Base — поиск по базе знаний (permanent-api-crq411646), LLM glm-5.1. HTTP сервер на порту 8765."
+      "description": "Beeline AI RAG Knowledge Base — поиск по базе знаний (permanent-api-crq411646), LLM glm-xlarge. HTTP сервер на порту 8765."
     },
     "prod-design-system-http": {
       "type": "remote",

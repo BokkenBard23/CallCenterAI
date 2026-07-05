@@ -1,0 +1,167 @@
+# Quality scoring rubric + prompt (IP-4.1).
+#
+# The 12 base categories mirror the QualityCategory enum in app/models.py
+# (stable contract — do NOT rename). This file ENRICHES the rubric with
+# call-center-specific categories (script_adherence, client_identification,
+# pii_handling, first_call_resolution) and per-domain extras.
+#
+# `in_enum: true` marks categories backed by a QualityCategory enum member
+# (i.e. scoreable today via CategoryScore). `in_enum: false` categories are
+# advisory — they extend the rubric description and the prompt mentions
+# them, but the LLM still returns scores only for the 12 enum categories.
+version: 1
+
+rubrics:
+  quality:
+    categories:
+      communication_skills:
+        label: "Навыки общения"
+        criteria: "Ясность, активное слушание, вежливость, структура ответа"
+        in_enum: true
+      problem_solving:
+        label: "Решение проблем"
+        criteria: "Понимание проблемы клиента, поиск решения, доведение до результата"
+        in_enum: true
+      product_knowledge:
+        label: "Знание продукта"
+        criteria: "Корректные сведения о продуктах/услугах, тарифах, условиях"
+        in_enum: true
+      responsiveness:
+        label: "Отзывчивость"
+        criteria: "Скорость реакции на вопросы клиента, готовность помочь"
+        in_enum: true
+      professionalism:
+        label: "Профессионализм"
+        criteria: "Тон, соблюдение деловой этики, владение ситуацией"
+        in_enum: true
+      empathy:
+        label: "Эмпатия"
+        criteria: "Признание эмоций клиента, сочувствие, персональный подход"
+        in_enum: true
+      accuracy:
+        label: "Точность информации"
+        criteria: "Достоверность сведений, отсутствие ошибочных обещаний"
+        in_enum: true
+      efficiency:
+        label: "Эффективность"
+        criteria: "Решение вопроса без лишних переводов и удержаний, оптимальная длительность"
+        in_enum: true
+      follow_up_procedures:
+        label: "Порядок последующих действий"
+        criteria: "Чёткие дальнейшие шаги, фиксация договорённостей, информирование о сроках"
+        in_enum: true
+      conflict_resolution:
+        label: "Разрешение конфликтов"
+        criteria: "Деэскалация, поиск компромисса, удержание клиента"
+        in_enum: true
+      compliance:
+        label: "Соблюдение стандартов"
+        criteria: "Следование регламенту, обязательным процедурам и нормативным требованиям"
+        in_enum: true
+      customer_education:
+        label: "Обучение клиента"
+        criteria: "Разъяснение условий, предупреждение о типичных ошибках, обучение самообслуживанию"
+        in_enum: true
+
+      # ── Call-center-specific enrichments (advisory; not in enum) ──
+      script_adherence:
+        label: "Соблюдение скрипта"
+        criteria: "Следование регламенту разговора, обязательные фразы (приветствие, идентификация, прощание), порядок действий"
+        in_enum: false
+      client_identification:
+        label: "Идентификация клиента"
+        criteria: "Корректная идентификация по кодовому слову/документу/номеру, соблюдение требований 152-ФЗ при обработке ПДн"
+        in_enum: false
+      pii_handling:
+        label: "Корректность работы с ПДн"
+        criteria: "Не разглашать ПДн третьим лицам, маскирование при необходимости, минимизация запрашиваемой информации"
+        in_enum: false
+      first_call_resolution:
+        label: "Решение при первом обращении (FCR)"
+        criteria: "Попытка решить вопрос за один звонок, минимизация переводов и повторных обращений"
+        in_enum: false
+
+    domains:
+      telecom:
+        extra_categories:
+          tariff_explanation:
+            label: "Объяснение тарифа"
+            criteria: "Корректное и понятное объяснение тарификации, опций, условий перехода"
+            in_enum: false
+          retention:
+            label: "Удержание клиента"
+            criteria: "Работа с отказом, контрпредложение, удержание в сети"
+            in_enum: false
+      banking:
+        extra_categories:
+          transaction_security:
+            label: "Безопасность транзакций"
+            criteria: "Верификация операций, предупреждение мошенничества, соблюдение 115-ФЗ"
+            in_enum: false
+          product_disclosure:
+            label: "Раскрытие условий продукта"
+            criteria: "Информирование о комиссиях, ставках, сроках, штрафах за досрочное расторжение"
+            in_enum: false
+      insurance:
+        extra_categories:
+          coverage_explanation:
+            label: "Объяснение покрытия"
+            criteria: "Ясное объяснение страхового покрытия, исключений и лимитов"
+            in_enum: false
+          claim_handling:
+            label: "Обработка страхового случая"
+            criteria: "Корректный приём заявления, полнота консультации, соблюдение сроков уведомления"
+            in_enum: false
+      healthcare:
+        extra_categories:
+          patient_confidentiality:
+            label: "Врачебная тайна"
+            criteria: "Соблюдение конфиденциальности пациента, защита медицинских данных"
+            in_enum: false
+          appointment_handling:
+            label: "Работа с записью на приём"
+            criteria: "Корректная запись, проверка доступности специалистов, напоминания"
+            in_enum: false
+
+prompts:
+  quality:
+    # {categories} is substituted at call time with the formatted list
+    # (12 enum categories with their Russian labels).
+    # Block scalar style "|-" strips trailing newline for byte-identical
+    # match with the inline _QUALITY_SYSTEM_PROMPT in llm.py.
+    system: |-
+      Ты — эксперт по оценке качества диалогов колл-центра. Оцени диалог по 12 категориям.
+
+      ВАЖНО — ИГНОРИРУЙ артефакты сплошного текста:
+      Группировка большими блоками является артефактом записи, а не реальной структурой диалога.
+      Восстанови истинный порядок коротких реплик клиента и сотрудника — они чередуются.
+
+      Категории:
+      {categories}
+
+      Для каждой категории:
+      - level: high / medium / low
+      - score: число от 0.0 до 1.0 (low ≈ 0.33, medium ≈ 0.66, high ≈ 1.0)
+      - justification: 1-2 предложения, почему присвоен этот уровень
+
+      Также определи:
+      - strengths: список категорий с высоким уровнем (high)
+      - weaknesses: список категорий с низким уровнем (low)
+      - recommendations: 1-3 конкретных рекомендации по улучшению
+
+      Ответь в формате JSON:
+      {
+        "categories": [
+          {"category": "communication_skills", "level": "high", "score": 0.9, "justification": "Обоснование..."},
+          ...все 12 категорий...
+        ],
+        "strengths": ["communication_skills", "professionalism"],
+        "weaknesses": ["efficiency"],
+        "recommendations": ["Рекомендация 1", "Рекомендация 2"]
+      }
+
+
+      Ответь ТОЛЬКО валидным JSON, без markdown-обёрток.
+    temperature: 0.3
+    max_tokens: 4000
+    output_model: app.models.QualityScoreResult

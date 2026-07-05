@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from app.models import (
     DictionaryNode,
     DictMatch,
+    EnhancedHybridSearchResult,
     HybridSearchResult,
     ParsedDialog,
     VectorSearchResult,
@@ -47,6 +48,8 @@ _DEFAULT_RRF_K = 60
 _DEFAULT_NER_BOOST_PER_MATCH = 0.1
 _DEFAULT_NER_PER_WEIGHT = 1.5
 _DEFAULT_TOP_K = 10
+# BM25 sparse scores can be unbounded; clamp to [0, 1] before LogOdds fusion.
+_BM25_PROB_CLAMP_MAX = 10.0
 
 
 class HybridSearchService:
@@ -216,6 +219,356 @@ class HybridSearchService:
 
         # Return top_k
         return merged[:top_k]
+
+    # ── Enhanced search (BM25 + advanced fusion + explainability) ──
+
+    async def search_enhanced(
+        self,
+        query: str,
+        dialogue: Optional[ParsedDialog] = None,
+        dictionaries: Optional[List[DictionaryNode]] = None,
+        top_k: int = _DEFAULT_TOP_K,
+        use_semantic: bool = True,
+        use_ner: bool = True,
+        use_bm25: bool = True,
+        fusion_strategy: str = "rrf",
+        explain: bool = False,
+    ) -> List[EnhancedHybridSearchResult]:
+        """Enhanced hybrid search: morph + semantic + BM25 + advanced fusion.
+
+        Adds a third sparse-retrieval channel (BM25 indexed over the session's
+        chunk texts) and replaces the inline RRF with the ``app.services.fusion``
+        dispatcher that supports RRF / Convex / LogOdds strategies. Optionally
+        computes token-level explanations for the top results.
+
+        Graceful degradation:
+          - If BM25 indexing fails or the corpus is empty → falls back to the
+            plain ``search()`` path (results wrapped in EnhancedHybridSearchResult
+            with ``bm25_score=0``).
+          - If ``explain=True`` but the embedding service is unavailable →
+            ``token_contributions`` is left empty.
+          - If any unexpected exception is raised → the call falls back to the
+            plain ``search()`` path (matches the existing graceful-degradation
+            pattern of this service).
+
+        Args:
+            query: Search query text.
+            dialogue: Parsed dialogue (for morph search + BM25 corpus).
+            dictionaries: Dictionaries for morphological search.
+            top_k: Number of results to return.
+            use_semantic: Whether to include FAISS cosine search.
+            use_ner: Whether to include NER boost.
+            use_bm25: Whether to build a BM25 index over the dialogue turns and
+                fuse it as a third channel.
+            fusion_strategy: One of "rrf" | "convex" | "log_odds".
+            explain: If True, compute token-level explanations for top-K results.
+
+        Returns:
+            List of EnhancedHybridSearchResult sorted by combined_score desc.
+        """
+        # Validation: empty query
+        if not query or not query.strip():
+            return []
+
+        # Clamp top_k
+        if top_k < 1:
+            top_k = 1
+        if top_k > 100:
+            top_k = 100
+
+        try:
+            return await self._search_enhanced_impl(
+                query=query,
+                dialogue=dialogue,
+                dictionaries=dictionaries,
+                top_k=top_k,
+                use_semantic=use_semantic,
+                use_ner=use_ner,
+                use_bm25=use_bm25,
+                fusion_strategy=fusion_strategy,
+                explain=explain,
+            )
+        except Exception as exc:
+            # Graceful degradation: fall back to plain search and wrap results.
+            logger.warning(
+                "search_enhanced failed (%s); falling back to plain search()", exc,
+                exc_info=True,
+            )
+            base_results = await self.search(
+                query=query,
+                dialogue=dialogue,
+                dictionaries=dictionaries,
+                top_k=top_k,
+                use_semantic=use_semantic,
+                use_ner=use_ner,
+            )
+            return [
+                EnhancedHybridSearchResult(**r.model_dump())
+                for r in base_results
+            ]
+
+    async def _search_enhanced_impl(
+        self,
+        query: str,
+        dialogue: Optional[ParsedDialog],
+        dictionaries: Optional[List[DictionaryNode]],
+        top_k: int,
+        use_semantic: bool,
+        use_ner: bool,
+        use_bm25: bool,
+        fusion_strategy: str,
+        explain: bool,
+    ) -> List[EnhancedHybridSearchResult]:
+        """Internal enhanced search implementation (no validation/fallback wrapper)."""
+        from app.services.bm25 import BM25Scorer
+        from app.services import fusion as fusion_mod
+
+        # ── Step 1: gather the same per-channel results as plain search() ──
+        can_morph = dialogue is not None and dictionaries is not None and len(dictionaries) > 0
+        can_semantic = use_semantic
+        can_ner = use_ner and self._has_ner
+
+        morph_results: List[_MorphResult] = []
+        if can_morph:
+            morph_results = await self._morph_search(query, dialogue, dictionaries)
+
+        semantic_results: List[VectorSearchResult] = []
+        if can_semantic:
+            semantic_results = await self._semantic_search(query, top_k=top_k * 2)
+
+        # ── Step 2: BM25 channel (optional, third sparse signal) ──
+        bm25_ranking: List[Tuple[int, float]] = []  # (chunk_idx, score)
+        bm25_chunk_texts: List[str] = []
+        bm25_scorer: Optional[BM25Scorer] = None
+
+        if use_bm25 and dialogue is not None and len(dialogue.turns) > 0:
+            try:
+                bm25_chunk_texts = [t.text for t in dialogue.turns]
+                bm25_scorer = BM25Scorer(k1=1.2, b=0.75, lemmatize=True)
+                bm25_scorer.index(bm25_chunk_texts)
+                bm25_ranking = bm25_scorer.score(query, top_k=len(bm25_chunk_texts))
+            except Exception as exc:
+                logger.warning("search_enhanced: BM25 channel failed: %s", exc)
+                bm25_ranking = []
+                bm25_scorer = None
+
+        # ── Step 3: NER query entities (same logic as plain search) ──
+        query_entities: List[Dict[str, str]] = []
+        if can_ner:
+            query_entities = self._extract_query_entities(query)
+            if not query_entities:
+                can_ner = False
+
+        # ── Step 4: build per-channel rankings keyed by (dialogue_id, turn_index) ──
+        # Map each channel's results to a list of (doc_key, score) for fusion.
+        # doc_key is a (dialogue_id, turn_index) tuple serialized via a dict index.
+        doc_keys: Dict[Tuple[str, int], int] = {}
+        doc_meta: List[Dict[str, object]] = []  # parallel list of metadata per doc_key
+
+        def _key_for(dialogue_id: str, turn_index: int) -> int:
+            k = (dialogue_id, turn_index)
+            if k not in doc_keys:
+                doc_keys[k] = len(doc_meta)
+                doc_meta.append({"dialogue_id": dialogue_id, "turn_index": turn_index})
+            return doc_keys[k]
+
+        # Morph channel: rank by morph match order; "score" set to 1.0 (matched)
+        # so RRF/Convex have a non-zero signal.
+        morph_ranking: List[Tuple[int, float]] = []
+        morph_doc_lookup: Dict[int, _MorphResult] = {}
+        for rank, morph in enumerate(morph_results, start=1):
+            doc_idx = _key_for(morph.dialogue_id, morph.turn_index)
+            morph_ranking.append((doc_idx, 1.0 / rank))  # higher = better rank
+            morph_doc_lookup[doc_idx] = morph
+
+        # Semantic channel: rank by cosine score (already in [0, 1] for FAISS IP
+        # with L2-normalized vectors).
+        semantic_ranking: List[Tuple[int, float]] = []
+        semantic_doc_lookup: Dict[int, VectorSearchResult] = {}
+        for rank, semantic in enumerate(semantic_results, start=1):
+            doc_idx = _key_for(semantic.dialogue_id, semantic.turn_index)
+            semantic_ranking.append((doc_idx, semantic.score))
+            semantic_doc_lookup[doc_idx] = semantic
+
+        # BM25 channel: rank by BM25 score, clamped to [0,1] via score/max for
+        # LogOdds compatibility. RRF ignores magnitude; Convex min-max normalizes.
+        bm25_doc_ranking: List[Tuple[int, float]] = []
+        bm25_max = max((s for _, s in bm25_ranking), default=0.0)
+        for chunk_idx, score in bm25_ranking:
+            if chunk_idx < 0 or chunk_idx >= len(bm25_chunk_texts):
+                continue
+            # Build a doc_key from the chunk's turn_index using the dialogue filename.
+            # BM25 chunks are indexed in turn order, so chunk_idx == turn_index.
+            turn_index = chunk_idx
+            dialogue_id = dialogue.filename if dialogue is not None else ""
+            doc_idx = _key_for(dialogue_id, turn_index)
+            normalized_score = (score / bm25_max) if bm25_max > 0 else 0.0
+            bm25_doc_ranking.append((doc_idx, normalized_score))
+
+        # ── Step 5: fuse via the chosen strategy ──
+        # Default weights: dense + morph + sparse (BM25).
+        channels: List[List[Tuple[int, float]]] = []
+        weights: List[float] = []
+
+        if morph_ranking:
+            channels.append(morph_ranking)
+            weights.append(1.0)
+        if semantic_ranking:
+            channels.append(semantic_ranking)
+            weights.append(1.0)
+        if bm25_doc_ranking:
+            channels.append(bm25_doc_ranking)
+            weights.append(1.0)
+
+        if not channels:
+            return []
+
+        fusion_strategy_lower = (fusion_strategy or "rrf").lower()
+        if fusion_strategy_lower == "log_odds":
+            # LogOdds expects exactly two channels (dense, sparse).
+            # Use semantic as dense and BM25 as sparse; morph is dropped here
+            # (cannot be calibrated as a probability) — falls back to RRF if
+            # either is missing.
+            if semantic_ranking and bm25_doc_ranking:
+                fused = fusion_mod.log_odds_fusion(
+                    dense_scores=semantic_ranking,
+                    sparse_scores=bm25_doc_ranking,
+                )
+            else:
+                fused = fusion_mod.reciprocal_rank_fusion(channels, k=self.rrf_k)
+        elif fusion_strategy_lower == "convex":
+            w_sum = sum(weights)
+            norm_weights = [w / w_sum for w in weights] if w_sum > 0 else None
+            fused = fusion_mod.convex_fusion(channels, weights=norm_weights)
+        else:  # rrf
+            fused = fusion_mod.reciprocal_rank_fusion(channels, k=self.rrf_k)
+
+        # ── Step 6: apply NER boost (same logic as plain search) ──
+        # Build HybridSearchResult objects to reuse the existing NER boost path.
+        merged: Dict[Tuple[str, int], EnhancedHybridSearchResult] = {}
+        for doc_idx, fused_score in fused[: top_k * 2]:
+            meta = doc_meta[doc_idx]
+            dialogue_id = str(meta["dialogue_id"])
+            turn_index = int(meta["turn_index"])
+
+            # Pull text + speaker + per-channel scores from whichever channel had it.
+            morph = morph_doc_lookup.get(doc_idx)
+            semantic = semantic_doc_lookup.get(doc_idx)
+
+            text = ""
+            speaker = ""
+            morph_score = 0.0
+            semantic_score = 0.0
+            morph_match: Optional[DictMatch] = None
+
+            if morph is not None:
+                text = morph.text
+                speaker = morph.speaker
+                morph_score = 1.0
+                morph_match = morph.morph_match
+            if semantic is not None:
+                text = text or semantic.text
+                speaker = speaker or semantic.speaker
+                semantic_score = semantic.score
+
+            # BM25 score for the result row (raw BM25, not normalized).
+            bm25_score = 0.0
+            if bm25_scorer is not None and dialogue is not None:
+                try:
+                    bm25_score = bm25_scorer.score_document(query, turn_index)
+                except Exception:
+                    bm25_score = 0.0
+
+            source_label = "hybrid"
+            if morph is not None and semantic is None and not bm25_doc_ranking:
+                source_label = "morph"
+            elif semantic is not None and morph is None and not bm25_doc_ranking:
+                source_label = "semantic"
+
+            result = EnhancedHybridSearchResult(
+                text=text,
+                dialogue_id=dialogue_id,
+                turn_index=turn_index,
+                speaker=speaker,
+                morph_score=morph_score,
+                morph_match=morph_match,
+                semantic_score=semantic_score,
+                bm25_score=bm25_score,
+                combined_score=float(fused_score),
+                source=source_label,
+            )
+            merged[(dialogue_id, turn_index)] = result
+
+        results_list = list(merged.values())
+
+        # Apply NER boost (reuses plain-search logic; mutates combined_score).
+        if can_ner and query_entities:
+            results_list = self._apply_ner_boost_enhanced(results_list, query_entities)
+
+        # Sort and trim.
+        results_list.sort(key=lambda r: r.combined_score, reverse=True)
+        results_list = results_list[:top_k]
+
+        # ── Step 7: optional token-level explainability on top results ──
+        if explain and results_list:
+            try:
+                from app.services.explainer import explain_match
+            except Exception as exc:
+                logger.warning("search_enhanced: explainer import failed: %s", exc)
+                explain = False
+
+            if explain:
+                frida_available = False
+                try:
+                    frida_available = await self.embedding_service.is_available()
+                except Exception:
+                    frida_available = False
+
+                if frida_available:
+                    for r in results_list:
+                        try:
+                            contributions = await explain_match(
+                                query=query,
+                                text=r.text,
+                                embedder=self.embedding_service,
+                                top_n=10,
+                            )
+                            r.token_contributions = contributions
+                        except Exception as exc:
+                            logger.warning(
+                                "search_enhanced: explain_match failed for turn %d: %s",
+                                r.turn_index,
+                                exc,
+                            )
+                            r.token_contributions = []
+
+        return results_list
+
+    def _apply_ner_boost_enhanced(
+        self,
+        results: List[EnhancedHybridSearchResult],
+        query_entities: List[Dict[str, str]],
+    ) -> List[EnhancedHybridSearchResult]:
+        """Apply NER boost to enhanced results (mirrors _apply_ner_boost).
+
+        Wrapped into a thin wrapper so the base ``_apply_ner_boost`` (which
+        operates on HybridSearchResult) can be reused without leaking the
+        Enhanced subclass into the legacy code path.
+        """
+        # Reuse the existing computation logic by building HybridSearchResult
+        # shadows, boosting, then writing ner_boost back onto the enhanced rows.
+        base_shadows: List[HybridSearchResult] = [
+            HybridSearchResult(**r.model_dump(exclude={"bm25_score", "token_contributions"}))
+            for r in results
+        ]
+        boosted = self._apply_ner_boost(base_shadows, query_entities)
+        for r, b in zip(results, boosted):
+            r.ner_boost = b.ner_boost
+            r.matched_entities = b.matched_entities
+            # _apply_ner_boost added the boost to the shadow's combined_score;
+            # mirror the final value onto the enhanced row.
+            r.combined_score = b.combined_score
+        return results
 
     # ── Morphological search ─────────────────────────────────────
 

@@ -1,4 +1,4 @@
-"""Tests for graceful degradation: circuit breakers, fallback chains, source indicators.
+﻿"""Tests for graceful degradation: circuit breakers, fallback chains, source indicators.
 
 Covers:
   - CircuitBreaker state transitions (closed → open → half-open → closed)
@@ -225,27 +225,47 @@ class TestCircuitBreakerRegistry:
 class TestFallbackOrder:
     """Test provider fallback order."""
 
+    _ALL = {"beeline", "beeline_fast", "qwen36", "qwen35", "ollama", "yandexgpt", "gigachat"}
+
     def test_ollama_primary(self) -> None:
         order = _get_fallback_order("ollama")
         assert order[0] == "ollama"
-        assert len(order) == 4
-        assert set(order) == {"ollama", "yandexgpt", "gigachat", "beeline"}
+        assert len(order) == 7
+        assert set(order) == self._ALL
 
     def test_beeline_primary(self) -> None:
         order = _get_fallback_order("beeline")
         assert order[0] == "beeline"
-        assert len(order) == 4
+        assert len(order) == 7
+
+    def test_qwen36_primary(self) -> None:
+        order = _get_fallback_order("qwen36")
+        assert order[0] == "qwen36"
+        assert len(order) == 7
+
+    def test_beeline_fast_primary(self) -> None:
+        order = _get_fallback_order("beeline_fast")
+        assert order[0] == "beeline_fast"
+        assert len(order) == 7
 
     def test_unknown_primary(self) -> None:
         order = _get_fallback_order("unknown")
-        assert order == ["ollama", "yandexgpt", "gigachat", "beeline"]
+        # Unknown provider → full canonical order
+        assert order[0] == "beeline"
+        assert set(order) == self._ALL
 
     def test_all_providers_included(self) -> None:
-        for primary in ["ollama", "yandexgpt", "gigachat", "beeline"]:
+        for primary in ["beeline", "beeline_fast", "qwen35", "qwen36", "ollama", "yandexgpt", "gigachat"]:
             order = _get_fallback_order(primary)
-            assert len(order) == 4
+            assert len(order) == 7
             assert order[0] == primary
-            assert len(set(order)) == 4  # No duplicates
+            assert len(set(order)) == 7  # No duplicates
+
+    def test_guardrails_providers_last(self) -> None:
+        """YandexGPT and GigaChat (Guardrails, unreliable) are last in the chain."""
+        order = _get_fallback_order("beeline")
+        assert order[-1] == "gigachat"
+        assert order[-2] == "yandexgpt"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -281,7 +301,7 @@ class TestAnalyzeDialogueFallback:
 
         mock_beeline = AsyncMock()
         mock_beeline.generate.return_value = '{"summary": "beeline result", "topic": "test", "client_sentiment": "neutral", "resolution": "unresolved", "key_points": [], "result": "", "restructured_dialogue": ""}'
-        mock_beeline.get_default_model = MagicMock(return_value="glm-5.1")
+        mock_beeline.get_default_model = MagicMock(return_value="glm-xlarge")
 
         def mock_get_provider(pid: str):
             if pid == "ollama":
@@ -321,7 +341,7 @@ class TestAnalyzeDialogueFallback:
 
         mock_beeline = AsyncMock()
         mock_beeline.generate.return_value = '{"summary": "beeline fallback", "topic": "test", "client_sentiment": "neutral", "resolution": "unresolved", "key_points": [], "result": "", "restructured_dialogue": ""}'
-        mock_beeline.get_default_model = MagicMock(return_value="glm-5.1")
+        mock_beeline.get_default_model = MagicMock(return_value="glm-xlarge")
 
         def mock_get_provider(pid: str):
             if pid == "beeline":
@@ -382,7 +402,7 @@ class TestAnalyzeDialogueFallback:
         """When get_provider returns None, it is skipped without error."""
         mock_beeline = AsyncMock()
         mock_beeline.generate.return_value = '{"summary": "beeline", "topic": "test", "client_sentiment": "neutral", "resolution": "unresolved", "key_points": [], "result": "", "restructured_dialogue": ""}'
-        mock_beeline.get_default_model = MagicMock(return_value="glm-5.1")
+        mock_beeline.get_default_model = MagicMock(return_value="glm-xlarge")
 
         def mock_get_provider(pid: str):
             # Return None for all except beeline
@@ -403,7 +423,7 @@ class TestAnalyzeDialogueFallback:
 
         mock_beeline = AsyncMock()
         mock_beeline.generate.return_value = '{"summary": "beeline fallback", "topic": "test", "client_sentiment": "neutral", "resolution": "unresolved", "key_points": [], "result": "", "restructured_dialogue": ""}'
-        mock_beeline.get_default_model = MagicMock(return_value="glm-5.1")
+        mock_beeline.get_default_model = MagicMock(return_value="glm-xlarge")
 
         def mock_get_provider(pid: str):
             if pid == "ollama":
@@ -648,7 +668,7 @@ class TestCircuitBreakerIntegration:
             assert result1.provider == "none"
 
         # Circuit breaker for each provider should have failures recorded
-        for pid in ["ollama", "yandexgpt", "gigachat", "beeline"]:
+        for pid in ["beeline", "beeline_fast", "qwen36", "qwen35", "ollama", "yandexgpt", "gigachat"]:
             cb = _get_circuit_breaker(pid)
             assert cb._failure_count > 0
 
@@ -664,7 +684,7 @@ class TestCircuitBreakerIntegration:
         # Now a request to ollama should skip it
         mock_beeline = AsyncMock()
         mock_beeline.generate.return_value = '{"summary": "beeline", "topic": "test", "client_sentiment": "neutral", "resolution": "unresolved", "key_points": [], "result": "", "restructured_dialogue": ""}'
-        mock_beeline.get_default_model = MagicMock(return_value="glm-5.1")
+        mock_beeline.get_default_model = MagicMock(return_value="glm-xlarge")
 
         def mock_get_provider(pid: str):
             if pid == "beeline":

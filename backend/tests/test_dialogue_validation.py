@@ -1,4 +1,4 @@
-"""Tests for dialogue validation endpoint (ID-12).
+﻿"""Tests for dialogue validation endpoint (ID-12).
 
 Tests cover:
   - DialogueValidationResult model validation
@@ -49,7 +49,7 @@ class TestDialogueValidationResultModel:
             reason="Диалог содержит осмысленные реплики клиента и сотрудника",
             language_detected="ru",
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
         )
         assert result.is_valid_dialogue is True
         assert result.confidence == 0.95
@@ -93,7 +93,7 @@ class TestDialogueValidationResultModel:
             reason="Валидный диалог с 5 репликами",
             language_detected="ru",
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
         )
         json_str = original.model_dump_json()
         restored = DialogueValidationResult.model_validate_json(json_str)

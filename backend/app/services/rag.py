@@ -8,7 +8,8 @@ Orchestrates the full RAG (Retrieval-Augmented Generation) pipeline:
   4. Generate answer via LLM with RAG-specific prompt
   5. Return answer with source citations
 
-CRITICAL: RAG inference must use GLM-5.1 only.
+CRITICAL: RAG inference must use a GLM model (glm-xlarge family code) only.
+Previously glm-5.1 was used; it is now decommissioned → glm-xlarge (GLM-5.2 family).
 Qwen model gives HTTP 500 on /api/v2/Rag/inference endpoint.
 This is documented in the code and enforced via _RAG_DEFAULT_MODEL constant.
 
@@ -41,12 +42,18 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
-# CRITICAL: RAG inference must use GLM-5.1 only.
+# CRITICAL: RAG inference must use a GLM model only (glm-xlarge family code).
+# glm-5.1 was decommissioned → replaced by glm-xlarge (GLM-5.2 family, per
+# official Beeline AI docs: https://docs.ai.beeline.ru/quickstart/models/).
 # Qwen model returns HTTP 500 on /api/v2/Rag/inference.
 # This constant is used as the default model for RAG answer generation.
-_RAG_DEFAULT_MODEL = "glm-5.1"
+_RAG_DEFAULT_MODEL = "glm-xlarge"
 
 # RAG-specific system prompt: answer based ONLY on provided context.
+#
+# NOTE: Mirrored in backend/app/prompts/rag.yaml (managed by prompt_manager).
+# Inline constant below is kept as backward-compat fallback — see
+# _resolve_system_prompt() in app.services.llm.
 _RAG_SYSTEM_PROMPT = """\
 Ты — помощник для анализа диалогов колл-центра. Отвечай на вопросы, основываясь ТОЛЬКО на предоставленном контексте из диалогов.
 
@@ -398,8 +405,8 @@ class RAGService:
     ) -> tuple[str, str, str, Optional[str]]:
         """Generate answer via LLM with RAG-specific prompt.
 
-        CRITICAL: Uses GLM-5.1 model only for RAG inference.
-        Qwen model gives HTTP 500 on /api/v2/Rag/inference.
+        CRITICAL: Uses a GLM model (glm-xlarge family code) only for RAG inference.
+        glm-5.1 was decommissioned → glm-xlarge (GLM-5.2 family). Qwen model gives HTTP 500 on /api/v2/Rag/inference.
 
         Uses circuit breaker + fallback chain from existing LLM infrastructure.
         System prompt instructs model to answer ONLY from context and cite sources.
@@ -414,13 +421,18 @@ class RAGService:
             On success: (answer, provider, model, None).
             On failure: ("", "none", "", error_message).
         """
-        from app.services.llm import get_provider, _get_circuit_breaker, _get_fallback_order
+        from app.services.llm import (
+            get_provider,
+            _get_circuit_breaker,
+            _get_fallback_order,
+            _resolve_system_prompt,
+        )
 
         # Build user prompt with context
         context_text = "\n\n".join(context_blocks)
         user_prompt = f"Контекст:\n{context_text}\n\nВопрос: {question}"
 
-        # CRITICAL: Force GLM-5.1 model for RAG inference.
+        # CRITICAL: Force GLM model (glm-xlarge family code) for RAG inference.
         # Qwen returns HTTP 500 on /api/v2/Rag/inference.
         model_override = self._rag_model
 
@@ -445,11 +457,18 @@ class RAGService:
             if provider is None:
                 continue
 
+            # External Guardrails providers are unreliable — warn on use.
+            if pid in ("yandexgpt", "gigachat"):
+                logger.warning(
+                    "RAG: using %s which goes through Guardrails — may fail",
+                    pid,
+                )
+
             try:
                 raw_response = await provider.generate(
                     prompt=user_prompt,
                     model=model_override,
-                    system_prompt=_RAG_SYSTEM_PROMPT,
+                    system_prompt=_resolve_system_prompt("rag", _RAG_SYSTEM_PROMPT),
                 )
 
                 # Record success in circuit breaker
@@ -551,7 +570,7 @@ class RAGService:
         from app.services.llm import get_provider, _get_circuit_breaker
 
         provider_status: Dict[str, Any] = {}
-        for pid in ("beeline", "ollama", "yandexgpt", "gigachat"):
+        for pid in ("beeline", "beeline_fast", "qwen36", "qwen35", "ollama", "yandexgpt", "gigachat"):
             provider = get_provider(pid)
             cb = _get_circuit_breaker(pid)
             provider_status[pid] = {
@@ -564,6 +583,6 @@ class RAGService:
             "vector_store": vector_stats,
             "hybrid_search": hybrid_stats,
             "rag_model": self._rag_model,
-            "rag_model_note": "GLM-5.1 only for RAG inference (Qwen gives HTTP 500 on /api/v2/Rag/inference)",
+            "rag_model_note": "GLM model (glm-xlarge family code) only for RAG inference (Qwen gives HTTP 500 on /api/v2/Rag/inference)",
             "providers": provider_status,
         }

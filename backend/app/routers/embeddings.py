@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from app.middleware.rate_limiter import limiter
-from app.models import HybridSearchResult, VectorSearchResult
+from app.models import EnhancedHybridSearchResult, HybridSearchResult, VectorSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +136,65 @@ class HybridSearchResponse(BaseModel):
     )
     query: str = Field(..., description="Original query text")
     total: int = Field(..., description="Total number of results returned")
+
+
+class EnhancedSearchRequest(BaseModel):
+    """Request for enhanced hybrid search (BM25 + advanced fusion + explain)."""
+
+    query: str = Field(
+        ..., min_length=1, max_length=2000,
+        description="Search query text",
+    )
+    session_id: Optional[str] = Field(
+        None, min_length=1, max_length=100,
+        description="Optional session ID to restrict search scope (and supply dialogue)",
+    )
+    top_k: int = Field(10, ge=1, le=100, description="Number of results to return")
+    use_semantic: bool = Field(True, description="Include semantic (FRIDA) search")
+    use_ner: bool = Field(True, description="Include NER boost in ranking")
+    use_bm25: bool = Field(
+        True,
+        description="Build a BM25 index over the dialogue turns and fuse as a third channel",
+    )
+    fusion_strategy: Literal["rrf", "convex", "log_odds"] = Field(
+        "rrf",
+        description=(
+            "Fusion strategy: rrf (Reciprocal Rank Fusion, default), "
+            "convex (min-max normalized weighted sum), "
+            "log_odds (dynamic per-query sigmoid calibration — best when dense & sparse have different scales)"
+        ),
+    )
+    explain: bool = Field(
+        False,
+        description="Compute token-level explanations (LIME-style) for the top results",
+    )
+
+    @field_validator("query")
+    @classmethod
+    def sanitize_query(cls, v: str) -> str:
+        """Remove control characters from query."""
+        return _sanitize_text(v)
+
+    @field_validator("session_id")
+    @classmethod
+    def sanitize_session_id(cls, v: Optional[str]) -> Optional[str]:
+        """Remove control characters from session_id."""
+        if v is None:
+            return v
+        return _sanitize_text(v)
+
+
+class EnhancedSearchResponse(BaseModel):
+    """Response from enhanced hybrid search."""
+
+    results: List[EnhancedHybridSearchResult] = Field(
+        default_factory=list,
+        description="Search results with BM25 score and token-level explanations",
+    )
+    query: str = Field(..., description="Original query text")
+    total: int = Field(..., description="Total number of results returned")
+    fusion_strategy: str = Field(..., description="Fusion strategy that was applied")
+    bm25_used: bool = Field(..., description="Whether the BM25 channel was used")
 
 
 class EmbeddingStatusResponse(BaseModel):
@@ -380,6 +439,65 @@ async def search_hybrid(
         results=results,
         query=body.query,
         total=len(results),
+    )
+
+
+@router.post(
+    "/search/enhanced",
+    response_model=EnhancedSearchResponse,
+    summary="Enhanced hybrid search",
+    description=(
+        "Enhanced hybrid search: morphology + semantics + NER + BM25 sparse channel, "
+        "fused via RRF / Convex / LogOdds. Optionally computes token-level explanations."
+    ),
+)
+@limiter.limit("100/minute")
+async def search_enhanced(
+    request: Request,
+    body: EnhancedSearchRequest,
+) -> EnhancedSearchResponse:
+    """Enhanced hybrid search with BM25 + advanced fusion + explainability."""
+    from app.utils.session import session_store
+
+    hybrid_search_service = _get_hybrid_search_service(request)
+
+    # Resolve dialogue + dictionaries from session (same pattern as /search/hybrid).
+    dialogue = None
+    dictionaries = None
+
+    if body.session_id:
+        session = session_store.get(body.session_id)
+        if session is not None:
+            dialogue = session.dialog
+            if session.dictionaries:
+                dictionaries = list(session.dictionaries.values())
+
+    # Run enhanced search.
+    try:
+        results = await hybrid_search_service.search_enhanced(
+            query=body.query,
+            dialogue=dialogue,
+            dictionaries=dictionaries,
+            top_k=body.top_k,
+            use_semantic=body.use_semantic,
+            use_ner=body.use_ner,
+            use_bm25=body.use_bm25,
+            fusion_strategy=body.fusion_strategy,
+            explain=body.explain,
+        )
+    except Exception as exc:
+        logger.error("Enhanced search failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Enhanced search failed: {exc}",
+        )
+
+    return EnhancedSearchResponse(
+        results=results,
+        query=body.query,
+        total=len(results),
+        fusion_strategy=body.fusion_strategy,
+        bm25_used=body.use_bm25,
     )
 
 

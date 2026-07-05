@@ -17,6 +17,10 @@ export interface DialogueTurn {
   speaker: string;
   text: string;
   timestamp: string | null;
+  /** UI-2.6: turn start offset in seconds from dialogue start (null when RTF lacks timing). */
+  start_offset?: number | null;
+  /** UI-2.6: turn end offset in seconds from dialogue start (null when RTF lacks timing). */
+  end_offset?: number | null;
 }
 
 export interface UploadRtfResponse {
@@ -37,6 +41,54 @@ export interface PhraseGroupVisual {
   is_exception: boolean;
 }
 
+// ═══════════════════════════════════════════════════════════
+// ExtraLimitations (UI-2.6 time-gap limits from <ExtraLimitations>)
+// Mirrors backend ExtraLimitation / ExtraLimitationLimit in models.py.
+// ═══════════════════════════════════════════════════════════
+
+/** Mirrors backend ExtraLimitationLimit. Optional member of ExtraLimitation.limits. */
+export interface ExtraLimitationLimit {
+  value: number;
+  /** "Seconds" | "Words" | ... */
+  value_type: string;
+  /** "CLIENT" | "OPERATOR" | "ANY" */
+  channel: string;
+  enabled: boolean;
+  /** "First" | "Last" — only for EventType=StartEnd */
+  limit_type?: string | null;
+  /** "Each" | "First" | ... — only for EventType=Parent */
+  event_selector?: string | null;
+  /** "Before" | "After" — only for EventType=Parent */
+  search_direction?: string | null;
+}
+
+/** Mirrors backend ExtraLimitation. Optional on DictionaryCondition. */
+export interface ExtraLimitation {
+  /** "StartEnd" | "Parent" | "" */
+  event_type: string;
+  /** "OnlyInGaps" | "ExcludeGaps" | ... */
+  search_specifier: string;
+  settings: Record<string, unknown>;
+  limits: ExtraLimitationLimit[];
+}
+
+/** Mirrors backend SavedState. Optional on DictionaryNode. */
+export interface SavedState {
+  total_found: number;
+  last_update_time: string | null;
+  execution_time: string | null;
+  is_actual: boolean;
+  is_cancelled: boolean;
+}
+
+/**
+ * Mirrors backend AttributeSection. Optional on DictionaryNode.
+ * Permissive shape — FE does not render attributes yet.
+ */
+export interface AttributeSection {
+  [key: string]: unknown;
+}
+
 export interface DictionaryCondition {
   text: string;
   word_distance: number;
@@ -53,6 +105,8 @@ export interface DictionaryCondition {
   is_exception?: boolean;
   /** Exception phrases (prefixed with НЕ) */
   exception_phrases?: string[];
+  /** UI-2.6: real XML time-gap limits (NOT phrase-WITHOUT). Optional — FE may not render. */
+  extra_limitations?: ExtraLimitation[];
 }
 
 export interface DictionaryNode {
@@ -64,6 +118,14 @@ export interface DictionaryNode {
   condition_count: number;
   has_children: boolean;
   children_count: number;
+  /** UI-2.6: SavedState from XML (TotalFound, LastUpdateTime, ExecutionTime, IsActual, IsCancelled). Optional. */
+  saved_state?: SavedState | null;
+  /** UI-2.6: Attributes section (AttributeTokens). Optional. */
+  attributes?: AttributeSection | null;
+  /** UI-2.6: whether this node is a <SpeechLabRemainderRequest> catch-all. */
+  is_remainder?: boolean;
+  // NOTE: token_section, phrase_groups (internal), attribute_tree are NOT
+  // exposed to FE — they are BE-internal. See backend/app/models.py.
 }
 
 export interface DictionaryValidation {
@@ -113,6 +175,10 @@ export interface DictMatch {
   channel_constraint?: string;
   /** Original word_distance from dictionary condition (0=adjacent, 1=1 gap, etc.) */
   word_distance?: number;
+  /** UI-2.6: dictionary level (alias for word_distance_used hierarchy level). Optional — FE may not use it. */
+  dict_level?: number;
+  /** UI-2.6: whether this match is from a SpeechLabRemainderRequest catch-all node. */
+  is_remainder?: boolean;
 }
 
 export interface SearchResult {
@@ -425,4 +491,162 @@ export interface QualityScoreResult {
 export interface QualityScoreRequest {
   session_id: string;
   provider_id?: string;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Dictionary Editing & Analysis (UI-3)
+// Mirrors backend DTOs from:
+//   - backend/app/routers/dictionary.py (request/response DTOs)
+//   - backend/app/services/dict_utils.py (DuplicateReport, DictionaryStats, ValidationResult)
+//   - backend/app/services/dictionary_ai.py (DictionarySuggestion, DictionaryAnalysisResult)
+// ═══════════════════════════════════════════════════════════
+
+/** Body for POST /nodes. */
+export interface NodeCreateRequest {
+  name: string;
+  parent_name?: string | null;
+}
+
+/** Body for PATCH /nodes/{node_id}. All fields optional. */
+export interface NodeUpdateRequest {
+  name?: string;
+  saved_state?: SavedState | null;
+  attributes?: AttributeSection | null;
+}
+
+/** Body for POST /nodes/{node_id}/conditions. */
+export interface ConditionCreateRequest {
+  text: string;
+  word_distance?: number;
+  channel_constraint?: string;
+  is_exact?: boolean;
+  is_exception?: boolean;
+  phrase_groups?: PhraseGroupVisual[];
+  open_brackets?: number;
+  close_brackets?: number;
+  /** Operator preceding this condition: "" | "И" | "ИЛИ" | "НЕ" | "И НЕ" | "ИЛИ НЕ". */
+  logic_operator?: string;
+}
+
+/** Body for PATCH /nodes/{node_id}/conditions/{idx}. All fields optional. */
+export type ConditionUpdateRequest = Partial<ConditionCreateRequest>;
+
+/** Body for POST /nodes/{node_id}/conditions/reorder. */
+export interface ReorderRequest {
+  /** Old condition indices in the desired new order. Must be a permutation of range(n). */
+  new_order: number[];
+}
+
+/** Body for POST /analyze-ai. */
+export interface AnalyzeAiRequest {
+  dict_name?: string | null;
+  provider_id?: string | null;
+}
+
+/** Body for POST /suggest-phrases. */
+export interface SuggestPhrasesRequest {
+  dict_name?: string | null;
+  provider_id?: string | null;
+  count?: number;
+}
+
+/** Body for endpoints that only need a dict_name (duplicates/stats/validate). */
+export interface DictNameRequest {
+  dict_name?: string | null;
+}
+
+/** Body for POST /export-xml. */
+export interface ExportXmlRequest {
+  dict_name?: string | null;
+  pretty?: boolean;
+}
+
+// --- Response shapes ---
+
+/** Response for POST /conditions. */
+export interface ConditionCreateResponse {
+  condition: DictionaryCondition;
+  index: number;
+}
+
+/** Response for DELETE endpoints. */
+export interface DeleteResponse {
+  deleted: boolean;
+  node_name?: string | null;
+  condition_idx?: number | null;
+}
+
+/** Response for POST /conditions/reorder. */
+export interface ReorderResponse {
+  conditions: DictionaryCondition[];
+}
+
+/** Response for POST /suggest-phrases. */
+export interface SuggestPhrasesResponse {
+  suggestions: DictionarySuggestion[];
+}
+
+/** Mirrors backend DictionarySuggestion (dictionary_ai.py). */
+export interface DictionarySuggestion {
+  phrase: string;
+  /** "ANY" | "OPERATOR" | "CLIENT" */
+  channel: string;
+  distance: number;
+}
+
+/** Mirrors backend DictionaryAnalysisResult (dictionary_ai.py). */
+export interface DictionaryAnalysisResult {
+  summary: string;
+  examples: string[];
+  recommendations: string[];
+  raw_response: string;
+}
+
+/** Mirrors backend DupPair (dict_utils.py). */
+export interface DupPair {
+  row_a: number;
+  row_b: number;
+  /** Normalised phrase text (or shared key). */
+  phrase: string;
+  is_exact_a: boolean;
+  is_exact_b: boolean;
+}
+
+/** Mirrors backend DuplicateReport (dict_utils.py). */
+export interface DuplicateReport {
+  /** Identical phrases including is_exact flag (true duplicates). */
+  full: DupPair[];
+  /** Same word set but differ in quoting, channel, or word distance. */
+  soft: DupPair[];
+}
+
+/** Mirrors backend WordFreq (dict_utils.py). */
+export interface WordFreq {
+  word: string;
+  count: number;
+}
+
+/** Mirrors backend DictionaryStats (dict_utils.py). */
+export interface DictionaryStats {
+  total_conditions: number;
+  total_words: number;
+  unique_words: number;
+  operators_count: Record<string, number>;
+  brackets_count: number;
+  channels_distribution: Record<string, number>;
+}
+
+/** Mirrors backend ValidationIssue (dict_utils.py). */
+export interface ValidationIssue {
+  /** Row index (-1 = global). */
+  row: number;
+  /** "error" | "warning" */
+  severity: string;
+  message: string;
+}
+
+/** Mirrors backend ValidationResult (dict_utils.py). */
+export interface ValidationResult {
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
 }

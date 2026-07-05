@@ -136,6 +136,14 @@ async def lifespan(app: FastAPI):
     _init_services()
     logger.info("FRIDA embedding services initialized")
 
+    # Fetch and log dynamic LLM concurrency limits from Beeline AI
+    # (observability only — semaphores are not resized at runtime).
+    try:
+        from app.services.llm_limits import fetch_and_log_all_limits
+        await fetch_and_log_all_limits()
+    except Exception as exc:  # noqa: BLE001 — startup must not fail on monitoring
+        logger.warning("Startup: LLM limits fetch skipped — %s", exc)
+
     yield
 
     # Shutdown — clean up expired sessions

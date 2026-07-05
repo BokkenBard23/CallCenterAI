@@ -1,4 +1,4 @@
-"""Comprehensive tests for auto-resolution + sentiment trajectory (ID-3).
+﻿"""Comprehensive tests for auto-resolution + sentiment trajectory (ID-3).
 
 Covers:
   - ResolutionClassification enum (4 values)
@@ -180,7 +180,7 @@ class TestResolutionSentimentResult:
             sentiment_end="positive",
             trajectory_direction="improving",
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
         )
         assert result.resolution == ResolutionClassification.resolved
         assert len(result.sentiment_trajectory) == 1

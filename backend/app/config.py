@@ -45,9 +45,29 @@ class Settings(BaseSettings):
     gigachat_auth_key: str = ""
     gigachat_scope: str = "GIGACHAT_API_PERS"
 
-    # ── LLM: Beeline AI ──
+    # ── LLM: Beeline AI (GLM family) ──
+    # Model codes per official Beeline AI docs (https://docs.ai.beeline.ru/quickstart/models/).
+    # Family codes are lowercase slugs sent in the `model` field of
+    # POST /api/v3/chat/completions.
     beeline_api_key: str = ""
-    beeline_default_model: str = "glm-5.1"
+    beeline_default_model: str = "glm-xlarge"  # GLM-5.2 family, serious tasks (summary, quality, dict_analysis, restructured)
+    beeline_fast_model: str = "glm-xlarge-fast"  # GLM-5.2 fast, short classifications (shares GLM slots)
+    # ── LLM: Qwen family via Beeline AI (OpenAI-compatible endpoint) ──
+    # `qwen-medium`        — Qwen3.5-35B stable family code (3 parallel slots)
+    # `qwen-medium-preview` — Qwen3.6-35B temporary preview code (3 parallel slots)
+    qwen35_model: str = "qwen-medium"             # Qwen3.5-35B (stable)
+    qwen35_fast_model: str = "qwen-medium-fast"   # Qwen3.5-35B fast
+    qwen36_model: str = "qwen-medium-preview"     # Qwen3.6-35B (preview)
+    qwen36_fast_model: str = "qwen-medium-preview-fast"  # Qwen3.6-35B fast (preview)
+
+    # ── Per-provider parallelism (asyncio.Semaphore sizes) ──
+    # Total max parallel = 2 (GLM) + 3 (Qwen3.5) + 3 (Qwen3.6) = 8
+    # NOTE: actual concurrent limits are also exposed dynamically via
+    # GET /api/v3/me/limits?model={publicModelName} (see app.services.llm_limits).
+    # These values are fallback defaults used when the limits API is unreachable.
+    glm_max_concurrent: int = 2      # shared between glm-xlarge and glm-xlarge-fast
+    qwen35_max_concurrent: int = 3
+    qwen36_max_concurrent: int = 3
 
     # ── Embeddings: FRIDA (Beeline AI) ──
     frida_base_url: str = "https://api.ai.beeline.ru/api/v3"
@@ -77,6 +97,9 @@ class Settings(BaseSettings):
     # ── LLM Orchestrator (IP-3.6) ──
     llm_orchestrator_steps: List[str] = ["sentiment", "conflict", "profanity", "topic"]
     llm_orchestrator_enabled: bool = True
+    # Parallel mode: run all analysis steps concurrently via asyncio.gather.
+    # Each step respects its provider's semaphore, so the 8-slot budget is honoured.
+    llm_orchestrator_parallel: bool = True
 
     # ── Domain-specific analysis (IP-6.1) ──
     analysis_default_domain: str = "general"

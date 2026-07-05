@@ -1,4 +1,4 @@
-"""Comprehensive tests for error classifier (IP-5.2).
+﻿"""Comprehensive tests for error classifier (IP-5.2).
 
 Covers:
   - ErrorCategory enum (7 values)
@@ -186,7 +186,7 @@ class TestErrorClassificationResult:
             total_errors=1,
             errors_by_category={"compliance_violation": 1},
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
         )
         assert result.has_errors is True
         assert result.total_errors == 1

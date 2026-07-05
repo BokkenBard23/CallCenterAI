@@ -1,4 +1,4 @@
-"""Comprehensive tests for the RAG pipeline service and router.
+﻿"""Comprehensive tests for the RAG pipeline service and router.
 
 Tests cover:
   1. RAG happy path (FRIDA + LLM both available)
@@ -12,7 +12,7 @@ Tests cover:
   9. Config defaults
   10. Context truncation (long context)
   11. Rate limiting
-  12. RAG model forced to GLM-5.1
+  12. RAG model forced to glm-xlarge
 """
 
 from __future__ import annotations
@@ -182,8 +182,8 @@ class TestRAGHappyPath:
 
     @pytest.mark.asyncio
     async def test_happy_path_llm_model_is_glm51(self) -> None:
-        """RAG inference must use GLM-5.1 model (Qwen gives 500)."""
-        assert _RAG_DEFAULT_MODEL == "glm-5.1"
+        """RAG inference must use glm-xlarge model (Qwen gives 500)."""
+        assert _RAG_DEFAULT_MODEL == "glm-xlarge"
 
         fragments = [_make_hybrid_search_result()]
         rag_service = _make_rag_service(hybrid_results=fragments)
@@ -203,10 +203,10 @@ class TestRAGHappyPath:
 
             await rag_service.query(question="Тест?", provider_id="beeline")
 
-            # Verify generate was called with GLM-5.1 model
+            # Verify generate was called with glm-xlarge model
             mock_provider.generate.assert_called_once()
             call_kwargs = mock_provider.generate.call_args
-            assert call_kwargs.kwargs.get("model") == "glm-5.1" or call_kwargs[1].get("model") == "glm-5.1"
+            assert call_kwargs.kwargs.get("model") == "glm-xlarge" or call_kwargs[1].get("model") == "glm-xlarge"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -627,7 +627,7 @@ class TestRAGStatus:
 
         status = await rag_service.get_status()
 
-        assert status["rag_model"] == "glm-5.1"
+        assert status["rag_model"] == "glm-xlarge"
         assert "qwen" in status["rag_model_note"].lower() or "500" in status["rag_model_note"]
 
     @pytest.mark.asyncio
@@ -655,8 +655,8 @@ class TestConfigDefaults:
     """RAG configuration defaults are correct."""
 
     def test_rag_default_model_is_glm51(self) -> None:
-        """Default RAG model is GLM-5.1 (Qwen gives 500)."""
-        assert _RAG_DEFAULT_MODEL == "glm-5.1"
+        """Default RAG model is glm-xlarge (Qwen gives 500)."""
+        assert _RAG_DEFAULT_MODEL == "glm-xlarge"
 
     def test_rag_system_prompt_mentions_context_only(self) -> None:
         """System prompt instructs model to answer only from context."""
@@ -877,8 +877,8 @@ class TestRAGRouter:
             "frida_available": True,
             "vector_store": {"total_vectors": 100, "unique_dialogues": 5, "index_size_bytes": 614400},
             "hybrid_search": {"rrf_k": 60, "ner_available": True},
-            "rag_model": "glm-5.1",
-            "rag_model_note": "GLM-5.1 only for RAG inference",
+            "rag_model": "glm-xlarge",
+            "rag_model_note": "glm-xlarge only for RAG inference",
             "providers": {},
         })
 

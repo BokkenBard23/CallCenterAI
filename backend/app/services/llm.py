@@ -11,6 +11,12 @@ CRITICAL PROMPT requirements:
   - Must instruct model to reconstruct dialogue as alternating short replicas
   - Must request JSON output format
   - 30-second timeout, 1 retry on failure
+
+NOTE: Prompts are migrating to ``backend/app/prompts/*.yaml`` (managed by
+:class:`app.services.prompt_manager.PromptManager`). Inline constants
+below are kept as fallback for backward compatibility — if YAML is
+missing or a specific prompt is not found there, the inline constant is
+used. See :func:`_resolve_system_prompt`.
 """
 
 from __future__ import annotations
@@ -54,6 +60,10 @@ from app.models import (
     ErrorClassificationResult,
     DomainType,
 )
+# YAML prompt manager — used as the primary source for system prompts.
+# Inline constants below remain as backward-compat fallback. The import
+# is intentionally lazy-tolerant: a missing prompts/ dir never crashes.
+from app.services.prompt_manager import prompt_manager
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +214,11 @@ def get_circuit_breaker_stats() -> Dict[str, Dict[str, Any]]:
 def _get_fallback_order(primary_provider_id: str) -> List[str]:
     """Get ordered list of provider IDs for fallback chain.
 
-    The requested provider comes first, then others in a stable order.
+    New priority (per official Beeline AI model codes — glm-xlarge is GLM-5.2 family):
+      beeline (glm-xlarge) → qwen36 → qwen35 → beeline_fast (shared GLM slot)
+      → ollama (local) → yandexgpt → gigachat (Guardrails, unreliable, last resort)
+
+    The requested provider comes first, then the rest in the canonical order.
 
     Args:
         primary_provider_id: The initially requested provider.
@@ -212,7 +226,15 @@ def _get_fallback_order(primary_provider_id: str) -> List[str]:
     Returns:
         List of provider IDs starting with the primary, then others.
     """
-    all_providers = ["ollama", "yandexgpt", "gigachat", "beeline"]
+    all_providers = [
+        "beeline",
+        "qwen36",
+        "qwen35",
+        "beeline_fast",
+        "ollama",
+        "yandexgpt",
+        "gigachat",
+    ]
 
     if primary_provider_id in all_providers:
         order = [primary_provider_id]
@@ -252,30 +274,50 @@ _SYSTEM_PROMPT = """Ты — аналитик колл-центра. Проан�
 # ═══════════════════════════════════════════════════════════
 
 class LLMProvider(ABC):
-    """Abstract base class for LLM providers."""
+    """Abstract base class for LLM providers with per-provider concurrency limiting.
 
-    @abstractmethod
+    Each provider holds an ``asyncio.Semaphore`` (created lazily inside an event
+    loop) that caps the number of concurrent in-flight API calls. The public
+    :meth:`generate` acquires the semaphore and delegates to :meth:`_do_generate`,
+    which subclasses implement.
+
+    GLM-family providers (``glm-xlarge`` + ``glm-xlarge-fast``) SHARE a single
+    semaphore (2 slots) because they compete for the same backend capacity.
+    Qwen providers have their own per-version semaphores (3 slots each).
+    """
+
+    def __init__(self, max_concurrent: int = 1) -> None:
+        self._max_concurrent = max_concurrent
+        self._semaphore: Optional[asyncio.Semaphore] = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Lazily create the per-provider semaphore (must run inside an event loop)."""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        return self._semaphore
+
     async def generate(
         self,
         prompt: str,
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
     ) -> str:
-        """Generate text from the LLM.
+        """Generate text — acquires the concurrency semaphore, then delegates.
 
-        Args:
-            prompt: User prompt text.
-            model: Optional model override.
-            system_prompt: Optional system prompt override.
-                When *None*, the provider uses its default system prompt.
-
-        Returns:
-            Raw generated text.
-
-        Raises:
-            ConnectionError: If the LLM service is unavailable.
-            TimeoutError: If the request times out.
+        Backward-compatible public signature: callers (``analyze_dialogue``,
+        ``_run_llm_analysis``, RAG, dictionary_ai) keep using ``generate()``.
         """
+        async with self._get_semaphore():
+            return await self._do_generate(prompt, model=model, system_prompt=system_prompt)
+
+    @abstractmethod
+    async def _do_generate(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Actual API call — subclasses implement. Semaphore already acquired."""
 
     @abstractmethod
     async def is_available(self) -> bool:
@@ -305,11 +347,12 @@ class LLMProvider(ABC):
 class OllamaProvider(LLMProvider):
     """Ollama local LLM provider."""
 
-    def __init__(self, base_url: str, default_model: str) -> None:
+    def __init__(self, base_url: str, default_model: str, max_concurrent: int = 2) -> None:
+        super().__init__(max_concurrent=max_concurrent)
         self._base_url = base_url.rstrip("/")
         self._default_model = default_model
 
-    async def generate(
+    async def _do_generate(
         self,
         prompt: str,
         model: Optional[str] = None,
@@ -366,15 +409,22 @@ class OllamaProvider(LLMProvider):
 # ═══════════════════════════════════════════════════════════
 
 class YandexGPTProvider(LLMProvider):
-    """YandexGPT cloud LLM provider."""
+    """YandexGPT cloud LLM provider (DEPRECATED — goes through Guardrails, unreliable)."""
 
-    def __init__(self, api_key: str, folder_id: str, default_model: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        folder_id: str,
+        default_model: str,
+        max_concurrent: int = 2,
+    ) -> None:
+        super().__init__(max_concurrent=max_concurrent)
         self._api_key = api_key
         self._folder_id = folder_id
         self._default_model = default_model
         self._base_url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
-    async def generate(
+    async def _do_generate(
         self,
         prompt: str,
         model: Optional[str] = None,
@@ -444,14 +494,20 @@ class YandexGPTProvider(LLMProvider):
 # ═══════════════════════════════════════════════════════════
 
 class GigaChatProvider(LLMProvider):
-    """GigaChat cloud LLM provider."""
+    """GigaChat cloud LLM provider (DEPRECATED — goes through Guardrails, unreliable)."""
 
-    def __init__(self, auth_key: str, scope: str = "GIGACHAT_API_PERS") -> None:
+    def __init__(
+        self,
+        auth_key: str,
+        scope: str = "GIGACHAT_API_PERS",
+        max_concurrent: int = 2,
+    ) -> None:
+        super().__init__(max_concurrent=max_concurrent)
         self._auth_key = auth_key
         self._scope = scope
         self._base_url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-    async def generate(
+    async def _do_generate(
         self,
         prompt: str,
         model: Optional[str] = None,
@@ -515,24 +571,49 @@ class GigaChatProvider(LLMProvider):
 
 
 # ═══════════════════════════════════════════════════════════
-# Beeline AI provider (OpenAI-compatible API)
+# Beeline AI providers (OpenAI-compatible API)
 # ═══════════════════════════════════════════════════════════
 
-class BeelineProvider(LLMProvider):
-    """Beeline AI cloud LLM provider.
+# Shared GLM-family semaphore: glm-xlarge + glm-xlarge-fast compete for the
+# same 2 backend slots (per Beeline AI capacity spec). Created lazily.
+_glm_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_glm_semaphore() -> asyncio.Semaphore:
+    """Lazily create the shared GLM-family semaphore (must run inside an event loop)."""
+    global _glm_semaphore
+    if _glm_semaphore is None:
+        _glm_semaphore = asyncio.Semaphore(settings.glm_max_concurrent)
+    return _glm_semaphore
+
+
+class BeelineAIProvider(LLMProvider):
+    """Base for Beeline AI OpenAI-compatible providers (GLM + Qwen families).
 
     Uses the OpenAI-compatible chat completions API at api.ai.beeline.ru.
     Endpoints:
       - POST /api/v3/chat/completions — generate response
       - GET  /api/v3/models          — list available models
+
+    Subclasses set ``_provider_id``, ``_default_model`` and may override
+    :meth:`_get_semaphore` to share a semaphore family (e.g. GLM).
     """
 
-    def __init__(self, api_key: str, default_model: str = "glm-5.1") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        default_model: str,
+        max_concurrent: int = 2,
+        base_url: str = "https://api.ai.beeline.ru/api/v3",
+        provider_id: str = "beeline",
+    ) -> None:
+        super().__init__(max_concurrent=max_concurrent)
         self._api_key = api_key
         self._default_model = default_model
-        self._base_url = "https://api.ai.beeline.ru/api/v3"
+        self._base_url = base_url
+        self._provider_id = provider_id
 
-    async def generate(
+    async def _do_generate(
         self,
         prompt: str,
         model: Optional[str] = None,
@@ -615,7 +696,7 @@ class BeelineProvider(LLMProvider):
             return False
 
     def get_name(self) -> str:
-        return "beeline"
+        return self._provider_id
 
     def get_default_model(self) -> str:
         return self._default_model
@@ -623,6 +704,100 @@ class BeelineProvider(LLMProvider):
     def get_models(self) -> List[str]:
         """Return default model list; actual models fetched dynamically via /v3/models."""
         return [self._default_model, "llm-medium-moe-instruct"]
+
+
+class BeelineProvider(BeelineAIProvider):
+    """GLM-5.2 via Beeline AI (legacy class name kept for backward compat).
+
+    Uses the `glm-xlarge` family code per official Beeline AI docs
+    (https://docs.ai.beeline.ru/quickstart/models/). GLM-5.2 family, serious
+    tasks: summary, restructured, quality, dict_analysis.
+    Shares the 2-slot GLM-family semaphore with :class:`BeelineFastProvider`.
+    """
+
+    def __init__(self, api_key: str, default_model: str = "glm-xlarge") -> None:
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_concurrent=settings.glm_max_concurrent,
+            provider_id="beeline",
+        )
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """glm-xlarge shares the GLM-family semaphore with glm-xlarge-fast."""
+        return _get_glm_semaphore()
+
+
+class BeelineFastProvider(BeelineAIProvider):
+    """glm-xlarge-fast via Beeline AI — short classifications (fast profile).
+
+    Shares the 2-slot GLM-family semaphore with :class:`BeelineProvider`.
+    """
+
+    def __init__(self, api_key: str, default_model: str = "glm-xlarge-fast") -> None:
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_concurrent=settings.glm_max_concurrent,
+            provider_id="beeline_fast",
+        )
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """glm-xlarge-fast shares the GLM-family semaphore with glm-xlarge."""
+        return _get_glm_semaphore()
+
+
+class QwenProvider(BeelineAIProvider):
+    """Qwen 3.5/3.6 via Beeline AI (OpenAI-compatible endpoint).
+
+    Same API endpoint as BeelineProvider, different model id in the request body.
+    Uses the official `qwen-medium` / `qwen-medium-preview` family codes per
+    Beeline AI docs. 3 parallel slots per Qwen version (per capacity spec).
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        default_model: str = "qwen-medium-preview",
+        max_concurrent: int = 3,
+        provider_id: str = "qwen36",
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_concurrent=max_concurrent,
+            provider_id=provider_id,
+        )
+
+
+class Qwen35Provider(QwenProvider):
+    """Qwen 3.5 — fallback for medium tasks. 3 parallel slots.
+
+    Uses the `qwen-medium` family code (Qwen3.5-35B stable per Beeline AI docs).
+    """
+
+    def __init__(self, api_key: str, default_model: str = "qwen-medium") -> None:
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_concurrent=settings.qwen35_max_concurrent,
+            provider_id="qwen35",
+        )
+
+
+class Qwen36Provider(QwenProvider):
+    """Qwen 3.6 — primary for medium tasks + fallback for GLM. 3 parallel slots.
+
+    Uses the `qwen-medium-preview` family code (Qwen3.6-35B preview per Beeline AI docs).
+    """
+
+    def __init__(self, api_key: str, default_model: str = "qwen-medium-preview") -> None:
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_concurrent=settings.qwen36_max_concurrent,
+            provider_id="qwen36",
+        )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -945,11 +1120,17 @@ class LLMResultHandler:
 _PROVIDERS: Dict[str, LLMProvider] = {}
 
 
+# External providers that go through Guardrails and are frequently unreliable.
+# Kept as last-resort fallback only — emit a warning when they're actually used.
+_GUARDRAILS_PROVIDERS = {"yandexgpt", "gigachat"}
+
+
 def get_provider(provider_id: str) -> Optional[LLMProvider]:
     """Get or create an LLM provider by ID.
 
     Args:
-        provider_id: Provider identifier (ollama, yandexgpt, gigachat).
+        provider_id: Provider identifier
+            (beeline, beeline_fast, qwen35, qwen36, ollama, yandexgpt, gigachat).
 
     Returns:
         LLMProvider instance, or None if unknown provider.
@@ -978,6 +1159,21 @@ def get_provider(provider_id: str) -> Optional[LLMProvider]:
             api_key=settings.beeline_api_key,
             default_model=settings.beeline_default_model,
         )
+    elif provider_id == "beeline_fast":
+        provider = BeelineFastProvider(
+            api_key=settings.beeline_api_key,
+            default_model=settings.beeline_fast_model,
+        )
+    elif provider_id == "qwen35":
+        provider = Qwen35Provider(
+            api_key=settings.beeline_api_key,
+            default_model=settings.qwen35_model,
+        )
+    elif provider_id == "qwen36":
+        provider = Qwen36Provider(
+            api_key=settings.beeline_api_key,
+            default_model=settings.qwen36_model,
+        )
     else:
         return None
 
@@ -988,7 +1184,15 @@ def get_provider(provider_id: str) -> Optional[LLMProvider]:
 def get_all_providers() -> Dict[str, LLMProvider]:
     """Get all configured providers."""
     result: Dict[str, LLMProvider] = {}
-    for pid in ("ollama", "yandexgpt", "gigachat", "beeline"):
+    for pid in (
+        "beeline",
+        "beeline_fast",
+        "qwen36",
+        "qwen35",
+        "ollama",
+        "yandexgpt",
+        "gigachat",
+    ):
         provider = get_provider(pid)
         if provider is not None:
             result[pid] = provider
@@ -1007,7 +1211,8 @@ async def analyze_dialogue(
 
     Fallback order:
       1. Try requested provider
-      2. Try other available providers (in order: ollama, yandexgpt, gigachat, beeline)
+      2. Try other available providers (beeline → qwen36 → qwen35 →
+         beeline_fast → ollama → yandexgpt → gigachat)
       3. If all fail, return LLMResult with empty summary and provider="none"
 
     Circuit breaker:
@@ -1044,6 +1249,12 @@ async def analyze_dialogue(
         provider = get_provider(pid)
         if provider is None:
             continue
+
+        if pid in _GUARDRAILS_PROVIDERS:
+            logger.warning(
+                "Using %s which goes through Guardrails — may fail (last-resort fallback)",
+                pid,
+            )
 
         # Try to generate
         try:
@@ -1249,6 +1460,53 @@ def _safe_parse_model(raw: str, model_class: type, **extra: Any) -> Any:
                 model_class.__name__,
             )
     return model_class(**extra)
+
+
+# ═══════════════════════════════════════════════════════════
+# YAML prompt resolution (additive over inline constants)
+# ═══════════════════════════════════════════════════════════
+
+
+def _resolve_system_prompt(
+    task_name: str,
+    inline_fallback: str,
+    **placeholders: Any,
+) -> str:
+    """Resolve a system prompt by task name, with inline fallback.
+
+    Tries :data:`prompt_manager` first (YAML-driven). If the prompt is
+    not found there (missing YAML, missing key, or directory absent),
+    falls back to the provided inline constant. This keeps behaviour
+    backward-compatible: existing tests that don't ship YAML files
+    still pass via the inline path.
+
+    Args:
+        task_name: Prompt key in the YAML ``prompts:`` mapping
+            (e.g. ``"sentiment"``, ``"quality"``).
+        inline_fallback: Inline constant to use when YAML lookup fails.
+        **placeholders: Optional ``{placeholders}`` to substitute in
+            the YAML prompt (e.g. ``categories=...`` for quality).
+            Placeholders are NOT applied to the inline fallback — the
+            inline constants are already fully formatted.
+
+    Returns:
+        The resolved system prompt string.
+    """
+    yaml_prompt = prompt_manager.get(task_name)
+    if yaml_prompt is None:
+        return inline_fallback
+    if placeholders:
+        resolved = yaml_prompt.format_system(**placeholders)
+    else:
+        resolved = yaml_prompt.system
+    if not resolved.strip():
+        # Empty YAML prompt — fall back rather than send an empty system.
+        logger.warning(
+            "Empty YAML prompt for task %r — using inline fallback",
+            task_name,
+        )
+        return inline_fallback
+    return resolved
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1600,6 +1858,12 @@ async def _run_llm_analysis(
         if provider is None:
             continue
 
+        if pid in _GUARDRAILS_PROVIDERS:
+            logger.warning(
+                "Using %s which goes through Guardrails — may fail (last-resort fallback)",
+                pid,
+            )
+
         try:
             raw_response = await provider.generate(
                 dialogue_text, model=model, system_prompt=system_prompt,
@@ -1670,7 +1934,7 @@ async def analyze_sentiment(
     )
     return await _run_llm_analysis(
         dialogue_text=dialogue_text,
-        system_prompt=_SENTIMENT_SYSTEM_PROMPT,
+        system_prompt=_resolve_system_prompt("sentiment", _SENTIMENT_SYSTEM_PROMPT),
         model_class=SentimentAnalysisResult,
         default_instance=default,
         provider_id=provider_id,
@@ -1706,7 +1970,7 @@ async def analyze_conflict(
     )
     return await _run_llm_analysis(
         dialogue_text=dialogue_text,
-        system_prompt=_CONFLICT_SYSTEM_PROMPT,
+        system_prompt=_resolve_system_prompt("conflict", _CONFLICT_SYSTEM_PROMPT),
         model_class=ConflictAnalysisResult,
         default_instance=default,
         provider_id=provider_id,
@@ -1740,7 +2004,7 @@ async def analyze_profanity(
     )
     return await _run_llm_analysis(
         dialogue_text=dialogue_text,
-        system_prompt=_PROFANITY_SYSTEM_PROMPT,
+        system_prompt=_resolve_system_prompt("profanity", _PROFANITY_SYSTEM_PROMPT),
         model_class=ProfanityAnalysisResult,
         default_instance=default,
         provider_id=provider_id,
@@ -1774,7 +2038,7 @@ async def analyze_topic(
     )
     return await _run_llm_analysis(
         dialogue_text=dialogue_text,
-        system_prompt=_TOPIC_SYSTEM_PROMPT,
+        system_prompt=_resolve_system_prompt("topic", _TOPIC_SYSTEM_PROMPT),
         model_class=TopicAnalysisResult,
         default_instance=default,
         provider_id=provider_id,
@@ -1889,7 +2153,10 @@ async def analyze_quality(
     default = _build_quality_fallback_result(session_id)
     raw_result = await _run_llm_analysis(
         dialogue_text=dialogue_text,
-        system_prompt=_QUALITY_SYSTEM_PROMPT,
+        system_prompt=_resolve_system_prompt(
+            "quality", _QUALITY_SYSTEM_PROMPT,
+            categories=_QUALITY_CATEGORY_LIST,
+        ),
         model_class=QualityScoreResult,
         default_instance=default,
         provider_id=provider_id,
@@ -1945,7 +2212,9 @@ async def analyze_dialogue_validation(
     )
     return await _run_llm_analysis(
         dialogue_text=dialogue_text,
-        system_prompt=_VALIDATION_SYSTEM_PROMPT,
+        system_prompt=_resolve_system_prompt(
+            "validation", _VALIDATION_SYSTEM_PROMPT,
+        ),
         model_class=DialogueValidationResult,
         default_instance=default,
         provider_id=provider_id,
@@ -1998,7 +2267,9 @@ async def analyze_resolution_sentiment(
     )
 
     # Build system prompt with optional domain addition
-    system_prompt = _RESOLUTION_SENTIMENT_SYSTEM_PROMPT
+    system_prompt = _resolve_system_prompt(
+        "resolution_sentiment", _RESOLUTION_SENTIMENT_SYSTEM_PROMPT,
+    )
     domain_addition = get_domain_prompt_addition(domain)
     if domain_addition:
         system_prompt = domain_addition + "\n\n" + system_prompt
@@ -2071,7 +2342,9 @@ async def analyze_errors(
     )
 
     # Build system prompt with optional domain addition
-    system_prompt = _ERROR_CLASSIFIER_SYSTEM_PROMPT
+    system_prompt = _resolve_system_prompt(
+        "error_classifier", _ERROR_CLASSIFIER_SYSTEM_PROMPT,
+    )
     domain_addition = get_domain_prompt_addition(domain)
     if domain_addition:
         system_prompt = domain_addition + "\n\n" + system_prompt
@@ -2101,7 +2374,7 @@ async def analyze_errors(
 
 
 # ═══════════════════════════════════════════════════════════
-# IP-3.6: LLM Orchestrator — sequential analysis with progress
+# IP-3.6: LLM Orchestrator — analysis with progress + parallel mode
 # ═══════════════════════════════════════════════════════════
 
 from datetime import datetime, timezone
@@ -2109,15 +2382,64 @@ from datetime import datetime, timezone
 from app.models import AnalysisAnnotation, ProgressInfo
 
 
+# Soft task → provider preference hint. When a caller passes provider_id=None,
+# the orchestrator picks the first available provider from this list. The
+# fallback chain still applies if the preferred provider's circuit breaker
+# is open. Keys mirror the analysis-function / step names.
+#
+# Model codes per official Beeline AI docs (https://docs.ai.beeline.ru/quickstart/models/):
+#   - glm-xlarge         (GLM-5.2, serious tasks, 245K context, reasoning on) → 2 slots
+#   - glm-xlarge-fast    (GLM-5.2 fast, short classifications, no reasoning) → shares GLM slots
+#   - qwen-medium-preview (Qwen3.6-35B preview)                               → 3 slots
+#   - qwen-medium        (Qwen3.5-35B stable)                                 → 3 slots
+_TASK_MODEL_PREFERENCE: Dict[str, List[str]] = {
+    # Long generations → glm-xlarge (GLM-5.2, 245K context, reasoning on)
+    "summary": ["beeline", "qwen36"],            # glm-xlarge → qwen-medium-preview
+    "restructured": ["beeline", "qwen36"],
+    "quality": ["beeline", "qwen36"],
+    "resolution_sentiment": ["beeline", "qwen36"],
+    "dict_analysis": ["beeline", "qwen36"],
+    "dict_suggest": ["beeline", "qwen36"],
+    # Medium tasks → qwen-medium-preview (Qwen3.6, 3 slots) → qwen-medium
+    "topic": ["qwen36", "qwen35", "beeline"],    # qwen-medium-preview → qwen-medium → glm-xlarge
+    "conflict": ["qwen36", "qwen35", "beeline_fast"],
+    # Short classifications → glm-xlarge-fast (fast, no reasoning)
+    "sentiment": ["beeline_fast", "qwen36", "qwen35"],  # glm-xlarge-fast → qwen-medium-preview → qwen-medium
+    "profanity": ["beeline_fast", "qwen36"],     # shortest → fast
+    "validation": ["beeline_fast", "qwen36"],
+    "error_classifier": ["beeline_fast", "qwen36"],
+    # RAG forces GLM (frida embeddings require GLM backing)
+    "rag": ["beeline"],  # glm-xlarge
+}
+
+
+def _resolve_preferred_provider(task: str) -> Optional[str]:
+    """Pick the best provider id for a task (soft hint).
+
+    Returns the first provider id from ``_TASK_MODEL_PREFERENCE`` whose
+    circuit breaker is not open, or None.
+    """
+    for pid in _TASK_MODEL_PREFERENCE.get(task, []):
+        cb = _get_circuit_breaker(pid)
+        if cb.can_execute():
+            return pid
+    return None
+
+
 class LLMOrchestrator:
-    """Run all LLM analyses sequentially with progress tracking and
-    graceful degradation (IP-3.6).
+    """Run all LLM analyses with progress tracking and graceful degradation (IP-3.6).
+
+    Supports two execution modes:
+      - **parallel** (default): steps run concurrently via ``asyncio.gather``.
+        Each step's provider acquires its own semaphore, so the 8-slot global
+        budget (2 GLM + 3 Qwen3.5 + 3 Qwen3.6) is respected.
+      - **sequential**: steps run one after another (``parallel=False``).
+        Kept for deterministic ordering in tests and debugging.
 
     Each step is independent: failure of one does NOT block the others.
     Failed steps produce safe default results and are recorded in
     ``ProgressInfo.error_steps``. The overall result
-    (:class:`AnalysisAnnotation`) is always valid, though it may be
-    partial.
+    (:class:`AnalysisAnnotation`) is always valid, though it may be partial.
 
     Usage::
 
@@ -2125,7 +2447,8 @@ class LLMOrchestrator:
         annotation = await orchestrator.run_all_analyses(
             dialogue_text="...",
             session_id="abc",
-            provider_id="beeline",
+            provider_id="beeline",  # or None for per-task smart routing
+            parallel=True,          # default — uses settings.llm_orchestrator_parallel
         )
     """
 
@@ -2181,22 +2504,30 @@ class LLMOrchestrator:
         provider_id: str = "beeline",
         include_summary: bool = False,
         domain: str = "general",
+        parallel: Optional[bool] = None,
     ) -> AnalysisAnnotation:
-        """Run all configured LLM analyses sequentially.
+        """Run all configured LLM analyses.
 
         Args:
             dialogue_text: Full dialogue text for analysis.
             session_id: Session identifier.
-            provider_id: LLM provider id (default: beeline).
+            provider_id: LLM provider id (default: beeline). Pass None to
+                use per-task smart routing via ``_TASK_MODEL_PREFERENCE``.
             include_summary: If True, also run ``analyze_dialogue()``
                 and include the summary in the result.
             domain: Domain type for domain-specific prompt additions
                 (IP-6.1). Default: "general".
+            parallel: If True, run steps concurrently via ``asyncio.gather``.
+                If False, run sequentially. If None, falls back to
+                ``settings.llm_orchestrator_parallel`` (default True).
 
         Returns:
             :class:`AnalysisAnnotation` with individual results,
             progress info, domain, and metadata.
         """
+        if parallel is None:
+            parallel = settings.llm_orchestrator_parallel
+
         completed: List[str] = []
         error_steps: List[str] = []
         remaining = list(self._steps)
@@ -2206,47 +2537,73 @@ class LLMOrchestrator:
         first_provider: str = "none"
         first_model: str = ""
 
-        for step_name in self._steps:
-            remaining.remove(step_name)
+        def _record_step(step_name: str, result: Any) -> None:
+            """Attach a successful result and capture provider/model metadata."""
+            results[step_name] = result
+            completed.append(step_name)
+            nonlocal first_provider, first_model
+            if first_provider == "none" and hasattr(result, "provider"):
+                result_provider = getattr(result, "provider", "none")
+                if result_provider != "none":
+                    first_provider = result_provider
+                    first_model = getattr(result, "model", "")
 
+        # Build the (step → coroutine) mapping. Each step resolves its own
+        # provider_id: explicit override wins, else per-task smart routing.
+        step_coros: Dict[str, Any] = {}
+        for step_name in self._steps:
             func = self._get_step_function(step_name)
             if func is None:
-                logger.warning(
-                    "Unknown analysis step '%s' — skipping", step_name,
-                )
+                logger.warning("Unknown analysis step '%s' — skipping", step_name)
                 error_steps.append(step_name)
                 continue
+            step_provider = provider_id
+            if step_provider is None:
+                step_provider = _resolve_preferred_provider(step_name) or "beeline"
+            step_coros[step_name] = func(
+                dialogue_text=dialogue_text,
+                provider_id=step_provider,
+            )
 
-            try:
-                result = await func(
-                    dialogue_text=dialogue_text,
-                    provider_id=provider_id,
-                )
-                results[step_name] = result
-                completed.append(step_name)
-
-                # Capture first successful provider/model
-                if first_provider == "none" and hasattr(result, "provider"):
-                    result_provider = getattr(result, "provider", "none")
-                    if result_provider != "none":
-                        first_provider = result_provider
-                        first_model = getattr(result, "model", "")
-
-            except Exception as exc:
-                logger.error(
-                    "Orchestrator step '%s' failed: %s — graceful degradation",
-                    step_name,
-                    exc,
-                )
-                error_steps.append(step_name)
+        if parallel and step_coros:
+            # ── Parallel mode ──────────────────────────────────────────
+            gathered = await asyncio.gather(
+                *step_coros.values(), return_exceptions=True,
+            )
+            for (step_name, result) in zip(step_coros.keys(), gathered):
+                remaining.remove(step_name)
+                if isinstance(result, Exception):
+                    logger.error(
+                        "Orchestrator step '%s' failed: %s — graceful degradation",
+                        step_name, result,
+                    )
+                    error_steps.append(step_name)
+                else:
+                    _record_step(step_name, result)
+        else:
+            # ── Sequential mode ────────────────────────────────────────
+            for step_name, coro in step_coros.items():
+                remaining.remove(step_name)
+                try:
+                    result = await coro
+                    _record_step(step_name, result)
+                except Exception as exc:
+                    logger.error(
+                        "Orchestrator step '%s' failed: %s — graceful degradation",
+                        step_name, exc,
+                    )
+                    error_steps.append(step_name)
 
         # Optional: run summary analysis
         summary_result: Optional[LLMResult] = None
         if include_summary:
+            summary_provider = provider_id
+            if summary_provider is None:
+                summary_provider = _resolve_preferred_provider("summary") or "beeline"
             try:
                 summary_result = await analyze_dialogue(
                     dialogue_text=dialogue_text,
-                    provider_id=provider_id,
+                    provider_id=summary_provider,
                 )
                 # If summary succeeded, use its provider if we don't have one yet
                 if first_provider == "none" and summary_result.provider != "none":

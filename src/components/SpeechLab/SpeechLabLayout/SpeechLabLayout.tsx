@@ -22,6 +22,7 @@
 
 import { Box, Tab, Tabs } from '@beeline/design-system-react';
 import { Group, Panel, Separator } from 'react-resizable-panels';
+import type { Layout } from 'react-resizable-panels';
 
 import type { SpeechLabTreeNode } from '../../../types/speechlab';
 import type { SearchResult, TextSegment } from '../../../types/api';
@@ -40,9 +41,6 @@ const DEFAULT_LEFT_SIZE = 25;
 const DEFAULT_RIGHT_SIZE = 75;
 const MIN_LEFT_SIZE = 15;
 const MAX_LEFT_SIZE = 45;
-
-/** Minimum size for left panel to prevent it from being too narrow */
-const MIN_VALID_LEFT_SIZE = 15;
 
 type TabValue = 'query' | 'found-records';
 
@@ -96,11 +94,19 @@ export default function SpeechLabLayout({
   treeError,
   expandedNodes,
 }: SpeechLabLayoutProps) {
-  // Simple layout state — defaults on mount
-  const [layout] = useState<number[]>([DEFAULT_LEFT_SIZE, DEFAULT_RIGHT_SIZE]);
+  // Default panel layout keyed by Panel id (matches react-resizable-panels Layout type).
+  const defaultLayout: Layout = {
+    [PANEL_LEFT_ID]: DEFAULT_LEFT_SIZE,
+    [PANEL_RIGHT_ID]: DEFAULT_RIGHT_SIZE,
+  };
 
   // Tab state
   const [activeTab, setActiveTab] = useStateTab();
+
+  // Persist layout changes — currently a no-op; localStorage wiring can be added later.
+  const handleLayoutChanged = useCallback(() => {
+    // TODO: persist to localStorage if needed.
+  }, []);
 
   const totalMatches = searchResult?.total_matches ?? 0;
 
@@ -108,7 +114,7 @@ export default function SpeechLabLayout({
     <Box className="speechlab-layout">
       <Group
         id={LAYOUT_STORAGE_KEY}
-        defaultLayout={layout}
+        defaultLayout={defaultLayout}
         onLayoutChanged={handleLayoutChanged}
         orientation="horizontal"
         className="speechlab-layout__group"

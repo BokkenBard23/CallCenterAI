@@ -1,4 +1,4 @@
-"""Comprehensive tests for LLM analysis prompts (IP-3.2 – IP-3.5).
+﻿"""Comprehensive tests for LLM analysis prompts (IP-3.2 – IP-3.5).
 
 Covers each of the 4 analysis types:
   - Model validation (Pydantic models accept valid data, reject invalid)
@@ -153,7 +153,7 @@ class TestSentimentModels:
             overall_sentiment="positive",
             sentiment_trajectory="stable",
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
         )
         assert result.overall_sentiment == "positive"
         assert len(result.utterances) == 1
@@ -233,7 +233,7 @@ class TestProfanityModels:
             ],
             total_count=1,
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
         )
         assert result.has_profanity is True
         assert result.total_count == 1

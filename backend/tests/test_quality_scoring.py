@@ -1,4 +1,4 @@
-"""Comprehensive tests for quality scoring (IP-4.1).
+﻿"""Comprehensive tests for quality scoring (IP-4.1).
 
 Covers:
   - QualityCategory enum completeness (12 categories)
@@ -449,11 +449,11 @@ class TestComputeQualityDerivedFields:
             session_id="test",
             categories=categories,
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
         )
         computed = _compute_quality_derived_fields(result)
         assert computed.provider == "beeline"
-        assert computed.model == "glm-5.1"
+        assert computed.model == "glm-xlarge"
 
 
 # ═══════════════════════════════════════════════════════════

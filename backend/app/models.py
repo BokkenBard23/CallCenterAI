@@ -16,7 +16,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -1222,6 +1222,27 @@ class HybridSearchResult(BaseModel):
     source: str = Field(
         "hybrid",
         description="Источник результата: morph | semantic | hybrid | ner_boost",
+    )
+
+
+class EnhancedHybridSearchResult(HybridSearchResult):
+    """Расширенный результат гибридного поиска.
+
+    Добавляет BM25 sparse-скор и токен-уровневую объяснимость (LIME-style)
+    к базовому HybridSearchResult. Используется только в /search/enhanced.
+    """
+
+    bm25_score: float = Field(
+        0.0,
+        description="BM25 sparse-скор (Robertson IDF, k1=1.2, b=0.75)",
+    )
+    token_contributions: List[Tuple[str, float]] = Field(
+        default_factory=list,
+        description=(
+            "Токен-уровневые вклады в similarity: "
+            "[(token, contribution), ...] отсортированы по |contribution| desc. "
+            "Положительный вклад = токен усилил матч, отрицательный = ослабил."
+        ),
     )
 
 

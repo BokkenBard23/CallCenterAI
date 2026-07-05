@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 # Default configuration constants
 _DEFAULT_BASE_URL = "https://api.ai.beeline.ru/api/v3"
+# FRIDA embedding model id ("frida"). FRIDA requires GLM backing (per Beeline AI spec);
+# the embeddings endpoint itself accepts the "frida" model id — no glm-5.x reference needed
+# here. If a future FRIDA revision requires an explicit GLM model, set it via settings.frida_model.
 _DEFAULT_MODEL = "frida"
 _DEFAULT_MAX_BATCH_SIZE = 10
 _DEFAULT_MAX_TEXT_LENGTH = 5000

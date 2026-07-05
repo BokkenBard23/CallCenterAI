@@ -24,6 +24,25 @@ import type {
   FeedbackResponse,
   QualityScoreRequest,
   QualityScoreResult,
+  DictionaryNode,
+  DictionaryCondition,
+  NodeCreateRequest,
+  NodeUpdateRequest,
+  ConditionCreateRequest,
+  ConditionUpdateRequest,
+  ReorderRequest,
+  AnalyzeAiRequest,
+  SuggestPhrasesRequest,
+  DictNameRequest,
+  ExportXmlRequest,
+  ConditionCreateResponse,
+  DeleteResponse,
+  ReorderResponse,
+  SuggestPhrasesResponse,
+  DictionaryAnalysisResult,
+  DuplicateReport,
+  DictionaryStats,
+  ValidationResult,
 } from '../types/api';
 
 const API_BASE = '';
@@ -335,4 +354,292 @@ export async function getQualityScore(
     body: JSON.stringify(qualityRequest),
     signal,
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// Dictionary Editing & Analysis (UI-3)
+// Endpoints under /api/dictionary/{session_id}/...
+// See backend/app/routers/dictionary.py for the canonical contract.
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * POST /api/dictionary/{session_id}/nodes
+ * Add a new dictionary node (root dictionary when parent_name omitted).
+ */
+export async function addDictionaryNode(
+  sessionId: string,
+  body: NodeCreateRequest,
+  signal?: AbortSignal,
+): Promise<DictionaryNode> {
+  return request<DictionaryNode>(`/api/dictionary/${sessionId}/nodes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * PATCH /api/dictionary/{session_id}/nodes/{node_id}
+ * Update node metadata (name / saved_state / attributes).
+ */
+export async function updateDictionaryNode(
+  sessionId: string,
+  nodeId: string,
+  body: NodeUpdateRequest,
+  signal?: AbortSignal,
+): Promise<DictionaryNode> {
+  return request<DictionaryNode>(
+    `/api/dictionary/${sessionId}/nodes/${encodeURIComponent(nodeId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * DELETE /api/dictionary/{session_id}/nodes/{node_id}
+ * Remove a node (and its subtree). `dict_name` restricts search to one root.
+ */
+export async function deleteDictionaryNode(
+  sessionId: string,
+  nodeId: string,
+  dictName?: string | null,
+  signal?: AbortSignal,
+): Promise<DeleteResponse> {
+  const query = dictName ? `?dict_name=${encodeURIComponent(dictName)}` : '';
+  return request<DeleteResponse>(
+    `/api/dictionary/${sessionId}/nodes/${encodeURIComponent(nodeId)}${query}`,
+    {
+      method: 'DELETE',
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/nodes/{node_id}/conditions
+ * Add a new condition to a node. Returns the created condition + its index.
+ */
+export async function addDictionaryCondition(
+  sessionId: string,
+  nodeId: string,
+  body: ConditionCreateRequest,
+  dictName?: string | null,
+  signal?: AbortSignal,
+): Promise<ConditionCreateResponse> {
+  const query = dictName ? `?dict_name=${encodeURIComponent(dictName)}` : '';
+  return request<ConditionCreateResponse>(
+    `/api/dictionary/${sessionId}/nodes/${encodeURIComponent(nodeId)}/conditions${query}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * PATCH /api/dictionary/{session_id}/nodes/{node_id}/conditions/{condition_idx}
+ * Update an existing condition (partial merge).
+ */
+export async function updateDictionaryCondition(
+  sessionId: string,
+  nodeId: string,
+  conditionIdx: number,
+  body: ConditionUpdateRequest,
+  dictName?: string | null,
+  signal?: AbortSignal,
+): Promise<DictionaryCondition> {
+  const query = dictName ? `?dict_name=${encodeURIComponent(dictName)}` : '';
+  return request<DictionaryCondition>(
+    `/api/dictionary/${sessionId}/nodes/${encodeURIComponent(nodeId)}/conditions/${conditionIdx}${query}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * DELETE /api/dictionary/{session_id}/nodes/{node_id}/conditions/{condition_idx}
+ * Remove a condition by index.
+ */
+export async function deleteDictionaryCondition(
+  sessionId: string,
+  nodeId: string,
+  conditionIdx: number,
+  dictName?: string | null,
+  signal?: AbortSignal,
+): Promise<DeleteResponse> {
+  const query = dictName ? `?dict_name=${encodeURIComponent(dictName)}` : '';
+  return request<DeleteResponse>(
+    `/api/dictionary/${sessionId}/nodes/${encodeURIComponent(nodeId)}/conditions/${conditionIdx}${query}`,
+    {
+      method: 'DELETE',
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/nodes/{node_id}/conditions/reorder
+ * Reorder conditions. `new_order` is a list of old indices in new order.
+ */
+export async function reorderDictionaryConditions(
+  sessionId: string,
+  nodeId: string,
+  body: ReorderRequest,
+  dictName?: string | null,
+  signal?: AbortSignal,
+): Promise<ReorderResponse> {
+  const query = dictName ? `?dict_name=${encodeURIComponent(dictName)}` : '';
+  return request<ReorderResponse>(
+    `/api/dictionary/${sessionId}/nodes/${encodeURIComponent(nodeId)}/conditions/reorder${query}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/analyze-ai
+ * Run LLM dictionary analysis (summary / examples / recommendations).
+ */
+export async function analyzeDictionaryAi(
+  sessionId: string,
+  body: AnalyzeAiRequest,
+  signal?: AbortSignal,
+): Promise<DictionaryAnalysisResult> {
+  return request<DictionaryAnalysisResult>(
+    `/api/dictionary/${sessionId}/analyze-ai`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/suggest-phrases
+ * Generate phrase suggestions via the LLM.
+ */
+export async function suggestDictionaryPhrases(
+  sessionId: string,
+  body: SuggestPhrasesRequest,
+  signal?: AbortSignal,
+): Promise<SuggestPhrasesResponse> {
+  return request<SuggestPhrasesResponse>(
+    `/api/dictionary/${sessionId}/suggest-phrases`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/duplicates
+ * Detect full and soft duplicate conditions.
+ */
+export async function findDictionaryDuplicates(
+  sessionId: string,
+  body: DictNameRequest,
+  signal?: AbortSignal,
+): Promise<DuplicateReport> {
+  return request<DuplicateReport>(
+    `/api/dictionary/${sessionId}/duplicates`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/statistics
+ * Compute aggregate statistics for the dictionary tree.
+ */
+export async function getDictionaryStatistics(
+  sessionId: string,
+  body: DictNameRequest,
+  signal?: AbortSignal,
+): Promise<DictionaryStats> {
+  return request<DictionaryStats>(
+    `/api/dictionary/${sessionId}/statistics`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/validate
+ * Run structural validation on the dictionary.
+ */
+export async function validateDictionary(
+  sessionId: string,
+  body: DictNameRequest,
+  signal?: AbortSignal,
+): Promise<ValidationResult> {
+  return request<ValidationResult>(
+    `/api/dictionary/${sessionId}/validate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/dictionary/{session_id}/export-xml
+ * Export the dictionary to canonical SmartLogger XML bytes.
+ * Returns a Blob (StreamingResponse, application/xml) — NOT JSON.
+ */
+export async function exportDictionaryXml(
+  sessionId: string,
+  body: ExportXmlRequest,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const url = `${API_BASE}/api/dictionary/${sessionId}/export-xml`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) {
+    let errorBody: unknown;
+    try {
+      errorBody = await response.json();
+    } catch {
+      // ignore JSON parse errors for error responses
+    }
+    throw new ApiError(
+      (errorBody as { detail?: string })?.detail ?? `HTTP ${response.status}`,
+      response.status,
+      errorBody,
+    );
+  }
+  return response.blob();
 }

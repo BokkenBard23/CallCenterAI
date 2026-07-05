@@ -1,4 +1,4 @@
-"""Comprehensive tests for LLMOrchestrator (IP-3.6) and AnalysisAnnotation (IP-3.7).
+﻿"""Comprehensive tests for LLMOrchestrator (IP-3.6) and AnalysisAnnotation (IP-3.7).
 
 Covers:
   - ProgressInfo model validation
@@ -57,7 +57,7 @@ def _make_sentiment_result(**overrides: Any) -> SentimentAnalysisResult:
         "overall_sentiment": "negative",
         "sentiment_trajectory": "stable",
         "provider": "beeline",
-        "model": "glm-5.1",
+        "model": "glm-xlarge",
     }
     defaults.update(overrides)
     return SentimentAnalysisResult(**defaults)
@@ -71,7 +71,7 @@ def _make_conflict_result(**overrides: Any) -> ConflictAnalysisResult:
         "de_escalation_attempts": 0,
         "justification": "Спокойный диалог",
         "provider": "beeline",
-        "model": "glm-5.1",
+        "model": "glm-xlarge",
     }
     defaults.update(overrides)
     return ConflictAnalysisResult(**defaults)
@@ -83,7 +83,7 @@ def _make_profanity_result(**overrides: Any) -> ProfanityAnalysisResult:
         "instances": [],
         "total_count": 0,
         "provider": "beeline",
-        "model": "glm-5.1",
+        "model": "glm-xlarge",
     }
     defaults.update(overrides)
     return ProfanityAnalysisResult(**defaults)
@@ -102,7 +102,7 @@ def _make_topic_result(**overrides: Any) -> TopicAnalysisResult:
         "primary_topic": "Интернет",
         "topic_count": 1,
         "provider": "beeline",
-        "model": "glm-5.1",
+        "model": "glm-xlarge",
     }
     defaults.update(overrides)
     return TopicAnalysisResult(**defaults)
@@ -117,7 +117,7 @@ def _make_llm_result(**overrides: Any) -> LLMResult:
         "client_sentiment": "negative",
         "resolution": "resolved",
         "provider": "beeline",
-        "model": "glm-5.1",
+        "model": "glm-xlarge",
     }
     defaults.update(overrides)
     return LLMResult(**defaults)
@@ -257,7 +257,7 @@ class TestAnalysisAnnotationModel:
                 total_steps=4,
             ),
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
             completed_at="2026-06-22T12:00:00+00:00",
         )
         assert ann.sentiment is not None
@@ -300,7 +300,7 @@ class TestAnalysisAnnotationModel:
             sentiment=_make_sentiment_result(),
             progress=ProgressInfo(current_step="done", total_steps=4),
             provider="beeline",
-            model="glm-5.1",
+            model="glm-xlarge",
             completed_at="2026-06-22T12:00:00+00:00",
         )
         data = ann.model_dump()
@@ -366,7 +366,7 @@ class TestLLMOrchestratorHappyPath:
             assert result.topic.primary_topic == "Интернет"
             assert result.summary is None  # include_summary=False by default
             assert result.provider == "beeline"
-            assert result.model == "glm-5.1"
+            assert result.model == "glm-xlarge"
             assert result.analysis_source == "orchestrator"
 
             # Progress
@@ -411,6 +411,7 @@ class TestLLMOrchestratorHappyPath:
             await orchestrator.run_all_analyses(
                 dialogue_text="text",
                 session_id="s1",
+                parallel=False,  # order is only deterministic in sequential mode
             )
 
         assert call_order == ["sentiment", "conflict", "profanity", "topic"]
@@ -734,6 +735,7 @@ class TestLLMOrchestratorCustomSteps:
             result = await orchestrator.run_all_analyses(
                 dialogue_text="text",
                 session_id="s1",
+                parallel=False,  # order is only deterministic in sequential mode
             )
 
         assert call_order == ["topic", "sentiment"]
@@ -809,9 +811,9 @@ class TestLLMOrchestratorProviderTracking:
             patch("app.services.llm.analyze_topic", new_callable=AsyncMock) as mock_t,
         ):
             mock_s.return_value = _make_sentiment_result(provider="ollama", model="llama3.2")
-            mock_c.return_value = _make_conflict_result(provider="beeline", model="glm-5.1")
-            mock_p.return_value = _make_profanity_result(provider="beeline", model="glm-5.1")
-            mock_t.return_value = _make_topic_result(provider="beeline", model="glm-5.1")
+            mock_c.return_value = _make_conflict_result(provider="beeline", model="glm-xlarge")
+            mock_p.return_value = _make_profanity_result(provider="beeline", model="glm-xlarge")
+            mock_t.return_value = _make_topic_result(provider="beeline", model="glm-xlarge")
 
             orchestrator = LLMOrchestrator()
             result = await orchestrator.run_all_analyses(

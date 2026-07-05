@@ -51,7 +51,10 @@ async def provider_status(provider_id: str):
     if provider is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Unknown provider: '{provider_id}'. Supported: ollama, yandexgpt, gigachat, beeline",
+            detail=(
+                f"Unknown provider: '{provider_id}'. Supported: "
+                "beeline, beeline_fast, qwen35, qwen36, ollama, yandexgpt, gigachat"
+            ),
         )
 
     available = False
