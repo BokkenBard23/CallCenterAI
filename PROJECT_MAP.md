@@ -3,20 +3,34 @@
 ### meta
 
 project: CallCenterAI
-updated: 2026-07-05
-version: 2.0
-previous_version: 1.1 (2026-07-04)
-total_files: ~155
+updated: 2026-07-07
+version: 2.4
+previous_version: 2.3 (2026-07-05 LexiCore Phase 2 + master_plan_next_session)
+total_files: ~195
 changed_since_last:
-  - LexiCore AI v3 reverse-engineering port (Phase 1 BE + Phase 3 advanced analysis + LLM model migration)
-  - Phase 1 BE foundation: llm_utils.py, dict_utils.py, xml_serializer.py (round-trip), dictionary_ai.py, dictionary router 14 endpoints (was 1)
-  - Phase 1 FE: type drift fixes (is_remainder, dict_level, start_offset/end_offset, extra_limitations), SpeechLabLayout bug fix, 13 new API client functions, 25 new TS types
-  - Phase 3 advanced morph/semantic: bm25.py (Robertson IDF), fusion.py (RRF/Convex/LogOdds), explainer.py (LIME permutation), domain_ner.py (GLiNER zero-shot), topics.py (networkx communities)
-  - Phase 3 LLM enhancements: YAML prompts (12 prompts in backend/app/prompts/), prompt_manager.py, llm_validator.py (generic), dialogue_annotator.py (5 layers)
-  - LLM model migration: glm-5.1 DECOMMISSIONED → glm-xlarge/glm-xlarge-fast (GLM-5.2 family codes per docs.ai.beeline.ru); added Qwen35Provider (qwen-medium), Qwen36Provider (qwen-medium-preview), BeelineFastProvider; shared GLM semaphore (2 slots), Qwen semaphores (3 each), total max 8 parallel; LLMOrchestrator parallel mode (asyncio.gather); llm_limits.py (dynamic limits via /api/v3/me/limits API)
-  - ~400 new tests, ~1670 BE total pass, 0 new regressions
-  - Memory entities: lexicore_port_phase1 (implementation log), lexicore_port_plan (4-phase spec)
-  - v1.1 (2026-07-04): UI-2.5 Parser Rewrite + UI-2.6 Wave (see git log)
+  - Master Plan Tracks A, B, C, D COMPLETE (2026-07-07). Фазы E и F — следующий шаг.
+  - Track A (Quality Gates, P0, БЛОКЕР): pre-commit hook (husky+lint-staged, tsc -b --noEmit), .github/workflows/ci.yml (npm ci → typecheck → lint → test, block PR), .vscode/settings.json (tsconfig.app.json active project). Orchestrator verification protocol A.4 enforced.
+  - Track B (Type Hygiene, P1): 7 type-level fixes — ViewMode union extended, UploadedDictionary.file optional, SpeechLabTree 4 unused props removed, ResultsPage inline import casts removed (5×), Icon disabled DS gap confirmed, LoadingPlaceholder DS gap confirmed, SpeechLabLayout hooks import lifted. 7 casts REMOVED, 0 added.
+  - Track C (Tech-Debt Inventory, P2, read-only): docs/specs/tech-debt-inventory.md — 3 TODO/FIXME, 0 `as any` (Track B clean preserved!), 20 eslint-disable (all justified), 0 console.log/debugger в production, knip: 22 unused exports/types (DictionaryEditor + types/api.ts Phase 2 leftovers).
+  - Track D (DS Drift Detection, P2): docs/specs/ds-prop-inventory.json (47 компонентов, 40.5 KB), scripts/check-ds-drift.ts (regex .d.ts parser + src/ grep), .github/workflows/ds-drift.yml (weekly Sunday cron + GitHub issue on drift). npm run check:ds-drift активен.
+  - Quality gates infrastructure ACTIVE: pre-commit hook blocks commit с type error (verified via integration test), CI workflow блокирует PR, DS drift weekly cron настроен.
+  - Baseline (verified orchestrator-ом 2026-07-07): tsc -b --force ExitCode 0, eslint 0 errors, vitest 552/553 (1 pre-existing client.test.ts getProviders).
+  - Memory entities: track_a_complete, track_b_complete, track_c_complete, track_d_complete (с relations через INDEX).
+  - Точка входа новой сессии: memory_open_nodes(['INDEX','track_d_complete','master_plan_next_session','tsc_composite_project_gotcha'])
+  - LexiCore Port Phase 2 — FE Dictionary Editor UI COMPLETE (предыдущая сессия, сохранено в history)
+  - Route /dictionary/:sessionId (lazy+ErrorBoundary в App.tsx) — редактор словарей ключевых фраз
+  - 31 файл: DictionaryEditorPage.tsx + 21 компонент в src/components/DictionaryEditor/ (11 impl + 10 tests) + types/hooks/constants + модификации
+  - Deps установлены: @tanstack/react-table@8.21.3 (headless table state mgmt), react-markdown@10.1.0 (AI summary rendering)
+  - 2 chunks: Chunk 1 (Core CRUD editing — DictionaryEditorPage, DictionaryTreePanel, ConditionsTable+TanStack, SearchFilterBar, ConditionRowActions; AG-LEXICORE-PHASE2-FE-1), Chunk 2 (Assistance panels — AIAnalysisPanel Sidesheet, PhraseSuggestionsModal, DuplicatesModal, ValidationIssuesPanel, StatisticsPanel+WordFrequencyBar, XmlExportDialog; AG-LEXICORE-PHASE2-FE-2)
+  - Channel color-coding via Badge semantic: ANY=neutral, OPERATOR=violet, CLIENT=success, SYSTEM hidden (BE gap)
+  - jump-to-condition: DuplicatesModal/ValidationIssuesPanel → ConditionsTable highlightRowIdx + scrollIntoView
+  - AbortController for cancel on close во всех 6 overlays с async fetch
+  - 61/61 tests pass (35 Chunk 2 + 26 Chunk 1). tsc --noEmit ExitCode 0 (full project). 0 bugs.
+  - Visual gate: Chunk 1 passed iter 3/3 (3 blocking issues fixed: C-1 TableCell→TableData, M-1 dark theme CSS tokens, M-2 focus-visible; D-1 Slider infinite loop surfaced+fixed), Chunk 2 passed iter 1/3
+  - Controlled deviation: added GET /api/dictionary/{session_id} backend endpoint (~20 lines, additive) — FE не может получить дерево на mount (GET /tokens возвращает плоский DisplayToken[])
+  - Memory entities created: CallCenterAI_Project, lexicore_phase2_fe_editor, beeline_ds_v25_patterns, pipeline_mcp_inventory, session_2026_07_05_summary
+  - Артефакты: spec.md, spec-chunk-{1,2}.md, design-spec.md, design-spec-chunk-{1,2}.md, ui-implementation-brief.md (lock-in rubric 8.5/10), user-scenarios.json, implementation-chunk-{1,2}.md, visual-gate-chunk-{1,2}.md, review-chunk-{1,2}.md, test-report-chunk-{1,2}.md, lexicore-port-research.md (consolidated research)
+  - Phase 4 dialogue enhancement (backend logic) — DEFERRED
 
 ### stack
 
@@ -37,6 +51,39 @@ search_logic: logic tree (И/ИЛИ/НЕ) на основе PhraseGroup.operator
 time_gap: ExtraLimitations (real XML time-gap limits, NOT phrase-WITHOUT) — _parse_extra_limitations → _apply_time_gap_filter (_filter_start_end / _filter_parent / _apply_gap_filter / _find_channel_gaps). Requires DialogueTurn.start_offset/end_offset. No-op when RTF lacks timing.
 remainder: SpeechLabRemainderRequest nodes — DictMatch.is_remainder flag set; catch-all fallback suppression of siblings — TODO (not blocking UI-3 display)
 pii: Presidio (pii_masking.py + routers/pii.py)
+
+### next_session_entry_point
+
+**ПРИОРИТЕТ: Завершить генеральный план — Фаза E (P3, ~2ч) + опционально F. Tracks A-D COMPLETE.**
+
+Полный план: memory entity `master_plan_next_session` (supersedes `quality_gates_plan`).
+Root cause: memory entity `root_cause_analysis` + `tsc_composite_project_gotcha`.
+
+**Точка входа (новая сессия):**
+1. `memory_open_nodes(['INDEX', 'track_d_complete', 'master_plan_next_session', 'tsc_composite_project_gotcha'])`
+2. Прочитать `docs/specs/tech-debt-inventory.md` (Track C output — факты для E)
+3. Проверить baseline: `npx tsc -b --force` ExitCode 0; `npx vitest run` 552/553; `npx eslint .` 0 errors; `npm run check:ds-drift` (exit 1 = inventory gap, не blocker)
+4. Начать Фазу E.1 (Vite manualChunks)
+
+**Статус фаз (2026-07-07):**
+- ✅ A (P0, COMPLETE): Quality gates — pre-commit hook, CI workflow, VSCode settings, verification protocol A.4.
+- ✅ B (P1, COMPLETE): Type hygiene — 7 type-level fixes, 7 casts REMOVED, 0 added.
+- ✅ C (P2, COMPLETE): Tech-debt inventory (read-only) — docs/specs/tech-debt-inventory.md. 0 `as any`, 0 console.log, 20 eslint-disable (all justified).
+- ✅ D (P2, COMPLETE): DS drift detection — docs/specs/ds-prop-inventory.json (47 components), scripts/check-ds-drift.ts, .github/workflows/ds-drift.yml (weekly cron).
+- ⏳ E (P3, ~2ч): Code quality automation — Vite manualChunks, bundle visualizer, eslint type-assertions rule, knip в CI. NOT STARTED.
+- ⏳ F (optional): Next feature — Phase 4 dialogue enhancement / getProviders fix / SpeechLab UI / BE performance. NOT STARTED.
+
+**Распределение ролей:**
+- **pipeline-orchestrator** (главный): запускает фазы, ПЕРЕПРОВЕРЯЕТ tsc -b --force после каждого subagent, НЕ доверяет "tsc clean"
+- **coder** (основной исполнитель): все задачи A-E (config/scripts/type fixes/inventory)
+- **reviewer** (аудитор): second opinion после Фаз A, B, E
+- **tester** (регрессия): vitest full suite после Фаз A, B, E
+- **mcp-researcher** (DS inventory): Фаза D.1 только
+- **ui-tester, designer, request-analyst** — НЕ НУЖНЫ (нет UI/design/spec tasks)
+
+**КРИТИЧЕСКИЙ GOTCHA:** `tsc --noEmit` на composite project (root tsconfig с `files:[]`+`references`) = no-op, всегда ExitCode 0. 56 errors были невидимы 2+ недели. Использовать только `tsc -b --force` или `npm run typecheck`.
+
+**Что НЕ делать:** рефакторить large files, менять state management, трогать backend, включать strict строже, доверять "tsc clean" без указания команды.
 
 ### hubs
 
@@ -377,13 +424,7 @@ backend/app/utils/session.py:
   deps_out: [backend/app/routers/* (analysis, batch, dictionary, export, health, upload)]
   exports: [session_store, batch_store, create_session_store]
 
-### notes
-
-- Файлы node_modules/, .git/, dist/, .venv/, venv/, coverage/, __pycache__/, .pytest_cache/ исключены из карты
-- Файлы *.lock, package-lock.json игнорированы
-- Тесты сгруппированы по glob-паттерну, детальные связи не выписаны
-- deps_in/deps_out указаны только для hub-файлов; остальные связи выводимы из слоёв и архитектуры
-- v1.1 (2026-07-04): актуализировано после UI-2.5 (parser rewrite) и UI-2.6 (logic tree + ExtraLimitations time-gap + Remainder + perf). См. `docs/specs/ui-3-readiness-audit.md` для audit готовности к UI-3.
-- BE готов к UI-3 (0 blocker bugs). Open issues: N3 (window_size=N+WD vs spec N+(N-1)*WD — academic), N12 (break per turn — likely intentional SmartLogger behavior), S2#18 (TokenModel.word_distance: str — cosmetic).
-- FE type drift: BE DictMatch `is_remainder` + `dict_level` НЕ в FE api.ts — закрыть перед UI-3.
-- Pre-existing FE bug: SpeechLabLayout.handleLayoutChanged undefined (SpeechLabLayout.tsx:112) — fix recommended before UI-3.
+> **Архив:** tsc_build_recovery + memory scheme (строки 427-634 оригинала) перенесены в
+> `docs/archive/project-map-audit-history.md` (208 строк). Auditor concerns и tech debt
+> зафиксированы в `TODO_AND_ROADMAP.md` §Tech Debt. Memory graph description — не primary storage
+> (canonical в `pipeline-state.yaml` + `docs/specs/*`).
