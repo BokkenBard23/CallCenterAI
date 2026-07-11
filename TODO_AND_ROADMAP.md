@@ -2,7 +2,7 @@
 
 Текущие задачи, бэклог, tech debt и долгосрочные планы.
 
-> **Канонический backlog:** `docs/specs/backlog.json` (version 3, 31/33 done).
+> **Канонический backlog:** `docs/specs/backlog.json` (version 3, 44/53 done, 9 pending).
 > **Pipeline state:** `docs/specs/pipeline-state.yaml` (active task: Track B — Quick Win Mining Panel).
 > **Архитектура:** `ARCHITECTURE.md`.
 
@@ -11,10 +11,21 @@
 ## Текущий статус
 
 **Active task:** Track B — Quick Win Mining Panel (2 chunks)
-- Chunk 1 (Backend): dict_mining service + router + prompts + SQLite + models — **в работе**
-- Chunk 2 (Frontend): MiningPanel UI (3 tabs + integration) — **pending**
-- Visual gate: iteration 2/3, REJECTED (1 critical + 3 major mobile issues)
+- Chunk 1 (Backend): dict_mining service + router + prompts + SQLite + models — ✅ DONE (46/46 tests)
+- Chunk 2 (Frontend): MiningPanel UI (3 tabs + integration) — ✅ код написан, visual gate REJECTED
+- Reviewer: ✅ APPROVED (iteration 1/3)
+- Visual gate: ❌ REJECTED iteration 2/3 (1 critical + 3 major mobile responsive issues)
+- **NEXT:** ui-coder iteration 3/3 — исправить 4 mobile issues → ui-tester → tester → done
 - `pipeline-state.yaml` → `master-plan-track-b-quick-win-mining-panel`
+
+**4 issues для iteration 3/3:**
+
+| # | Severity | Issue | Fix |
+|---|----------|-------|-----|
+| c-1 | critical | `DirectoryPicker.tsx:124` `applicationRootElement='#root'` — crash всей страницы (DS Modal не принимает CSS # prefix) | Убрать `#` → `'root'` (1-строчный fix) |
+| m-1 | major | Sidesheet width=464px > viewport 375px — не full-screen drawer на mobile | Responsive: full-screen drawer при ≤768px |
+| m-2 | major | 2/3 tabs обрезаны на mobile (DS Tabs `overflow:visible`, не scrollable) | Tabs scrollable wrapper или `overflow:auto` |
+| m-3 | major | Process button «Обработать» обрезан на mobile (right=400 > 375) | `width: 100%` (fullWidth) на mobile |
 
 **Baseline (verified 2026-07-07):**
 - `tsc -b --force` → ExitCode 0
@@ -24,7 +35,7 @@
 
 ---
 
-## Completed (31/33 backlog items)
+## Completed (44/53 backlog items)
 
 ### Pipelines 001-007 (базовый UI + backend)
 - ✅ Pipeline 001: Начальный UI + backend (91 BE + 127 FE tests)
@@ -66,11 +77,18 @@
 - ✅ 7 credentials → env vars, spyware canary removed
 - ✅ CORS restrict, filename sanitization, structured logging
 
-### Master Plan Tracks A-D (2026-07-07)
+### Master Plan Tracks A-E (2026-07-07..08)
 - ✅ Track A (P0): Quality gates — pre-commit hook (husky+lint-staged), CI workflow, VSCode settings
 - ✅ Track B (P1): Type hygiene — 7 type fixes, 7 casts REMOVED, 0 added
 - ✅ Track C (P2): Tech-debt inventory — `docs/specs/tech-debt-inventory.md`
 - ✅ Track D (P2): DS drift detection — `scripts/check-ds-drift.ts`, weekly CI cron
+- ✅ Track E (P3): Code quality automation — Vite manualChunks, bundle visualizer, eslint rule, knip CI
+
+### Master Plan Track B — Quick Win Mining Panel (2026-07-09..10)
+- ✅ B.1 Backend: dict_mining.py (9 methods) + routers/mining.py (6 endpoints) + prompts/mining.yaml (5 prompts) + SQLite (5 tables) — 46/46 tests
+- ✅ B.2 Frontend: MiningPanel (3 tabs: Similar / FN / Audit) + click-to-add integration — 61/61 DictionaryEditor tests preserved
+- ✅ Reviewer: APPROVED iteration 1/3 (5 minor issues, 0 critical)
+- ❌ Visual gate: REJECTED iteration 2/3 (1 critical + 3 major mobile issues — см. выше)
 
 ### LexiCore Phase 2 — FE Dictionary Editor
 - ✅ 31 файл: DictionaryEditorPage + 21 компонент + types/hooks/constants
@@ -79,29 +97,38 @@
 
 ---
 
-## Pending Backlog (2 items)
+## Pending Backlog (9 items)
+
+### Legacy pending (2 items)
 
 | ID | Задача | Приоритет | Объём | Статус |
 |----|--------|-----------|-------|--------|
-| IP-1.5 | Визуальная проверка `is_exact` подсветки в браузере | Low | S | ⏳ Требует ручной проверки: загрузить XML с TERMINAL-кавычками, проверить подсветку |
-| IP-5.1 | Runtime фильтрация по `attribute_tree` | Medium | M | ⏳ Единственный реальный backend pending. `attribute_tree` парсится и хранится, но search.py не использует. Нужен источник метаданных звонка (CRM) |
+| IP-1.5 | Визуальная проверка `is_exact` подсветки в браузере | Medium | S | ⏳ Требует ручной проверки: загрузить XML с TERMINAL-кавычками, проверить подсветку |
+| IP-5.1 | Runtime фильтрация по `attribute_tree` | Low | M | ⏳ `attribute_tree` парсится и хранится, но search.py не использует. Нужен источник метаданных звонка (CRM) |
+
+### Phase G — Dictionary Mining v2 (7 items, all low priority)
+
+Продвинутый mining pipeline с active learning. Не блокирует ничего, не стартовал.
+
+| ID | Задача | Объём | Описание |
+|----|--------|-------|---------|
+| DM-3.0 | ASR-repair + dedup + morph coverage test | M | Предобработка корпуса: ASR-ремонт, дедупликация, тест coverage морфологии |
+| DM-3.1 | LLM-разметка корпуса | L | Пофразовый + dialogue summary + relevance_classify через LLM |
+| DM-3.2 | TopicScout: TopicModeler + Mahalanobis | M | Topic modeling + outlier detection для discovery |
+| DM-3.3 | Active Learning loop | L | 5 итераций × 20 диалогов, human-in-the-loop |
+| DM-3.4 | Phrase extraction pipeline | L | S4 + BOW dry-run + XML-sanitizer для auto-extract фраз |
+| DM-3.5 | Dictionary surgery | L | S6 + S15-light + жадный set cover для auto-fix словаря |
+| DM-3.6 | Валидация + итерация | M | A/B тестирование, 3-5 циклов до дельты <2% |
 
 ---
 
-## Next: Master Plan Phase E (P3, ~2ч)
+## Next: Track B visual gate iteration 3/3
 
-Code quality automation. NOT STARTED.
-
-| # | Задача | Объём | Risk |
-|---|--------|-------|------|
-| E.1 | **Vite manualChunks** — split vendor bundles (react, beeline-ds, tanstack) | S | Low (additive config) |
-| E.2 | **Bundle visualizer** (`rollup-plugin-visualizer`) — найти largest chunks | S | Low |
-| E.3 | **eslint type-assertions rule** (`@typescript-eslint/consistent-type-assertions`) | S | Medium (может найти существующие casts) |
-| E.4 | **knip в CI** — dead code detection (22 unused exports/types в DictionaryEditor) | S | Medium |
+4 mobile responsive issues (см. выше). Запустить `ui-coder` после завершения bookkeeping.
 
 ---
 
-## Optional: Phase F
+## Optional: Phase F (после Track B done)
 
 Next feature development. NOT STARTED.
 
@@ -115,6 +142,8 @@ Next feature development. NOT STARTED.
 ---
 
 ## Tech Debt (from Track C inventory + auditor concerns)
+
+> **Note:** Items 1-4 (ResultsPage ViewMode cast, inline imports, Icon opacity, placeholderFile hack) и item 6 (SpeechLabTree API rot) — **FIXED** в Master Plan Track B (Type Hygiene, 2026-07-07). Оставлены для истории.
 
 ### Production code concerns
 
@@ -177,9 +206,8 @@ Next feature development. NOT STARTED.
 
 | Документ | Назначение |
 |----------|-----------|
-| `docs/specs/backlog.json` | Канонический backlog (version 3) |
+| `docs/specs/backlog.json` | Канонический backlog (version 3, 44/53 done) |
 | `docs/specs/pipeline-state.yaml` | Active pipeline state |
 | `docs/improvement-plan.md` | Phases 1-7 + pipeline history |
-| `PROJECT_MAP.md` §next_session_entry_point | Master Plan Phases E/F |
-| `PROJECT_MAP.md` §tsc_build_recovery_2026_07_05 | Auditor concerns (tech debt) |
+| `PROJECT_MAP.md` | File structure map |
 | `.loops/known-issues.md` | 11 tracked issues (9 fixed, 2 open) |
