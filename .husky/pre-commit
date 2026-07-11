@@ -1,0 +1,3 @@
+node scripts/validate-pipeline-state.mjs
+npx lint-staged
+npm run typecheck

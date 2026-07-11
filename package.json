@@ -6,21 +6,34 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:analyze": "vite build",
+    "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "chrome:debug": "powershell -ExecutionPolicy Bypass -File scripts/start-chrome-debug.ps1",
-    "openapi:dump": "powershell -ExecutionPolicy Bypass -File scripts/dump-openapi-spec.ps1"
+    "openapi:dump": "powershell -ExecutionPolicy Bypass -File scripts/dump-openapi-spec.ps1",
+    "check:ds-drift": "tsx scripts/check-ds-drift.ts",
+    "validate:state": "node scripts/validate-pipeline-state.mjs",
+    "commit:state": "node scripts/commit-state.mjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix"
+    ]
   },
   "dependencies": {
     "@beeline/design-system-react": "^2.5.0",
     "@beeline/design-tokens": "^1.35.4",
     "@modelcontextprotocol/server-memory": "^2026.1.26",
+    "@tanstack/react-table": "^8.21.3",
     "motion": "^12.40.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.12.0",
     "react-router-dom": "^7.17.0"
   },
@@ -43,16 +56,21 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "figma-developer-mcp": "^0.13.2",
     "globals": "^16.5.0",
+    "husky": "^9.1.7",
     "jsdom": "^26.1.0",
     "knip": "^6.23.0",
+    "lint-staged": "^17.0.8",
     "mcp-server-filesystem": "^0.6.2",
     "mcp-server-memory": "^1.0.3",
+    "rollup-plugin-visualizer": "^7.0.1",
     "sass": "^1.101.0",
+    "tsx": "^4.22.4",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.61.1",
     "ui-ux-pro-mcp": "^1.5.0",
     "visual-ui-debug-agent-mcp": "^1.0.2",
     "vite": "^7.3.5",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "yaml": "^2.9.0"
   }
 }
