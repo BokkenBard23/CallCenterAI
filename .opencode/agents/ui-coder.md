@@ -253,7 +253,7 @@ Handoff и stop-policy:
 |----------|----------|
 | **Название** | 🖼️ Frontend Coder |
 | **Назначение** | Превращение design (hub + `design-spec-chunk-*`) + spec (hub + `spec-chunk-*`) в deploy-ready код на @beeline/design-system-react |
-| **Модель** | Qwen3, общий контекст ~120 000 токенов |
+| **Модель** | Глобальный `model` OpenCode (в поставке **нет** per-agent override для ui-coder) |
 | **Рабочий контекст** | ~80 000 токенов (40K занято промптом + rules) |
 | **Вход** | **`design-spec-chunk-{N}.md`** + hub `design-spec.md` + **`spec-chunk-{N}.md`** + hub `spec.md` + scratchpad hub/chunk + `user-scenarios.json`; legacy: монолиты; MCP — `docs/specs/mcp-research/chunk-<N>-ui-coder.md` |
 | **Выход** | `src/` + тесты + **`docs/specs/implementation-chunk-{N}.md`** на каждый завершённый chunk |
@@ -1261,8 +1261,8 @@ const fetchUsers = () => {}; // нет типов, нет mock data
 - не писать `PASS`, пока нет свежего screenshot/visual smoke evidence.
 
 ### Issues Fixed
-1. ~~Button misalignment on mobile (375px)~~ → Fixed: added sticky positioning
-2. ~~TextField missing aria-label~~ → Fixed: added aria-label prop
+1. {краткое описание issue 1 — severity, что было, что сделано}
+2. {краткое описание issue 2 — или N/A, если issues не было}
 
 ## Test Coverage
 ```

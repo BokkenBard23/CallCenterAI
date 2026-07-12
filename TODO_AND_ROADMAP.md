@@ -10,26 +10,25 @@
 
 ## Текущий статус
 
-**Active task:** Track B — Quick Win Mining Panel (2 chunks)
+**Active task:** Track B — Quick Win Mining Panel — ✅ ALL DONE (2026-07-12)
 - Chunk 1 (Backend): dict_mining service + router + prompts + SQLite + models — ✅ DONE (46/46 tests)
-- Chunk 2 (Frontend): MiningPanel UI (3 tabs + integration) — ✅ код написан, visual gate REJECTED
+- Chunk 2 (Frontend): MiningPanel UI (3 tabs + integration) — ✅ DONE
 - Reviewer: ✅ APPROVED (iteration 1/3)
-- Visual gate: ❌ REJECTED iteration 2/3 (1 critical + 3 major mobile responsive issues)
-- **NEXT:** ui-coder iteration 3/3 — исправить 4 mobile issues → ui-tester → tester → done
-- `pipeline-state.yaml` → `master-plan-track-b-quick-win-mining-panel`
+- Visual gate: ✅ PASSED iteration 3/3 (CDP-verified on 375/768/1440)
+- Final QA: ✅ PASSED (vitest 564/565, backend 46/46, tsc -b --force ExitCode 0)
+- Vision-анализ: ✅ 5/5 pages PASS with gpt-5.4 (vision benchmark: gpt-5.4 primary, qwen fallback)
+- `pipeline-state.yaml` → `orchestrator_status: track_b_all_done`, `next_agent: done`
 
-**4 issues для iteration 3/3:**
+**Latest maintenance session (2026-07-13):** pipeline integration hygiene —
+tsc --noEmit → tsc -b --force (5 places), rule 06 enforcement propagated
+(designer/orchestrator/reviewer/02-mcp-protocol), mobile_relevance: none set
+in pipeline-state, vision prompt parameterized, startIcon/100vh patterns
+documented in 01-design-system-first.md, client.test.ts getProviders fixed
+(14/14 passing). Commit 72d8770 + coder agent fix.
 
-| # | Severity | Issue | Fix |
-|---|----------|-------|-----|
-| c-1 | critical | `DirectoryPicker.tsx:124` `applicationRootElement='#root'` — crash всей страницы (DS Modal не принимает CSS # prefix) | Убрать `#` → `'root'` (1-строчный fix) |
-| m-1 | major | Sidesheet width=464px > viewport 375px — не full-screen drawer на mobile | Responsive: full-screen drawer при ≤768px |
-| m-2 | major | 2/3 tabs обрезаны на mobile (DS Tabs `overflow:visible`, не scrollable) | Tabs scrollable wrapper или `overflow:auto` |
-| m-3 | major | Process button «Обработать» обрезан на mobile (right=400 > 375) | `width: 100%` (fullWidth) на mobile |
-
-**Baseline (verified 2026-07-07):**
+**Baseline (verified 2026-07-13):**
 - `tsc -b --force` → ExitCode 0
-- `vitest run` → 552/553 (1 pre-existing `client.test.ts getProviders`)
+- `vitest run` → 565/565 passing (was 564/565 with 1 pre-existing getProviders failure — now FIXED)
 - `eslint .` → 0 errors
 - DictionaryEditor: 61/61 tests pass
 
@@ -84,11 +83,13 @@
 - ✅ Track D (P2): DS drift detection — `scripts/check-ds-drift.ts`, weekly CI cron
 - ✅ Track E (P3): Code quality automation — Vite manualChunks, bundle visualizer, eslint rule, knip CI
 
-### Master Plan Track B — Quick Win Mining Panel (2026-07-09..10)
+### Master Plan Track B — Quick Win Mining Panel (2026-07-09..12)
 - ✅ B.1 Backend: dict_mining.py (9 methods) + routers/mining.py (6 endpoints) + prompts/mining.yaml (5 prompts) + SQLite (5 tables) — 46/46 tests
 - ✅ B.2 Frontend: MiningPanel (3 tabs: Similar / FN / Audit) + click-to-add integration — 61/61 DictionaryEditor tests preserved
 - ✅ Reviewer: APPROVED iteration 1/3 (5 minor issues, 0 critical)
-- ❌ Visual gate: REJECTED iteration 2/3 (1 critical + 3 major mobile issues — см. выше)
+- ✅ Visual gate: PASSED iteration 3/3 (CDP-verified on 375/768/1440, 4 fixes applied)
+- ✅ Final QA: PASSED (12 new MiningPanel tests, vitest 564/565 — getProviders fixed separately 2026-07-13)
+- ✅ Vision-анализ: 5/5 pages PASS with gpt-5.4 (benchmark run, fallback chain updated)
 
 ### LexiCore Phase 2 — FE Dictionary Editor
 - ✅ 31 файл: DictionaryEditorPage + 21 компонент + types/hooks/constants
@@ -122,22 +123,16 @@
 
 ---
 
-## Next: Track B visual gate iteration 3/3
+## Next: Phase F (optional, after Track B done — Track B IS done)
 
-4 mobile responsive issues (см. выше). Запустить `ui-coder` после завершения bookkeeping.
+Track B fully complete. Phase F optional feature development. NOT STARTED.
 
----
-
-## Optional: Phase F (после Track B done)
-
-Next feature development. NOT STARTED.
-
-| # | Задача | Объём |
-|---|--------|-------|
-| F.1 | Phase 4 dialogue enhancement (backend logic) | M |
-| F.2 | `getProviders` fix (pre-existing test failure) | S |
-| F.3 | SpeechLab UI (устаревший UI-2 rework, 20-27 дней) | XL |
-| F.4 | BE performance optimization | M |
+| # | Задача | Объём | Статус |
+|---|--------|-------|--------|
+| F.1 | Phase 4 dialogue enhancement (backend logic) | M | Not started |
+| F.2 | `getProviders` fix (pre-existing test failure) | S | ✅ DONE 2026-07-13 (commit by coder agent, 14/14 passing) |
+| F.3 | SpeechLab UI (устаревший UI-2 rework, 20-27 дней) | XL | Not started |
+| F.4 | BE performance optimization | M | Not started |
 
 ---
 
@@ -159,10 +154,10 @@ Next feature development. NOT STARTED.
 
 ### Pre-existing test failures
 
-| Test | Причина | Severity |
-|------|---------|----------|
-| `client.test.ts getProviders` | 1 pre-existing failure | Low |
-| FastAPI `_IncludedRouter.path` (3 tests) | Version compat, NOT related to UI-2.5/2.6 | Low |
+| Test | Причина | Severity | Статус |
+|------|---------|----------|--------|
+| `client.test.ts getProviders` | Test expected `method: 'GET'`, impl uses fetch default (no method) — test was inconsistent with 3 sibling GET tests | Low | ✅ FIXED 2026-07-13 (test aligned with codebase convention, 14/14 passing) |
+| FastAPI `_IncludedRouter.path` (3 tests) | Version compat, NOT related to UI-2.5/2.6 | Low | ⏳ Still pre-existing |
 
 ---
 

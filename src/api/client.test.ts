@@ -154,9 +154,7 @@ describe('API client', () => {
       expect(result.providers[0].id).toBe('ollama');
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/providers',
-        expect.objectContaining({
-          method: 'GET',
-        }),
+        { signal: undefined },
       );
     });
   });

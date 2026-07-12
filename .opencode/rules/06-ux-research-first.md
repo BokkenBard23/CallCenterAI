@@ -110,7 +110,7 @@ html, body → height: 100% (НЕ 100vh)
 | `docs/archive/specs/ui-reference-session-final-summary.md` | Final summary of all UI research sessions |
 | `docs/archive/specs/ui-3-quick-reference.md` | Quick reference for DS components |
 | `docs/archive/specs/ui-3-readiness-audit.md` | UI readiness audit pre-Track-B |
-| `docs/specs/screenshots/vision-benchmark/VISION_BENCHMARK_RESULTS.md` | Vision model benchmark (gpt-5.4 winner) |
+| `docs/specs/screenshots/vision-benchmark/VISION_BENCHMARK_RESULTS.md` | Vision model benchmark results |
 | `PROJECT_MAP.md` | Canonical project map, stack, known issues |
 | `.opencode/rules/01-design-system-first.md` | DS-first principles, layout primitives |
 | `.opencode/rules/05-vision-gate.md` | Vision-анализ mandatory rule |
