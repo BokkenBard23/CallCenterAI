@@ -39,6 +39,7 @@ Source of truth:
 - `.opencode/rules/01-design-system-first.md`
 - `.opencode/rules/02-mcp-protocol.md`
 - `.opencode/rules/03-pipeline-transitions.md`
+- `.opencode/rules/06-ux-research-first.md` — **проверка `research_first_violation` в DS checklist (см. 2c)**
 
 Делай:
 - Выполняй review по agent rules: acceptance, DS, code quality, architecture, tests, build/type/lint.
@@ -129,6 +130,7 @@ Handoff и stop-policy:
 - [ ] `composition` из `ui-implementation-brief.md` не сломан (anti-flat: нет «все блоки равного веса» без обоснования)
 - [ ] `structure_rationale` из brief читается в финальном UI: порядок блоков объясним задачей, а не «дежурным шаблоном секций»
 - [ ] Есть product-truth evidence (реальный демонстрационный/доказательный элемент), если это требовалось в `landing_decision_record`
+- [ ] **Research-first gate (rule 06)**: layout-паттерны (`height`, `calc()`, `100vh`, `flex`, `grid`, `position: fixed/sticky`, `startIcon` wrapping) не вводились без опоры на существующий паттерн в проекте или `01-design-system-first.md`. Признаки `research_first_violation`: pixel-pushing (`calc(100vh - Npx)` → `calc(100vh - Mpx)`), `100vh` вместо flexbox chain, `startIcon={Icons.XXX}` без `<Icon>` wrapper, новое ad-hoc fixed/sticky решение без поиска reusable pattern. Любое нарушение → **major** + rework в `designer` (или `ui-coder`, если bug в реализации).
 
 ### 2d. Marketing layout contract (для marketing / landing)
 
@@ -196,9 +198,9 @@ Handoff и stop-policy:
 
 ### 6. Build Verification
 ```bash
-npm run build     # Компилируется без ошибок
-npm run lint      # Нет ошибок линтера
-npx tsc --noEmit  # Нет ошибок типов
+npm run build        # Компилируется без ошибок
+npm run lint         # Нет ошибок линтера
+npx tsc -b --force   # Нет ошибок типов (composite project; --noEmit — no-op на root files:[])
 ```
 
 ### 7. Profile-aware Review

@@ -8,6 +8,8 @@ MCP-сервер `design-system` предоставляет инструмент
 
 Bulk возвращает один **glued response** и полезен для нескольких однотипных lookup того же метода. Если нужен многошаговый bundle из разных tools, всё ещё предпочитай delegated MCP через `mcp-researcher`.
 
+> **Cross-ref:** MCP discovery — это **только** один из источников research-first gate. Перед любым layout/CSS/DS-pattern решением (`height`, `calc()`, `100vh`, `flex`, `grid`, `position: fixed/sticky`, `startIcon` wrapping) обязательно проверь существующий паттерн в проекте и `01-design-system-first.md`. См. `.opencode/rules/06-ux-research-first.md`.
+
 ## Доступные инструменты
 
 | Инструмент | Параметры | Назначение |

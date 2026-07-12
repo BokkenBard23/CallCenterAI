@@ -139,14 +139,15 @@ Vision-анализ через multimodal LLM выявляет: наложени
 **Для каждого breakpoint** (desktop/tablet/mobile — или только desktop если `mobile_relevance: none`):
 
 1. Сделать скриншот через CDP/MCP (уже выполнено на Шаге 2)
-2. Запустить vision-анализ:
+2. Запустить vision-анализ (подставь имя проверяемой страницы вместо `{page_name}` — например, `MiningPanel`, `DictionaryEditorPage`, `SpeechLabPage`):
    ```bash
    cd backend
    PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m app.services.vision_analysis \
      --image ../docs/specs/screenshots/{screenshot-name}.png \
-     --prompt "Проанализируй визуальные проблемы на скриншоте MiningPanel: 1) Наложение текста (дублирование EN+RU на кнопках, иконки как строки поверх подписей) 2) Обрезание текста за пределами кнопок/контейнеров 3) Склеивание tab-ов или некорректный рендеринг DS-компонентов 4) Визуальные коллизии (элементы поверх друг друга) 5) Общая читаемость и композиция. Ответь на русском, детально." \
+     --prompt "Проанализируй визуальные проблемы на скриншоте {page_name}: 1) Наложение текста (дублирование EN+RU на кнопках, иконки как строки поверх подписей) 2) Обрезание текста за пределами кнопок/контейнеров 3) Склеивание tab-ов или некорректный рендеринг DS-компонентов 4) Визуальные коллизии (элементы поверх друг друга) 5) Общая читаемость и композиция. Ответь на русском, детально." \
      --output ../docs/specs/screenshots/ai-analysis-{screenshot-name}.md
    ```
+   > **ВАЖНО:** `{page_name}` — это placeholder, замени на имя тестируемой страницы. Не оставляй литерал `MiningPanel`, если проверяешь другую страницу.
 3. Прочитать результат из `ai-analysis-{screenshot-name}.md`
 4. Если vision-анализ нашёл **любой** visual bug, который CDP не обнаружил → вердикт
    **обязан** быть `rejected`, даже если все DOM-метрики PASS.
@@ -171,7 +172,7 @@ GPT-5.4 — primary (100% точность в бенчмарке). Qwen моде
 | Severity | Критерий | Примеры |
 |----------|----------|---------|
 | critical | Блокирует использование, нарушает DS-compliance | Самописный аналог DS-компонента, страница не загружается |
-| major | Значительное отклонение от дизайна, проблемы адаптивности или marketing expression contract | Сломанная раскладка на мобильных, неработающая форма; несоответствие колонок/секций wireframe на 768px; замена компонента из ТЗ (например не `Tabs`, а стилизованные ссылки) без согласованного `ds_gap`; `too_dry_app_like`, `off_brand_overstyled`, `recipe_not_documented`, `motion_without_purpose`, `token_claim_without_evidence`, `fake_or_unverified_marketing_claim`; пустые offer cards; слабый hero contrast; отсутствующая карта при map CTA; кривой office layout; неоформленный footer |
+| major | Значительное отклонение от дизайна, проблемы адаптивности или marketing expression contract | Сломанная раскладка на мобильных, неработающая форма; несоответствие колонок/секций wireframe на 768px; замена компонента из ТЗ (например не `Tabs`, а стилизованные ссылки) без согласованного `ds_gap`; `too_dry_app_like`, `off_brand_overstyled`, `recipe_not_documented`, `motion_without_purpose`, `token_claim_without_evidence`, `fake_or_unverified_marketing_claim`; пустые offer cards; слабый hero contrast; отсутствующая карта при map CTA; кривой office layout; неоформленный footer; **`100vh` / `calc(100vh - Npx)` вместо flexbox chain** (`research_first_violation`, pixel-pushing); **`startIcon={Icons.XXX}` без `<Icon>` wrapper** (enum рендерится как строка поверх подписи — vision-detectable); ad-hoc `position: fixed/sticky` без опоры на существующий паттерн проекта |
 | minor | Косметические недочёты | Отступы, выравнивание, мелкие несоответствия |
 
 ## Выходные данные

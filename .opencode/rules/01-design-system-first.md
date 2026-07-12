@@ -56,6 +56,45 @@
    - создать минимальную обёртку или fallback с опорой на существующие DS-компоненты;
    - не создавать самописный клон существующего DS-компонента без необходимости.
 
+### 8a. Layout primitives (gotchas)
+
+Эти gotchas — канонические паттерны, проверенные в проекте. Перед любым layout-решением, не входящим в список ниже, обязательно пройди research-first gate (см. `.opencode/rules/06-ux-research-first.md`).
+
+- **`100vh` / `calc(100vh - Npx)` — НЕ использовать.** В composite layout с flex-цепочкой parent → child используй `height: 100%` на каждом уровне (`html, body` → root → page → layout → panel). Flexbox сам распределяет пространство; hardcoded `100vh` ломается при динамическом header/footer/scrollbar и не учитывает mobile browser chrome. Пример правильной цепочки:
+  ```css
+  html, body, #root { height: 100%; margin: 0; }
+  .app-root { display: flex; flex-direction: column; height: 100%; }
+  .app-main { flex: 1 1 auto; display: flex; min-height: 0; }
+  .page { display: flex; flex: 1 1 auto; min-height: 0; }
+  .panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  ```
+  Pixel-pushing (`calc(100vh - 56px)` → `calc(100vh - 48px)`) — это **anti-pattern**. Лечится переходом на flexbox chain, а не подбором magic number.
+
+- **`react-resizable-panels` v4 flex-grow workaround**: если `defaultSize={25}` игнорируется и панель съёживается до ~2% (баг расчёта flex-grow из content width), используй CSS-override с `!important` на `data-testid`:
+  ```css
+  .speechlab-layout__group > [data-testid='speechlab-left'] { flex-grow: 25 !important; }
+  ```
+  Это documented controlled fallback для конкретного бага библиотеки, не общий паттерн.
+
+### 8b. DS Button `startIcon` — ReactNode, НЕ enum
+
+`Button.startIcon` принимает **ReactNode**, а не значение enum `Icons`. Передача `Icons.Add` напрямую рендерит строку `"Add"` поверх подписи кнопки (визуальный баг, detectable только vision-анализом).
+
+```tsx
+import { Button, Icon } from '@beeline/design-system-react';
+import { Icons } from '@beeline/design-tokens';
+
+// ✅ ПРАВИЛЬНО:
+<Button startIcon={<Icon iconName={Icons.Add} />}>Добавить</Button>
+
+// ❌ НЕПРАВИЛЬНО (рендерит enum как строку "Add" поверх подписи):
+<Button startIcon={Icons.Add}>Добавить</Button>
+```
+
+То же касается `Button.endIcon`, `IconButton.icon`, `Tab.icon`, `Link.icon`, `LinkRouter.icon`, `Banner.icon` и других слотов с типом `ReactNode` — всегда заворачивай glyph в `<Icon iconName={...} />`.
+
+При обнаружении в коде `startIcon={Icons.XXX}` без wrapper-а → **major** (`research_first_violation`), rework в `ui-coder`. См. `.opencode/rules/06-ux-research-first.md`.
+
 9. **Корпоративный стиль для landing/marketing**:
    - Использовать локальный `docs/brand/beeline-marketing-expression-kit.md` как источник brand-safe recipes; kit не является stage, не требует internet/vision runtime и не копируется целиком в каждый артефакт.
    - Использовать параметризуемую базу стиля (`style_kit_source`, `brand_expression_budget`, `brand_invariants`, `creative_freedom_budget`, `content_truth_policy`, `anti_clone_policy`) из `spec.md` / `ui-implementation-brief.md`, а не fixed section-template.

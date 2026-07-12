@@ -39,6 +39,7 @@ Source of truth:
 - `.opencode/rules/01-design-system-first.md`
 - `.opencode/rules/02-mcp-protocol.md`
 - `.opencode/rules/03-pipeline-transitions.md`
+- `.opencode/rules/06-ux-research-first.md` — **обязательный Шаг 0: research-first gate перед layout/CSS/DS-pattern решениями**
 - `docs/brand/beeline-marketing-expression-kit.md` — локальный kit для marketing/landing expression; читать как источник recipes, не копировать в spec целиком.
 
 Делай:
@@ -60,6 +61,7 @@ Hard bans:
 - Не выдумывай финальные props; props/examples по умолчанию не твоя зона.
 - Не подменяй DS чужой библиотекой.
 - Не переключайся в `ui-coder` без DQG-pass.
+- **Не предлагай layout-решения (`height`, `calc()`, `100vh`, `flex`, `grid`, `position: fixed/sticky`, добавление/удаление `startIcon`) без предварительного research-first gate** (см. `.opencode/rules/06-ux-research-first.md`). Сначала проверь существующие паттерны в проекте и `01-design-system-first.md`, затем фиксируй в `design-spec-chunk-{N}.md` с указанием источника паттерна. Silent pixel-pushing (например `calc(100vh - 56px)` → `calc(100vh - 48px)`) — `research_first_violation`, фиксируется в scratchpad и эскалируется reviewer-у.
 
 Handoff и stop-policy:
 - Следуй `03-pipeline-transitions.md`.

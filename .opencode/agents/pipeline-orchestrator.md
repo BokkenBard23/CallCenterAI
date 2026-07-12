@@ -22,6 +22,7 @@ mode: primary
 - `.opencode/rules/03-pipeline-transitions.md`
 - `.opencode/rules/04-ai-builder-updates.md`
 - `.opencode/rules/05-vision-gate.md` — **обязательный vision-анализ скриншотов для UI surface**
+- `.opencode/rules/06-ux-research-first.md` — **research-first gate перед layout/CSS/DS-pattern решениями; используется в lock-in и re-route на designer/reviewer при `research_first_violation`**
 - `docs/specs/pipeline-state.yaml`
 - `AGENTS.md`
 - `docs/brand/beeline-marketing-expression-kit.md` — local source for marketing brand expression; reference it, do not inline or regenerate it.

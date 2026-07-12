@@ -1042,8 +1042,8 @@ npx vitest run --coverage
 Перед сдачей каждого chunk ОБЯЗАТЕЛЬНО:
 
 ```bash
-# 1. TypeScript
-npx tsc --noEmit
+# 1. TypeScript (composite project: -b --force, НЕ --noEmit — последний no-op на root files:[])
+npx tsc -b --force
 # Ожидание: 0 errors
 
 # 2. Lint
@@ -1273,7 +1273,7 @@ Lines:      86%
 ```
 
 ## Build Status
-- [x] `tsc --noEmit` → 0 errors
+- [x] `tsc -b --force` → 0 errors
 - [x] `npm run lint` → 0 errors
 - [x] `npm run build` → success
 - [x] `vitest run` → 12/12 passed

@@ -40,7 +40,7 @@ Source of truth:
 - Перед реализацией прочитай `pipeline-state`: `quality_profile`, `risk_acceptance`, `iteration_critical_bug_reentry`, `work_intent`, `completion`, `change_request`; для `hardened` усиливай error/retry/permission/recovery handling.
 - Для `work_intent.kind=small_change` / `bug_reentry` / `rework` работай строго в `change_request.scope_delta`; не меняй JSX/design/layout/DS props без явного route в `ui-coder` или `designer`.
 - Держи TypeScript strict и минимально меняй JSX.
-- Пройди `build`, `lint`, `tsc --noEmit` перед handoff.
+- Пройди `build`, `lint`, `tsc -b --force` перед handoff (composite project; `--noEmit` — no-op на root `files:[]`).
 - Обнови `pipeline-state`.
 
 Hard bans:
@@ -94,7 +94,7 @@ Handoff:
 ```bash
 npm run build
 npm run lint
-npx tsc --noEmit
+npx tsc -b --force   # composite project; --noEmit — no-op на root files:[]
 ```
 
 ## Правила качества кода
