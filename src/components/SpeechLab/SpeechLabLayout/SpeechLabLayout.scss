@@ -18,20 +18,21 @@
     flex-direction: row;
   }
 
-  // Left panel
+  // Left panel — react-resizable-panels sets flex-grow inline; we set flex-basis: 0
+  // so that panels distribute space by flex-grow ratio, not by content width.
   &__panel--left {
     height: 100%;
     overflow: hidden;
     border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.48));
-    flex-shrink: 0;
-    min-width: 0; // allow flex to shrink
+    flex-basis: 0;
+    min-width: 0;
   }
 
-  // Right panel
+  // Right panel — same: flex-basis: 0 for proportional distribution
   &__panel--right {
     height: 100%;
     overflow: hidden;
-    flex: 1;
+    flex-basis: 0;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -70,32 +71,20 @@
   }
 }
 
-/* Mobile: stack vertically (react-resizable-panels supports orientation switch) */
-@media (max-width: 767px) {
-  .speechlab-layout {
-    flex-direction: column;
+/* Mobile: stack vertically — mobile media queries removed (desktop-only internal tool, FullHD+). */
 
-    &__group {
-      flex-direction: column;
-    }
-
-    &__panel--left {
-      width: 100% !important;
-      max-width: 100% !important;
-      min-width: 100% !important;
-      max-height: 40vh;
-      border-right: none;
-      border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.48));
-    }
-
-    &__panel--right {
-      flex: 1;
-      width: 100% !important;
-      max-width: 100% !important;
-    }
-
-    &__separator {
-      display: none;
-    }
-  }
+/*
+ * react-resizable-panels v4.12 workaround:
+ * The library calculates flex-grow from content width instead of using
+ * defaultSize/defaultLayout props. This causes the left panel to collapse
+ * to ~45px (content width) instead of 25% of the container.
+ * Override flex-grow on the outer Panel divs (identified by data-testid).
+ * The className prop on <Panel> is applied to an INNER div, so we cannot
+ * target the flex item via className — only via data-testid.
+ */
+.speechlab-layout__group > [data-testid="speechlab-left"] {
+  flex-grow: 25 !important;
+}
+.speechlab-layout__group > [data-testid="speechlab-right"] {
+  flex-grow: 75 !important;
 }

@@ -8,19 +8,7 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-
-  @media (max-width: 767px) {
-    /* Mobile: overlay with fixed positioning */
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 100;
-    width: 85vw;
-    max-width: 320px;
-    background-color: var(--color-background-secondary, #fafafa);
-    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
-  }
+  /* Mobile media queries removed — desktop-only internal tool (FullHD+). */
 }
 
 /* ── Result card ── */
@@ -95,29 +83,10 @@
   flex-direction: column;
   overflow: hidden;
   background-color: var(--color-background-secondary, #fafafa);
-
-  @media (max-width: 767px) {
-    /* Mobile: full overlay */
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 100;
-    width: 85vw;
-    max-width: 320px;
-    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
-  }
+  /* Mobile media queries removed — desktop-only internal tool (FullHD+). */
 }
 
-/* ── Mobile backdrop for semantic sidebar ── */
+/* ── Mobile backdrop for semantic sidebar — mobile media queries removed (desktop-only internal tool). ── */
 .semantic-sidebar-backdrop {
   display: none;
-
-  @media (max-width: 767px) {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.32);
-    z-index: 99;
-  }
 }

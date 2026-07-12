@@ -669,10 +669,12 @@ export default function UploadPage() {
       {/* ── Reset Confirmation Dialog ── */}
       <Dialog
         open={showResetConfirm}
-        title="Сбросить анализ?"
         onClose={handleResetCancel}
       >
         <DialogContent>
+          <Typography variant="h6" style={{ marginBottom: 'var(--sizeSpacingX2, 8px)' }}>
+            Сбросить анализ?
+          </Typography>
           <Typography variant="body2">
             Все загруженные данные и результаты будут потеряны. Продолжить?
           </Typography>

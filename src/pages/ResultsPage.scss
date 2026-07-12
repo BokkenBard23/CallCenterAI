@@ -110,12 +110,7 @@
   }
 }
 
-/* Mobile: single column */
-@media (max-width: 767px) {
-  .results-semantic-panel {
-    display: none;
-  }
-}
+/* Mobile: single column — mobile media queries removed (desktop-only internal tool) */
 
 /* ── Stats row ── */
 .results-stats {

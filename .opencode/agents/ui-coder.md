@@ -194,7 +194,20 @@ Handoff и stop-policy:
 **Один доменный chunk за итерацию** (может включать **несколько экранов**, если так задал аналитик). **НЕ** реализуй весь проект в одном invocation.
 
 ```
-ШАГ 0: Собрать REQUIRED_COMPONENTS из Component Mapping → если bundle > 1-2 компонентов или нужен reusable registry, вызвать `Task / @mcp-researcher` со стартовым agent `mcp-researcher`; иначе пройти Discovery-first минимум для каждого (get-component + get-component-props; examples/guidelines только когда без них остаётся ambiguity)
+ШАГ 0: Research-First (ОБЯЗАТЕЛЬНО для нетривиальных UI/layout задач, см. `.opencode/rules/06-ux-research-first.md`):
+  а) Проверить существующие артефакты: `docs/archive/specs/ui-reference-patterns-analysis.md`,
+     `docs/archive/specs/ui-reference-session-final-summary.md`, `PROJECT_MAP.md`,
+     `.opencode/rules/01-design-system-first.md` — искать готовые паттерны для задачи.
+  б) Для layout/responsive задач — использовать UX MCP-инструменты:
+     `ux-mcp-server_check_responsive`, `ux-mcp-server_suggest_pattern`,
+     `ui-ux-pro-mcp_search_patterns` — найти best practices.
+  в) Только после этого — писать CSS/layout код, опираясь на найденные паттерны.
+  г) ЗАПРЕЩЕНО: pixel-pushing (`calc(100vh - Npx)` → `calc(100vh - Mpx)` вместо flexbox),
+     resolution-specific fixes (`@media (max-width: Npx)` для конкретного разрешения),
+     manual iteration loop (скриншот → пиксели → подгонка).
+  д) Универсальный layout-паттерн: `height: 100%` chain (html→body→#root→.app-root→main→page),
+     НЕ `100vh` или `calc(100vh - Npx)`. См. `.opencode/rules/06-ux-research-first.md`.
+ШАГ 0a: Собрать REQUIRED_COMPONENTS из Component Mapping → если bundle > 1-2 компонентов или нужен reusable registry, вызвать `Task / @mcp-researcher` со стартовым agent `mcp-researcher`; иначе пройти Discovery-first минимум для каждого (get-component + get-component-props; examples/guidelines только когда без них остаётся ambiguity)
 ШАГ 1: read `pipeline-state` (**`chunk_strategy`**, **`acceptance_group_id`** для текущего `spec-chunk-{N}`, `quality_profile`, `design_input`, artifacts/fallback/risk, **`work_intent`**, **`completion`**, **`change_request`**) + `design-spec-chunk-{N}.md` (handoff → Phase S) или legacy-секцию chunk в монолите; hub spec + `spec-chunk-{N}.md`; сверить `user-scenarios.json` и `design-scratchpad-chunk-{N}.md`
 ШАГ 2: Определить профиль chunk: app/product или marketing/landing; если marketing/landing — отдельно выписать primary conversion, proof blocks, CTA hierarchy, section order, AIDA / narrative notes
 ШАГ 2a: Если marketing/landing — выписать из brief `corporate_style_basis`: `style_kit_source`, `style_kit_version`, `brand_expression_budget`, `brand_invariants`, `creative_freedom_budget`, `content_truth_policy`, `anti_clone_policy`, `content_coverage_map`; также выписать `brand_expression_plan`, `expressive_style_allowlist`, `motion_policy`, `style_failure_modes`. При отсутствии `brand_expression_plan` для `visual_energy: medium|high` — не кодить, вернуть re-route в orchestrator/designer
@@ -204,6 +217,13 @@ Handoff и stop-policy:
 ШАГ 6: Следующий файл; для новых DS-компонентов не из списка → direct MCP по правилам п. 2 выше или точечный повторный brief через `Task` / `@mcp-researcher`, если накопился новый bundle; если всплыл alias/custom type ambiguity или непонятен usage pattern — тоже повторный helper-вызов
 ШАГ 7: Self-check: чеклист «Layout перед сдачей» + landing-specific self-check (если нужен) + review colors/tokens claims в своих стилях
 ШАГ 8: npm run dev → chrome-devtools-mcp: 375 / 768 / 1440, сравнить с wireframe
+ШАГ 8a: **Vision self-check (рекомендуется, см. `.opencode/rules/05-vision-gate.md`)**: после Шага 8 сделай скриншот через CDP/MCP и запусти vision-анализ для раннего обнаружения проблем (наложение текста, иконки как строки, склеенные tab-ы). Это не заменяет ui-tester visual gate, но сокращает итерации:
+   ```bash
+   cd backend && PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m app.services.vision_analysis \
+     --image ../docs/specs/screenshots/{screenshot}.png \
+     --prompt "Проверь визуальные проблемы: наложение текста, иконки как строки, склеенные tab-ы, обрезание." \
+     --output ../docs/specs/screenshots/ai-selfcheck-{screenshot}.md
+   ```
 ШАГ 9: write `docs/specs/implementation-chunk-{N}.md` (полный §4.2) → кратко в чат → handoff на `ui-tester`, `coder` или `reviewer` по `quality_profile`, наличию UI surface и logic stubs
 ```
 

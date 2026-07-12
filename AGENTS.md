@@ -4,7 +4,7 @@
 
 - Runtime config: `opencode.json`.
 - Agent prompts: `.opencode/agents/<slug>.md`.
-- Shared rules: `.opencode/rules/01-design-system-first.md`, `.opencode/rules/02-mcp-protocol.md`, `.opencode/rules/03-pipeline-transitions.md`, `.opencode/rules/04-ai-builder-updates.md`.
+- Shared rules: `.opencode/rules/01-design-system-first.md`, `.opencode/rules/02-mcp-protocol.md`, `.opencode/rules/03-pipeline-transitions.md`, `.opencode/rules/04-ai-builder-updates.md`, `.opencode/rules/05-vision-gate.md`, `.opencode/rules/06-ux-research-first.md`.
 - State template: `docs/specs/pipeline-state.yaml`.
 
 ### Delivery Model

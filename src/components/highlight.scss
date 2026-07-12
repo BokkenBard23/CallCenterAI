@@ -533,20 +533,7 @@
  * Dictionary sidebar styles
  * ═══════════════════════════════════════════════════════════ */
 
-/* Sidebar container */
-.results-sidebar {
-  @media (max-width: 767px) {
-    /* Mobile: overlay with fixed positioning */
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    z-index: 100;
-    width: 85vw;
-    max-width: 320px;
-    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.15);
-  }
-}
+/* Sidebar container — mobile media queries removed (desktop-only internal tool). */
 
 /* Dictionary phrase list */
 .dict-phrase-list {
@@ -626,17 +613,9 @@
   font-weight: 600;
 }
 
-/* Mobile sidebar backdrop */
+/* Mobile sidebar backdrop — mobile media queries removed (desktop-only internal tool). */
 .sidebar-backdrop {
   display: none;
-
-  @media (max-width: 767px) {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.32);
-    z-index: 99;
-  }
 }
 
 /* ═══════════════════════════════════════════════════════════

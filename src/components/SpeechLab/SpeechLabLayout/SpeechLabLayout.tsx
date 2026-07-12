@@ -20,12 +20,13 @@
  * Persistence: localStorage key "speechlab-layout" saves panel proportions.
  */
 
+import { useCallback, useState } from 'react';
 import { Box, Tab, Tabs } from '@beeline/design-system-react';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import type { Layout } from 'react-resizable-panels';
 
 import type { SpeechLabTreeNode } from '../../../types/speechlab';
-import type { SearchResult, TextSegment } from '../../../types/api';
+import type { SearchResult, TextSegment, UploadDictionaryResponse } from '../../../types/api';
 import LeftPanel from '../LeftPanel/LeftPanel';
 import QueryTab from '../QueryTab/QueryTab';
 import FoundRecordsTab from '../FoundRecordsTab/FoundRecordsTab';
@@ -56,7 +57,11 @@ interface SpeechLabLayoutProps {
   /** Callback when a node is expanded/collapsed */
   onToggleExpand?: (nodeId: string, expanded: boolean) => void;
   /** Callback when dictionary is uploaded */
-  onDictionaryUploaded: (sessionId: string, nodes: SpeechLabTreeNode[]) => void;
+  onDictionaryUploaded: (
+    sessionId: string,
+    nodes: SpeechLabTreeNode[],
+    response: UploadDictionaryResponse,
+  ) => void;
   /** Session ID */
   sessionId: string | null;
   /** Search result from analysis */
@@ -95,6 +100,7 @@ export default function SpeechLabLayout({
   expandedNodes,
 }: SpeechLabLayoutProps) {
   // Default panel layout keyed by Panel id (matches react-resizable-panels Layout type).
+  // CRITICAL: keys MUST match Panel id props for flex-grow to be applied correctly.
   const defaultLayout: Layout = {
     [PANEL_LEFT_ID]: DEFAULT_LEFT_SIZE,
     [PANEL_RIGHT_ID]: DEFAULT_RIGHT_SIZE,
@@ -185,8 +191,6 @@ export default function SpeechLabLayout({
 // ═══════════════════════════════════════════════════════════
 // Local hooks
 // ═══════════════════════════════════════════════════════════
-
-import { useState, useCallback } from 'react';
 
 function useStateTab() {
   const [tab, setTab] = useState<TabValue>('query');

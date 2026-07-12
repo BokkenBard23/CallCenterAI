@@ -23,9 +23,7 @@
  */
 
 import { useMemo, useCallback } from 'react';
-import { Tree, Tooltip, Typography, IconButton } from '@beeline/design-system-react';
-import { Icons } from '@beeline/design-tokens/js/iconfont';
-import type { TreeData } from '@beeline/design-system-react';
+import { Tree, Typography } from '@beeline/design-system-react';
 
 import type { SpeechLabTreeNode } from '../../../types/speechlab';
 import { mapToTreeData, filterTreeNodes } from './treeDataMapper'; // .tsx (JSX in buildCustomContent)
@@ -34,7 +32,6 @@ import './SpeechLabTree.scss';
 
 interface SpeechLabTreeProps {
   nodes: SpeechLabTreeNode[];
-  selectedNodeId: string | null;
   onSelectNode: (node: SpeechLabTreeNode) => void;
   /** Search query for filtering */
   searchQuery?: string;
@@ -42,24 +39,14 @@ interface SpeechLabTreeProps {
   expandedNodes?: Record<string, boolean>;
   /** Callback when node expand/collapse state changes */
   onToggleExpand?: (nodeId: string, expanded: boolean) => void;
-  /** Callback when user requests add child to node */
-  onAddChild?: (parentId: string) => void;
-  /** Callback when user requests rename of node */
-  onRenameNode?: (nodeId: string) => void;
-  /** Callback when user requests delete of node */
-  onDeleteNode?: (nodeId: string) => void;
 }
 
 export default function SpeechLabTree({
   nodes,
-  selectedNodeId,
   onSelectNode,
   searchQuery = '',
   expandedNodes,
   onToggleExpand,
-  onAddChild,
-  onRenameNode,
-  onDeleteNode,
 }: SpeechLabTreeProps) {
   // Filter nodes by search query
   const filteredNodes = useMemo(

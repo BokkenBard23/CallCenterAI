@@ -116,7 +116,7 @@ describe('AnalysisContext', () => {
         result.current.dispatch({ type: 'ADD_DICTIONARY', payload: dict });
       });
       expect(result.current.state.dictionaries).toHaveLength(1);
-      expect(result.current.state.dictionaries[0].file.name).toBe('test.xml');
+      expect(result.current.state.dictionaries[0].file?.name).toBe('test.xml');
 
       act(() => {
         result.current.dispatch({ type: 'REMOVE_DICTIONARY', payload: 0 });

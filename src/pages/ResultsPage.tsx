@@ -49,7 +49,8 @@ import SemanticSearchPanel from '../components/SemanticSearchPanel';
 import MatchCounter from '../components/MatchCounter/MatchCounter';
 import { QualityScorePanel } from '../components/QualityScorePanel';
 import { BlurFade } from '../components/ui/blur-fade';
-import type { DictMatch, DictionaryCondition } from '../types/api';
+import type { Group as NavGroup } from '@beeline/design-system-react';
+import type { DictMatch, DictionaryCondition, DictionaryNode, EmbeddingStatusResponse, ViewMode } from '../types/api';
 
 import './ResultsPage.scss';
 import '../components/SemanticSearchPanel/SemanticSearchPanel.scss';
@@ -92,25 +93,16 @@ function useBreakpoints(): BreakpointState {
 // NavigationDrawer items for DictionaryTree
 // ═══════════════════════════════════════════════════════════
 
-interface NavItem {
-  name: string;
-  text: string;
-  iconName?: Icons;
-  items?: NavItem[];
-}
-
 function buildNavItems(
-  dictionaries: import('../types/api').DictionaryNode[],
-): NavItem[] {
+  dictionaries: DictionaryNode[],
+): NavGroup[] {
   return [
     {
-      name: 'dictionary-root',
-      text: 'Словарь',
-      iconName: Icons.Book,
-      items: dictionaries.map((d) => ({
-        name: d.id,
-        text: d.name,
-        iconName: Icons.Folder,
+      name: 'Словарь',
+      children: dictionaries.map((d) => ({
+        name: d.name,
+        path: d.id,
+        icon: Icons.Folder,
       })),
     },
   ];
@@ -159,7 +151,7 @@ function ResultsPageContent() {
   const indexAbortRef = useRef<AbortController | null>(null);
 
   // FRIDA status
-  const [fridaStatus, setFridaStatus] = useState<import('../types/api').EmbeddingStatusResponse | null>(null);
+  const [fridaStatus, setFridaStatus] = useState<EmbeddingStatusResponse | null>(null);
 
   // Export state
   const [exportExcelLoading, setExportExcelLoading] = useState(false);
@@ -173,9 +165,11 @@ function ResultsPageContent() {
 
   const handleViewModeChange = useCallback(
     (tabIndex: number) => {
+      const mode: ViewMode =
+        tabIndex === 0 ? 'summary' : tabIndex === 1 ? 'highlighted' : 'structure';
       dispatch({
         type: 'SET_VIEW_MODE',
-        payload: tabIndex === 0 ? 'summary' : tabIndex === 1 ? 'highlighted' : 'structure',
+        payload: mode,
       });
     },
     [dispatch],
@@ -423,7 +417,7 @@ function ResultsPageContent() {
   const dictionaryNodes = state.dictionaries.map((d) => d.response.dictionary).filter(Boolean);
 
   const navItems = useMemo(
-    () => buildNavItems(dictionaryNodes as import('../types/api').DictionaryNode[]),
+    () => buildNavItems(dictionaryNodes as DictionaryNode[]),
     [dictionaryNodes],
   );
 
@@ -452,7 +446,7 @@ function ResultsPageContent() {
       {isDesktop && !sidebarCollapsed && (
         <Box className="results-sidebar">
           <DictionaryTree
-            dictionaries={dictionaryNodes as import('../types/api').DictionaryNode[]}
+            dictionaries={dictionaryNodes as DictionaryNode[]}
             searchResult={state.searchResult}
           />
 
@@ -762,7 +756,7 @@ function ResultsPageContent() {
 // ═══════════════════════════════════════════════════════════
 
 function findCondition(
-  node: import('../types/api').DictionaryNode | null,
+  node: DictionaryNode | null,
   phraseText: string,
 ): DictionaryCondition | null {
   if (!node) return null;

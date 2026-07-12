@@ -9,11 +9,20 @@ import { useSpeechLabState } from './useSpeechLabState';
 // ─── Mock AnalysisContext ────────────────────────────────
 
 const mockDispatch = vi.fn();
-const mockState = {
+const mockState: {
+  sessionId: string | null;
+  dialogue: { turn_index: number; speaker: string; text: string; timestamp: string | null }[] | null;
+  dictionaries: { file: File; response: import('../types/api').UploadDictionaryResponse }[];
+  analysisStatus: import('../types/api').AnalysisStatus;
+  analysisError: string | null;
+  selectedProvider: string | null;
+  selectedModel: string | null;
+  searchResult: import('../types/api').SearchResult | null;
+} = {
   sessionId: null,
   dialogue: null,
   dictionaries: [],
-  analysisStatus: 'idle' as const,
+  analysisStatus: 'idle',
   analysisError: null,
   selectedProvider: null,
   selectedModel: null,

@@ -134,7 +134,8 @@ if (typeof IntersectionObserver === 'undefined') {
     readonly thresholds: ReadonlyArray<number> = [];
 
     constructor(
-      private callback: IntersectionObserverCallback,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      _callback: IntersectionObserverCallback,
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       _options?: IntersectionObserverInit,
     ) {}

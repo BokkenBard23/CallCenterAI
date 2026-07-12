@@ -48,7 +48,8 @@ const STATUS_CONFIG: Record<AnalysisItemStatus, StatusConfig> = {
     label: 'Обработка',
     semantic: 'info',
     type: 'secondary',
-    icon: Icons.LoadingPlaceholder,
+    // DS gap: LoadingPlaceholder icon not in DS, using Hourglass fallback
+    icon: Icons.Hourglass,
   },
   completed: {
     label: 'Завершён',

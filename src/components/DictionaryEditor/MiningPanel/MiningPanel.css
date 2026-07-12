@@ -1,0 +1,10 @@
+/*
+ * MiningPanel styles.
+ *
+ * mobile_relevance: none — internal tool, desktop only (FullHD+).
+ * All @media(max-width:767px) mobile responsive overrides removed:
+ *   - m-2 tabs scroll fix (not needed: desktop has enough width for 3 tabs)
+ *   - m-3 picker row vertical stack (not needed: desktop renders row horizontally)
+ * DS Tabs header `overflow: hidden` is fine on desktop where 3 short tab labels
+ * fit without truncation (after Bug 2 fix: "LLM-аудит словаря" → "LLM-аудит").
+ */

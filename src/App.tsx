@@ -24,6 +24,7 @@ const ResultsPage = lazy(() => import('./pages/ResultsPage'));
 const BatchResultsPage = lazy(() => import('./pages/BatchResultsPage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
 const SpeechLabPage = lazy(() => import('./pages/SpeechLabPage'));
+const DictionaryEditorPage = lazy(() => import('./pages/DictionaryEditorPage'));
 
 function PageSkeleton() {
   return (
@@ -128,6 +129,7 @@ function App() {
                     <Route path="/history" element={<ErrorBoundary><HistoryPage /></ErrorBoundary>} />
                     <Route path="/speechlab" element={<ErrorBoundary><SpeechLabPage /></ErrorBoundary>} />
                     <Route path="/speechlab/:sessionId" element={<ErrorBoundary><SpeechLabPage /></ErrorBoundary>} />
+                    <Route path="/dictionary/:sessionId" element={<ErrorBoundary><DictionaryEditorPage /></ErrorBoundary>} />
                   </Routes>
                 </Suspense>
               </main>

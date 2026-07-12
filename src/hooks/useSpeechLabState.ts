@@ -145,7 +145,10 @@ export function useSpeechLabState(): {
       if (targetSessionId === sessionId && response) {
         const exists = ctxState.dictionaries.some((d) => d.response?.session_id === sessionId);
         if (!exists) {
-          dispatch({ type: 'ADD_DICTIONARY', payload: response });
+          // SpeechLab upload flow does not retain the original File handle
+          // (LeftPanel uploads via API and discards it). UploadedDictionary.file
+          // is optional — dispatch without it.
+          dispatch({ type: 'ADD_DICTIONARY', payload: { response } });
         }
       }
     },

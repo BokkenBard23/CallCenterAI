@@ -43,6 +43,17 @@ import type {
   DuplicateReport,
   DictionaryStats,
   ValidationResult,
+  // Track B Mining (additive — frozen existing types untouched)
+  IndexCorpusRequest,
+  IndexCorpusResponse,
+  MiningJobStatus,
+  FindSimilarRequest,
+  FindSimilarResponse,
+  FindFNRequest,
+  FindFNResponse,
+  AuditRequest,
+  AuditResponse,
+  CancelMiningResponse,
 } from '../types/api';
 
 const API_BASE = '';
@@ -363,6 +374,20 @@ export async function getQualityScore(
 // ═══════════════════════════════════════════════════════════
 
 /**
+ * GET /api/dictionary/{session_id}
+ * Fetch all root dictionaries (with full subtrees) stored in a session.
+ * Used by the DictionaryEditorPage to render the navigation tree on mount.
+ */
+export async function getDictionaryTree(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<DictionaryNode[]> {
+  return request<DictionaryNode[]>(`/api/dictionary/${sessionId}`, {
+    signal,
+  });
+}
+
+/**
  * POST /api/dictionary/{session_id}/nodes
  * Add a new dictionary node (root dictionary when parent_name omitted).
  */
@@ -642,4 +667,108 @@ export async function exportDictionaryXml(
     );
   }
   return response.blob();
+}
+
+// ═══════════════════════════════════════════════════════════
+// Mining (Track B) — offline corpus mining layer
+// Endpoints under /api/mining/...
+// See backend/app/routers/mining.py for the canonical contract.
+// FROZEN: existing functions above are NOT modified. Only ADDITIVE.
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * POST /api/mining/index
+ * Start long-running corpus indexing (returns 202 + job_id immediately).
+ */
+export async function indexCorpus(
+  body: IndexCorpusRequest,
+  signal?: AbortSignal,
+): Promise<IndexCorpusResponse> {
+  return request<IndexCorpusResponse>('/api/mining/index', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * GET /api/mining/status/{job_id}
+ * Poll job status. Polling interval: 2s (see useMiningState).
+ */
+export async function getMiningStatus(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<MiningJobStatus> {
+  return request<MiningJobStatus>(`/api/mining/status/${encodeURIComponent(jobId)}`, {
+    signal,
+  });
+}
+
+/**
+ * POST /api/mining/cancel/{job_id}
+ * Cancel a long-running job. Backend stops at the next checkpoint.
+ */
+export async function cancelMining(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<CancelMiningResponse> {
+  return request<CancelMiningResponse>(
+    `/api/mining/cancel/${encodeURIComponent(jobId)}`,
+    {
+      method: 'POST',
+      signal,
+    },
+  );
+}
+
+/**
+ * POST /api/mining/find_similar
+ * Find top-k dialogues similar to a phrase group.
+ * Synchronous (short-running) — returns FindSimilarResponse.
+ */
+export async function findSimilar(
+  body: FindSimilarRequest,
+  signal?: AbortSignal,
+): Promise<FindSimilarResponse> {
+  return request<FindSimilarResponse>('/api/mining/find_similar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * POST /api/mining/find_fn
+ * Find false-negative candidates with LLM confidence.
+ * Long-running → returns 202 + job_id immediately; poll via /status.
+ */
+export async function findFalseNegatives(
+  body: FindFNRequest,
+  signal?: AbortSignal,
+): Promise<FindFNResponse> {
+  return request<FindFNResponse>('/api/mining/find_fn', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * POST /api/mining/audit
+ * LLM audit of the dictionary (per PhraseGroup: recall, missed, recommendations).
+ * Long-running → returns 202 + job_id immediately; poll via /status.
+ */
+export async function auditDictionary(
+  body: AuditRequest,
+  signal?: AbortSignal,
+): Promise<AuditResponse> {
+  return request<AuditResponse>('/api/mining/audit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
 }

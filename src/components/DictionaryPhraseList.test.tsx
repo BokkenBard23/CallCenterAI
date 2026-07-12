@@ -19,9 +19,14 @@ function renderWithProviders(ui: React.ReactElement) {
 
 function makeDictionary(overrides: Partial<DictionaryNode> = {}): DictionaryNode {
   return {
+    id: 'test-id',
     name: 'TestDict',
+    parent_name: null,
     conditions: [],
     children: [],
+    condition_count: 0,
+    has_children: false,
+    children_count: 0,
     ...overrides,
   };
 }
@@ -30,27 +35,29 @@ const sampleDictionaries: DictionaryNode[] = [
   makeDictionary({
     name: 'Угрозы',
     conditions: [
-      { text: 'расторжение договора', channel_constraint: 'OPERATOR', is_exact: true, word_distance: 0 },
-      { text: 'отказ', channel_constraint: 'CLIENT', is_exact: false, word_distance: 2 },
+      { text: 'расторжение договора', channel_constraint: 'OPERATOR', is_exact: true, word_distance: 0, word_count: 2, without_list: [] },
+      { text: 'отказ', channel_constraint: 'CLIENT', is_exact: false, word_distance: 2, word_count: 1, without_list: [] },
     ],
     children: [],
   }),
   makeDictionary({
     name: 'Приветствия',
     conditions: [
-      { text: 'добрый день', channel_constraint: 'ANY', is_exact: false, word_distance: 1 },
+      { text: 'добрый день', channel_constraint: 'ANY', is_exact: false, word_distance: 1, word_count: 2, without_list: [] },
     ],
     children: [],
   }),
 ];
 
 const sampleSearchResult: SearchResult = {
-  dialogue_id: 'd1',
+  segments: [],
+  total_matches: 3,
   matches: [
-    { phrase_text: 'расторжение договора', start: 0, end: 20, turn_index: 0, dict_name: 'Угрозы', channel: 'OPERATOR', word_distance: 0, dict_level: 1 },
-    { phrase_text: 'расторжение договора', start: 50, end: 70, turn_index: 1, dict_name: 'Угрозы', channel: 'OPERATOR', word_distance: 0, dict_level: 1 },
-    { phrase_text: 'отказ', start: 100, end: 105, turn_index: 2, dict_name: 'Угрозы', channel: 'CLIENT', word_distance: 2, dict_level: 1 },
+    { phrase_text: 'расторжение договора', matched_text: 'расторжение договора', matched_start: 0, matched_end: 20, quarter: 'Угрозы', turn_index: 0, speaker: 'OPERATOR', match_type: 'phrase', word_distance_used: 0, cascade_order: 1, is_exact_match: true, channel_constraint: 'OPERATOR', word_distance: 0, dict_level: 1 },
+    { phrase_text: 'расторжение договора', matched_text: 'расторжение договора', matched_start: 50, matched_end: 70, quarter: 'Угрозы', turn_index: 1, speaker: 'OPERATOR', match_type: 'phrase', word_distance_used: 0, cascade_order: 1, is_exact_match: true, channel_constraint: 'OPERATOR', word_distance: 0, dict_level: 1 },
+    { phrase_text: 'отказ', matched_text: 'отказ', matched_start: 100, matched_end: 105, quarter: 'Угрозы', turn_index: 2, speaker: 'CLIENT', match_type: 'phrase', word_distance_used: 2, cascade_order: 1, is_exact_match: false, channel_constraint: 'CLIENT', word_distance: 2, dict_level: 1 },
   ],
+  matches_by_level: { '1': 3 },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -97,12 +104,12 @@ describe('DictionaryPhraseList', () => {
     const dupDicts: DictionaryNode[] = [
       makeDictionary({
         name: 'Dict1',
-        conditions: [{ text: 'тест', channel_constraint: 'ANY', is_exact: false, word_distance: 2 }],
+        conditions: [{ text: 'тест', channel_constraint: 'ANY', is_exact: false, word_distance: 2, word_count: 1, without_list: [] }],
         children: [],
       }),
       makeDictionary({
         name: 'Dict2',
-        conditions: [{ text: 'тест', channel_constraint: 'OPERATOR', is_exact: true, word_distance: 0 }],
+        conditions: [{ text: 'тест', channel_constraint: 'OPERATOR', is_exact: true, word_distance: 0, word_count: 1, without_list: [] }],
         children: [],
       }),
     ];
@@ -123,11 +130,11 @@ describe('DictionaryPhraseList', () => {
     const nestedDicts: DictionaryNode[] = [
       makeDictionary({
         name: 'Root',
-        conditions: [{ text: 'корень', channel_constraint: 'ANY', is_exact: false, word_distance: 2 }],
+        conditions: [{ text: 'корень', channel_constraint: 'ANY', is_exact: false, word_distance: 2, word_count: 1, without_list: [] }],
         children: [
           makeDictionary({
             name: 'Child',
-            conditions: [{ text: 'потомок', channel_constraint: 'CLIENT', is_exact: false, word_distance: 1 }],
+            conditions: [{ text: 'потомок', channel_constraint: 'CLIENT', is_exact: false, word_distance: 1, word_count: 1, without_list: [] }],
             children: [],
           }),
         ],

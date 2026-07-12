@@ -32,11 +32,11 @@ describe('SnackbarContext', () => {
       try {
         return useSnackbar();
       } catch (e) {
-        return { __error: (e as Error).message };
+        return { __error: (e as Error).message } as const;
       }
     });
 
-    expect(result.current.__error).toBe(
+    expect((result.current as { __error?: string }).__error).toBe(
       'useSnackbar must be used within a SnackbarProvider',
     );
   });

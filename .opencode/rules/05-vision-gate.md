@@ -1,0 +1,156 @@
+# Vision Gate — обязательный multimodal-анализ скриншотов
+
+## Контекст
+
+CDP (Chrome DevTools Protocol) и MCP-automation (chrome-devtools-mcp, playwright-mcp)
+проверяют **DOM-измерения** (width, overflow, position), но **не видят** визуальное содержимое:
+наложение текста, рендеринг иконок как текста, обрезание шрифтов, визуальные коллизии.
+
+**Проблема:** ui-tester может вернуть `verdict: approved` с `PASS` по всем DOM-метрикам,
+когда на экране реально сломан рендеринг (текст поверх текста, иконки как строки, склеенные tab-ы).
+
+**Решение:** обязательный vision-анализ скриншотов через multimodal LLM API для **каждого**
+visual gate с UI surface.
+
+## Инструмент
+
+### Backend module: `backend/app/services/vision_analysis.py`
+
+Переиспользуемый async-модуль с fallback-цепочкой (на основе vision-бенчмарка
+2026-07-12, см. `docs/specs/screenshots/vision-benchmark/VISION_BENCHMARK_RESULTS.md`):
+
+```
+gpt-5.4 → qwen-medium-dense → qwen-medium
+```
+
+**Бенчмарк (3 теста, 7 моделей):**
+
+| Модель | Точность | Скорость | Роль |
+|--------|----------|----------|------|
+| **gpt-5.4** | **100%** | 5.5s | Primary — единственная модель без false positives |
+| qwen-medium-dense | 67% | 3.6s | Fallback 1 — самая быстрая |
+| qwen-medium | 67% | 4.8s | Fallback 2 — гарантированно доступна (Beeline infra) |
+| claude-sonnet-4-5 | 67% | 6.4s | Не используется (хуже gpt-5.4, медленнее qwen) |
+| claude-opus-4-6 | 67% | 6.7s | Не используется |
+| gemini-2.5-pro | 67% | 12.8s | Не используется (самая медленная) |
+| qwen-medium-preview | 67% | 4.7s | Не используется (qwen-medium-dense быстрее) |
+
+- `gpt-5.4` может давать **Guardrails Exo** ошибки (intermittent).
+- Модели `qwen-medium*` — direct Beeline infrastructure, **не** проходят через Guardrails,
+  гарантированный last-resort fallback.
+- Все модели используют один OpenAI-compatible endpoint `api.ai.beeline.ru/api/v3/chat/completions`.
+- API key берётся из `backend/.env` (`BEELINE_API_KEY`).
+
+### CLI usage (для stage-агентов)
+
+```bash
+# Backend must be running OR just use PYTHONPATH
+cd backend
+PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m app.services.vision_analysis \
+  --image ../docs/specs/screenshots/some-screenshot.png \
+  --prompt "Опиши визуальные проблемы: наложение текста, обрезание, рендеринг иконок." \
+  --output ../docs/specs/screenshots/ai-analysis-some-screenshot.md
+```
+
+### Python API (для backend integration)
+
+```python
+from app.services.vision_analysis import analyze_screenshot
+
+result = await analyze_screenshot(
+    image_path="docs/specs/screenshots/some.png",
+    prompt="Опиши визуальные проблемы.",
+)
+print(result["text"])  # LLM response
+print(result["model"])  # "gpt-5.4" (or fallback model)
+print(result["attempts"])  # per-model attempt log
+```
+
+## Обязательные правила для stage-агентов
+
+### ui-tester — ОБЯЗАТЕЛЬНЫЙ vision-анализ
+
+1. **После** CDP/MCP DOM-проверок (width, overflow, position, console) — и **до** формирования
+   вердикта — ui-tester обязан запустить vision-анализ **минимум одного скриншота на breakpoint**.
+
+2. Vision-анализ проверяет:
+   - Наложение текста (дублирование RU+EN, иконки как строки поверх подписей)
+   - Обрезание текста за пределами кнопок/контейнеров
+   - Склеивание tab-ов / некорректный рендеринг DS-компонентов
+   - Визуальные коллизии (элементы поверх друг друга)
+   - Отсутствие иконок (пустые места где должны быть icons)
+   - Общая читаемость и композиция
+
+3. Если vision-анализ находит **любой** visual bug, который CDP не обнаружил — вердикт
+   **обязан** быть `rejected`, даже если все DOM-метрики PASS.
+
+4. Vision-анализ **не заменяет** CDP/MCP — он дополняет. CDP проверяет размеры/overflow,
+   vision проверяет содержимое/рендеринг.
+
+5. Результат vision-анализа сохраняется:
+   - Файл: `docs/specs/screenshots/ai-analysis-{screenshot-name}.md`
+   - В `stage_result.visual_gate.screenshots_or_notes` — ссылка на файл анализа
+   - В `pipeline-state.yaml` → `visual_gate.screenshots_or_notes` — краткое упоминание
+
+### reviewer — проверка vision evidence
+
+1. При review UI surface reviewer обязан проверить, что ui-tester приложил vision-анализ
+   (файл `ai-analysis-*.md` в `docs/specs/screenshots/`).
+
+2. Если vision-анализ отсутствует — это `visual_gate_met: false`, возвращать в `ui-tester`.
+
+3. Если vision-анализ нашёл issues, но ui-tester вернул `approved` — это blocker, возвращать
+   в `ui-tester` с пометкой `vision_analysis_discrepancy`.
+
+### ui-coder — self-check перед handoff
+
+1. После реализации UI и **до** запуска `npm run dev` → chrome-devtools-mcp цикла,
+   ui-coder может (опционально, но рекомендуется) запустить vision-анализ на скриншоте
+   из dev-сервера для раннего обнаружения проблем.
+
+2. Это **не заменяет** ui-tester visual gate, но сокращает итерации.
+
+## Fallback chain логика
+
+```
+1. gpt-5.4             → если Guardrails Exo →
+2. qwen-medium-dense   → direct Beeline infra, NO Guardrails (самая быстрая: 3.6s)
+3. qwen-medium         → direct Beeline infra, NO Guardrails (гарантированный recovery)
+```
+
+- Модуль автоматически переходит к следующей модели при ошибке.
+- `gpt-5.4` — primary (100% точность в бенчмарке, единственная модель без false positives
+  на тонких визуальных нюансах).
+- Qwen модели — **гарантированный** recovery: они никогда не дают Guardrails Exo.
+- Лог попыток сохраняется в `result["attempts"]` для аудита.
+- Бенчмарк: `docs/specs/screenshots/vision-benchmark/VISION_BENCHMARK_RESULTS.md`
+
+## Detect Guardrails Exo
+
+Модуль определяет Guardrails ошибки по паттернам:
+- HTTP non-200 + "guardrails" / "exo" / "content_filter" / "content policy" в теле
+- HTTP 200 + пустой content (для guardrails-моделей)
+- HTTP 200 + guardrails-текст в content body
+
+## Исключения (когда vision-анализ не нужен)
+
+- `quality_profile: lean` БЕЗ UI surface (logic-only changes)
+- `visual_gate.required: false` (явно указано в brief)
+- `design_input: null` (no UI)
+- Если `mobile_relevance: none` и тестируется только desktop — vision-анализ нужен только
+  для desktop скриншота (не для 375/768)
+
+## Артефакты
+
+| Артефакт | Создатель | Потребитель |
+|----------|-----------|-------------|
+| `backend/app/services/vision_analysis.py` | coder (создан) | ui-tester, reviewer, ui-coder (через CLI) |
+| `docs/specs/screenshots/ai-analysis-*.md` | ui-tester | reviewer, orchestrator |
+| `pipeline-state.yaml` → `visual_gate.vision_analysis` | ui-tester | orchestrator, reviewer |
+
+## Инвариант
+
+**CDP PASS без vision-анализа ≠ visual gate PASS.**
+
+Если visual gate `required: true` и есть UI surface, но vision-анализ не выполнен —
+`visual_gate.status` обязан быть `blocked`, а не `passed`.

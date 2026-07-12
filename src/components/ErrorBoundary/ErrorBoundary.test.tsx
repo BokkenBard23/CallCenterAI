@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 /** Component that always throws during render */
-function ThrowingComponent({ error }: { error: Error }) {
+function ThrowingComponent({ error }: { error: Error }): never {
   throw error;
 }
 

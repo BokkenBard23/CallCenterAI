@@ -1,0 +1,92 @@
+# Mining prompts (Track B — Quick Win Mining Panel).
+#
+# Used by app.services.dict_mining.DictionaryMiningService.
+# Pattern: prompts/dictionary.yaml (version + prompts map + system block scalar
+# + temperature + max_tokens + optional output_model).
+#
+# All prompts request JSON-only output for deterministic parsing.
+# Reason / explanation fields are short Russian sentences.
+# Anti-circularity: LLM judges by dialogue text, NOT by dict_match results.
+version: 1
+
+prompts:
+  find_similar:
+    system: |-
+      Дан диалог и фразы из PhraseGroup словаря SmartLogger.
+      Оцени, насколько диалог близок к этим фразам по смыслу.
+      Ответь в формате JSON:
+      {
+        "label": "relevant" | "partially" | "irrelevant",
+        "score": 0.0-1.0,
+        "reason": "одна sentence на русском"
+      }
+      Ответь ТОЛЬКО валидным JSON, без markdown-обёрток.
+    temperature: 0.3
+    max_tokens: 500
+    output_model: null
+
+  find_fn:
+    system: |-
+      Дан диалог, который НЕ match словарём SmartLogger (baseline search = 0 matches).
+      Но диалог векторно близок к фразам из PhraseGroup.
+      Есть ли в диалоге фразы, которые ДОЛЖНЫ были match, но не match?
+      Если да — предложи конкретную фразу для добавления в словарь.
+      Ответь в формате JSON:
+      {
+        "label": "relevant" | "irrelevant" | "uncertain",
+        "score": 0.0-1.0,
+        "reason": "одна sentence на русском",
+        "proposed_phrase": "фраза или null"
+      }
+      Учитывай: BOW free-order matching (порядок слов свободный),
+      WordDistance (промежуточные слова), morphological variations.
+      Ответь ТОЛЬКО валидным JSON.
+    temperature: 0.3
+    max_tokens: 600
+    output_model: null
+
+  audit_phrase_group:
+    system: |-
+      Для PhraseGroup словаря SmartLogger (фразы: {phrases}):
+      1. Что найдёт этот PhraseGroup в звонках? (recall — какие диалоги match)
+      2. Что пропустит? (missed — какие релевантные НЕ match)
+      3. Рекомендации по улучшению: новые фразы, исключения, WordDistance корректировки.
+      Учитывай BOW free-order limitation (порядок слов свободный, возможны ложные совпадения).
+      Ответь в формате JSON:
+      {
+        "recall": 0.0-1.0,
+        "missed_count": int,
+        "recommendations": [
+          {"type": "add_phrase"|"remove_phrase"|"adjust_word_distance"|"add_exception",
+           "phrase": "...", "reason": "...", "word_distance": int|null}
+        ],
+        "explanation": "markdown text с детальным разбором"
+      }
+      Ответь ТОЛЬКО валидным JSON.
+    temperature: 0.5
+    max_tokens: 2000
+    output_model: null
+
+  audit_recommendation:
+    system: |-
+      Конкретная рекомендация для PhraseGroup: {phrase}
+      Тип: {type} (add_phrase/remove_phrase/adjust_word_distance/add_exception)
+      Обоснуй, почему эта рекомендация улучшит coverage.
+      Ответь одной sentence на русском.
+    temperature: 0.3
+    max_tokens: 300
+    output_model: null
+
+  confidence_label:
+    system: |-
+      Дан диалог и assessment LLM. Поставь финальную метку confidence:
+      "relevant" — диалог релевантен теме словаря
+      "irrelevant" — диалог нерелевантен
+      "uncertain" — недостаточно информации для уверенности
+      Причина — одна sentence на русском.
+      Ответь в формате JSON:
+      {"label": "...", "reason": "..."}
+      Ответь ТОЛЬКО валидным JSON.
+    temperature: 0.2
+    max_tokens: 300
+    output_model: null

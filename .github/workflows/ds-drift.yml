@@ -1,0 +1,68 @@
+name: DS Drift Check
+
+# Weekly cron that compares the Beeline Design System prop inventory
+# (docs/specs/ds-prop-inventory.json, snapshotted by mcp-researcher)
+# against the .types.d.ts files shipped in node_modules/@beeline/design-system-react.
+# When drift is detected, a GitHub issue is created with the full report.
+#
+# Manual trigger: workflow_dispatch (Actions tab → "Run workflow").
+
+on:
+  schedule:
+    # Sunday 00:00 UTC — weekly cadence matches the mcp-researcher refresh cycle.
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ds-drift
+  cancel-in-progress: false
+
+jobs:
+  ds-drift:
+    name: Detect DS prop drift
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        # `npm ci` installs devDependencies (incl. tsx) required to run the script.
+        # If the repo has a production-only lockfile scenario, fallback to `npm install`.
+        run: npm ci
+
+      - name: Run drift check
+        id: drift
+        continue-on-error: true
+        # The script exits 0 when no drift is found and 1 when drift is detected.
+        # We capture both stdout and stderr into a report file for the issue body.
+        run: |
+          set -o pipefail
+          npm run check:ds-drift 2>&1 | tee ds-drift-report.txt
+
+      - name: Create issue on drift
+        if: steps.drift.outcome == 'failure'
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: 'DS Drift Detected — weekly check'
+          content-filepath: ds-drift-report.txt
+          labels: |
+            ds-drift
+            automation
+          assignees: ${{ github.repository_owner }}
+
+      - name: Fail job on drift
+        if: steps.drift.outcome == 'failure'
+        run: |
+          echo "::error::DS drift detected. See the created issue or the ds-drift-report.txt artifact."
+          exit 1

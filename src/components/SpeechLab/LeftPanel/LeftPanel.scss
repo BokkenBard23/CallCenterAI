@@ -26,11 +26,7 @@
 
   &__dialog {
     min-width: 400px;
-
-    @media (max-width: 767px) {
-      min-width: auto;
-      width: 100%;
-    }
+    /* Mobile media queries removed — desktop-only internal tool (FullHD+). */
   }
 
   &__preview {

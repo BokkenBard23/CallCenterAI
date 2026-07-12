@@ -13,6 +13,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QualityScorePanel } from './QualityScorePanel';
+import type { QualityScoreResult } from '../../types/api';
 
 // ── Mock API ──
 vi.mock('../../api/client', () => ({
@@ -23,24 +24,24 @@ import { getQualityScore } from '../../api/client';
 const mockGetQualityScore = vi.mocked(getQualityScore);
 
 // ── Mock data ──
-const MOCK_QUALITY_RESULT = {
+const MOCK_QUALITY_RESULT: QualityScoreResult = {
   session_id: 'test-session-1',
   categories: [
-    { category: 'communication_skills', level: 'high' as const, score: 0.9, justification: 'Отличная коммуникация' },
-    { category: 'problem_solving', level: 'medium' as const, score: 0.65, justification: 'Среднее решение проблем' },
-    { category: 'product_knowledge', level: 'low' as const, score: 0.3, justification: 'Слабое знание продукта' },
-    { category: 'responsiveness', level: 'high' as const, score: 0.85, justification: 'Быстрая реакция' },
-    { category: 'professionalism', level: 'high' as const, score: 0.88, justification: 'Профессиональный подход' },
-    { category: 'empathy', level: 'medium' as const, score: 0.7, justification: 'Умеренная эмпатия' },
-    { category: 'accuracy', level: 'high' as const, score: 0.92, justification: 'Высокая точность' },
-    { category: 'efficiency', level: 'medium' as const, score: 0.6, justification: 'Средняя эффективность' },
-    { category: 'follow_up_procedures', level: 'low' as const, score: 0.4, justification: 'Слабые последующие действия' },
-    { category: 'conflict_resolution', level: 'medium' as const, score: 0.55, justification: 'Среднее разрешение конфликтов' },
-    { category: 'compliance', level: 'high' as const, score: 0.95, justification: 'Полное соблюдение стандартов' },
-    { category: 'customer_education', level: 'low' as const, score: 0.35, justification: 'Слабое обучение клиента' },
+    { category: 'communication_skills', level: 'high', score: 0.9, justification: 'Отличная коммуникация' },
+    { category: 'problem_solving', level: 'medium', score: 0.65, justification: 'Среднее решение проблем' },
+    { category: 'product_knowledge', level: 'low', score: 0.3, justification: 'Слабое знание продукта' },
+    { category: 'responsiveness', level: 'high', score: 0.85, justification: 'Быстрая реакция' },
+    { category: 'professionalism', level: 'high', score: 0.88, justification: 'Профессиональный подход' },
+    { category: 'empathy', level: 'medium', score: 0.7, justification: 'Умеренная эмпатия' },
+    { category: 'accuracy', level: 'high', score: 0.92, justification: 'Высокая точность' },
+    { category: 'efficiency', level: 'medium', score: 0.6, justification: 'Средняя эффективность' },
+    { category: 'follow_up_procedures', level: 'low', score: 0.4, justification: 'Слабые последующие действия' },
+    { category: 'conflict_resolution', level: 'medium', score: 0.55, justification: 'Среднее разрешение конфликтов' },
+    { category: 'compliance', level: 'high', score: 0.95, justification: 'Полное соблюдение стандартов' },
+    { category: 'customer_education', level: 'low', score: 0.35, justification: 'Слабое обучение клиента' },
   ],
   overall_score: 0.67,
-  overall_level: 'medium' as const,
+  overall_level: 'medium',
   strengths: ['Навыки общения', 'Точность', 'Соблюдение стандартов'],
   weaknesses: ['Знание продукта', 'Обучение клиента'],
   recommendations: [

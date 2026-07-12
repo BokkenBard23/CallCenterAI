@@ -6,11 +6,11 @@ html, body {
   background-color: var(--color-background-base);
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  height: 100%;
 }
 
 #root {
-  height: 100vh;
+  height: 100%;
   width: 100%;
 }
 

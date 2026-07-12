@@ -1776,5 +1776,177 @@ class MaskedDialogueResult(BaseModel):
     )
 
 
+# ═══════════════════════════════════════════════════════════
+# Mining Models (Track B — Quick Win Mining Panel)
+#
+# Offline corpus mining discovery layer. Composition over existing services
+# (FRIDA embeddings + FAISS + LLM + chunker + rtf_parser). НЕ production-runtime
+# классификатор — НЕ вызывается из search.py runtime.
+#
+# API contract mirrors docs/specs/spec.md → API контракт → Request/Response schemas.
+# ═══════════════════════════════════════════════════════════
+
+
+class IndexCorpusRequest(BaseModel):
+    """POST /mining/index request body."""
+
+    session_id: str = Field(..., description="Существующая session с загруженным словарём")
+    directory_path: str = Field(..., description="Абсолютный путь к директории с RTF")
+    dictionary_id: str = Field(..., description="ID словаря для mining (root DictionaryNode.name)")
+
+
+class IndexCorpusResponse(BaseModel):
+    """POST /mining/index response (202 Accepted)."""
+
+    job_id: str
+    status: Literal["pending", "running"] = "pending"
+    total_dialogues: int = Field(0, description="0 пока не подсчитано")
+    message: str = ""
+
+
+class MiningJobStatus(BaseModel):
+    """GET /mining/status/{job_id} response. Polling для long-running jobs.
+
+    When status == 'completed', ``result`` contains job-type-specific payload
+    (FindFNJobResult for find_fn, AuditJobResult for audit, None for index).
+    """
+
+    job_id: str
+    status: Literal["pending", "running", "completed", "failed", "partial", "cancelled"]
+    job_type: Literal["index", "find_fn", "audit"] = "index"
+    progress: float = Field(0.0, ge=0.0, le=1.0, description="0.0-1.0")
+    processed_dialogues: int = 0
+    total_dialogues: int = 0
+    checkpoint_at: Optional[str] = Field(None, description="ISO-8601 last checkpoint")
+    started_at: str
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+    warning: Optional[str] = Field(None, description="Partial (LLM rate limited)")
+    result: Optional[Any] = Field(
+        None,
+        description="Job-type-specific payload when status=completed (FindFNJobResult / AuditJobResult / None)",
+    )
+
+
+class SimilarDialogue(BaseModel):
+    """Top-k dialogue similar to a phrase group."""
+
+    dialogue_id: str
+    file_path: str
+    snippet: str = Field(..., description="Первые N символов текста")
+    score: float = Field(..., ge=0.0, le=1.0, description="Cosine similarity 0-1")
+    channel: str = Field(..., description="CLIENT | OPERATOR | ANY")
+    turn_count: int = 0
+
+
+class FindSimilarRequest(BaseModel):
+    """POST /mining/find_similar request body."""
+
+    session_id: str
+    job_id: str = Field(..., description="Completed indexing job")
+    phrase_group_id: str = Field(..., description="ID PhraseGroup (или text фразы)")
+    top_k: int = Field(20, ge=1, le=200)
+
+
+class FindSimilarResponse(BaseModel):
+    """POST /mining/find_similar response."""
+
+    phrase_group_id: str
+    total: int
+    dialogues: List[SimilarDialogue]
+
+
+class ConfidenceLabel(str, enum.Enum):
+    """3-level LLM confidence taxonomy.
+
+    Anti-circularity: ``uncertain`` НЕ входит в positive-эталон.
+    """
+
+    relevant = "relevant"
+    irrelevant = "irrelevant"
+    uncertain = "uncertain"
+
+
+class FNCandidate(BaseModel):
+    """False Negative candidate (dialogue NOT matched by dict but vector-close + LLM verified)."""
+
+    dialogue_id: str
+    file_path: str
+    snippet: str
+    score: float = Field(..., ge=0.0, le=1.0, description="Vector similarity 0-1")
+    llm_label: ConfidenceLabel
+    llm_score: float = Field(0.0, ge=0.0, le=1.0)
+    llm_reason: str = Field("", description="Одна sentence на русском")
+    proposed_phrase: Optional[str] = Field(None, description="LLM-предложенная фраза для добавления")
+
+
+class FindFNRequest(BaseModel):
+    """POST /mining/find_fn request body. Long-running → 202 + polling."""
+
+    session_id: str
+    job_id: str = Field(..., description="Completed indexing job")
+    dictionary_id: str
+    threshold: float = Field(0.7, ge=0.0, le=1.0, description="Min vector similarity для FN candidate")
+
+
+class FindFNResponse(BaseModel):
+    """POST /mining/find_fn initial response (202). Results via GET /status."""
+
+    job_id: str
+    dictionary_id: str
+    total: int = 0
+    candidates: List[FNCandidate] = Field(default_factory=list)
+    partial: bool = Field(False, description="True если LLM rate limited")
+
+
+class FindFNJobResult(BaseModel):
+    """Вложено в MiningJobStatus.result когда status=completed для find_fn job."""
+
+    candidates: List[FNCandidate] = Field(default_factory=list)
+
+
+class AuditRecommendation(BaseModel):
+    """Single LLM audit recommendation for a PhraseGroup."""
+
+    type: Literal["add_phrase", "remove_phrase", "adjust_word_distance", "add_exception"]
+    phrase: str
+    reason: str
+    word_distance: Optional[int] = Field(None, description="Для adjust_word_distance")
+
+
+class PhraseGroupAudit(BaseModel):
+    """LLM audit result for one PhraseGroup."""
+
+    phrase_group_id: str
+    phrase_text: str = Field(..., description="Объединённый текст фраз")
+    recall: float = Field(0.0, ge=0.0, le=1.0)
+    missed_count: int = 0
+    recommendations: List[AuditRecommendation] = Field(default_factory=list)
+    llm_explanation: str = Field("", description="Markdown text")
+
+
+class AuditRequest(BaseModel):
+    """POST /mining/audit request body. Long-running → 202 + polling."""
+
+    session_id: str
+    job_id: str = Field(..., description="Completed indexing job")
+    dictionary_id: str
+
+
+class AuditResponse(BaseModel):
+    """POST /mining/audit initial response (202). Results via GET /status."""
+
+    job_id: str
+    dictionary_id: str
+    phrase_groups: List[PhraseGroupAudit] = Field(default_factory=list)
+    partial: bool = Field(False)
+
+
+class AuditJobResult(BaseModel):
+    """Вложено в MiningJobStatus.result когда status=completed для audit job."""
+
+    phrase_groups: List[PhraseGroupAudit] = Field(default_factory=list)
+
+
 # Resolve forward references (LogicNode self-referencing children)
 LogicNode.model_rebuild()

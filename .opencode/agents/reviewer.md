@@ -211,6 +211,8 @@ npx tsc --noEmit  # Нет ошибок типов
 
 Для любого UI surface `visual_gate.status: skipped_mcp_unavailable` или отсутствие visual evidence не считается approval. Возврат: `blocked` / `needs_user` или re-route в `ui-tester`, кроме случая с явным `risk_acceptance.result_after_iteration_limit`.
 
+**Vision-анализ (см. `.opencode/rules/05-vision-gate.md`):** при review UI surface reviewer обязан проверить, что ui-tester приложил vision-анализ скриншотов (файлы `docs/specs/screenshots/ai-analysis-*.md`). Если vision-анализ отсутствует — `visual_gate_met: false`, возвращать в `ui-tester`. Если vision-анализ нашёл issues, но ui-tester вернул `approved` — это blocker с пометкой `vision_analysis_discrepancy`.
+
 Если `quality_profile: hardened` и лимит review-итераций достигнут, verdict не превращается в approved автоматически. Возврат: `blocked` / `needs_user` с требованием `risk_acceptance.result_after_iteration_limit`.
 
 ## Процесс DS-compliance проверки (через MCP)

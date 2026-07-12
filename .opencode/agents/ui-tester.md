@@ -35,9 +35,11 @@ Source of truth:
 - `.opencode/agents/ui-tester.md`
 - `.opencode/rules/01-design-system-first.md`
 - `.opencode/rules/03-pipeline-transitions.md`
+- `.opencode/rules/05-vision-gate.md` — **обязательный vision-анализ скриншотов**
 
 Делай:
 - Проверяй 375 / 768 / 1440, states, interactions, console и a11y.
+- **ОБЯЗАТЕЛЬНО** запускай vision-анализ скриншотов через `backend/app/services/vision_analysis.py` (см. `.opencode/rules/05-vision-gate.md`). CDP/MCP проверяют только DOM-измерения; vision-анализ проверяет реальный рендеринг (наложение текста, иконки как строки, склеенные tab-ы). Без vision-анализа `visual_gate.status` обязан быть `blocked`, а не `passed`.
 - Перед проверкой прочитай `pipeline-state`: `quality_profile`, `design_input`, `design_input_artifacts`, `risk_acceptance`.
 - Сравнивай реализацию с **`design-spec-chunk-{N}.md`** для тестируемого chunk (legacy: `design-spec.md`), если артефакт есть.
 - Для marketing/landing сверяй реализацию с `ui-implementation-brief.md`: `marketing_visual_contract`, `corporate_style_basis`, `brand_expression_plan`, `expressive_style_allowlist`, `motion_policy`, `style_failure_modes`, `quality_rubric`.
@@ -127,6 +129,36 @@ Handoff:
 - Контраст текста
 - Screen reader: aria-labels, semantic HTML
 - Focus visible
+
+### Шаг 5a: Vision-анализ скриншотов (ОБЯЗАТЕЛЬНО, см. `.opencode/rules/05-vision-gate.md`)
+
+CDP/MCP проверяют DOM-измерения (width, overflow, position), но **не видят** визуальное содержимое.
+Vision-анализ через multimodal LLM выявляет: наложение текста (RU+EN, иконки как строки),
+обрезание шрифтов, склеенные tab-ы, визуальные коллизии.
+
+**Для каждого breakpoint** (desktop/tablet/mobile — или только desktop если `mobile_relevance: none`):
+
+1. Сделать скриншот через CDP/MCP (уже выполнено на Шаге 2)
+2. Запустить vision-анализ:
+   ```bash
+   cd backend
+   PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m app.services.vision_analysis \
+     --image ../docs/specs/screenshots/{screenshot-name}.png \
+     --prompt "Проанализируй визуальные проблемы на скриншоте MiningPanel: 1) Наложение текста (дублирование EN+RU на кнопках, иконки как строки поверх подписей) 2) Обрезание текста за пределами кнопок/контейнеров 3) Склеивание tab-ов или некорректный рендеринг DS-компонентов 4) Визуальные коллизии (элементы поверх друг друга) 5) Общая читаемость и композиция. Ответь на русском, детально." \
+     --output ../docs/specs/screenshots/ai-analysis-{screenshot-name}.md
+   ```
+3. Прочитать результат из `ai-analysis-{screenshot-name}.md`
+4. Если vision-анализ нашёл **любой** visual bug, который CDP не обнаружил → вердикт
+   **обязан** быть `rejected`, даже если все DOM-метрики PASS.
+5. Сохранить ссылку на файл анализа в `stage_result.visual_gate.screenshots_or_notes`
+   и в `pipeline-state.yaml` → `visual_gate.screenshots_or_notes`.
+
+**Fallback chain** (автоматически в модуле): `gpt-5.4 → qwen-medium-dense → qwen-medium`.
+GPT-5.4 — primary (100% точность в бенчмарке). Qwen модели — гарантированный recovery
+от Guardrails Exo ошибок (direct Beeline infra). Бенчмарк:
+`docs/specs/screenshots/vision-benchmark/VISION_BENCHMARK_RESULTS.md`
+
+**Инвариант:** CDP PASS без vision-анализа ≠ visual gate PASS.
 
 ### Шаг 6: Формирование вердикта
 - `approved` — нет critical и major issues

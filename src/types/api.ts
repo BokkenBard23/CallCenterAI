@@ -259,7 +259,13 @@ export interface HealthResponse {
 }
 
 export interface UploadedDictionary {
-  file: File;
+  /**
+   * Original File handle. Optional: SpeechLab upload flow performs the upload
+   * via API in LeftPanel and discards the File afterwards — there is no File
+   * to retain. UploadPage still passes the original File. The field is unused
+   * downstream in production code beyond storage.
+   */
+  file?: File;
   response: UploadDictionaryResponse;
 }
 
@@ -314,7 +320,7 @@ export interface HistoryEntry {
 export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 export type AnalysisStatus = 'idle' | 'analyzing' | 'completed' | 'error';
 export type ProviderStatus = 'loading' | 'loaded' | 'error';
-export type ViewMode = 'summary' | 'highlighted';
+export type ViewMode = 'summary' | 'highlighted' | 'structure';
 
 // ═══════════════════════════════════════════════════════════
 // FRIDA Embeddings Models
@@ -649,4 +655,181 @@ export interface ValidationIssue {
 export interface ValidationResult {
   errors: ValidationIssue[];
   warnings: ValidationIssue[];
+}
+
+// ═══════════════════════════════════════════════════════════
+// Mining (Track B) — offline corpus mining layer
+// Mirrors backend/app/models.py mining models (B.1 Backend).
+// See docs/specs/spec.md → API контракт → Request/Response schemas.
+// FROZEN: existing types above are NOT modified. Only ADDITIVE.
+// ═══════════════════════════════════════════════════════════
+
+/** LLM confidence label for false-negative candidates (mirror ConfidenceLabel enum). */
+export type ConfidenceLabel = 'relevant' | 'irrelevant' | 'uncertain';
+
+/** Mining job lifecycle status (mirror backend Literal). */
+export type MiningJobStatusKind =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'partial'
+  | 'cancelled';
+
+/** Body for POST /mining/index. */
+export interface IndexCorpusRequest {
+  /** Existing session with the loaded dictionary. */
+  session_id: string;
+  /** Absolute path to RTF directory (browser-limited via webkitdirectory; UI sends file list, BE resolves path). */
+  directory_path: string;
+  /** Root DictionaryNode.name to mine against. */
+  dictionary_id: string;
+}
+
+/** Response for POST /mining/index (202 Accepted). */
+export interface IndexCorpusResponse {
+  job_id: string;
+  status: 'pending' | 'running';
+  total_dialogues: number;
+  message: string;
+}
+
+/** GET /mining/status/{job_id} response — polling payload. */
+export interface MiningJobStatus {
+  job_id: string;
+  status: MiningJobStatusKind;
+  /** 0.0–1.0 progress fraction. */
+  progress: number;
+  processed_dialogues: number;
+  total_dialogues: number;
+  /** ISO-8601 last checkpoint timestamp. */
+  checkpoint_at: string | null;
+  started_at: string;
+  completed_at: string | null;
+  error: string | null;
+  /** Set when status=partial (LLM rate limited). */
+  warning: string | null;
+  /**
+   * Result payload when status=completed/partial.
+   * Discriminated by job kind: FindFNJobResult for find_fn, AuditJobResult for audit.
+   * Indexing jobs do not populate this.
+   */
+  result?: FindFNJobResult | AuditJobResult | null;
+}
+
+/** Top-k similar dialogue row (mirror backend SimilarDialogue). */
+export interface SimilarDialogue {
+  dialogue_id: string;
+  file_path: string;
+  /** First N characters of the dialogue text. */
+  snippet: string;
+  /** Cosine similarity 0–1. */
+  score: number;
+  /** "CLIENT" | "OPERATOR" | "ANY". */
+  channel: string;
+  turn_count: number;
+}
+
+/** Body for POST /mining/find_similar. */
+export interface FindSimilarRequest {
+  session_id: string;
+  /** Completed indexing job_id. */
+  job_id: string;
+  /** PhraseGroup id (or phrase text fallback). */
+  phrase_group_id: string;
+  top_k?: number;
+}
+
+/** Response for POST /mining/find_similar. */
+export interface FindSimilarResponse {
+  phrase_group_id: string;
+  total: number;
+  dialogues: SimilarDialogue[];
+}
+
+/** False-negative candidate row (mirror backend FNCandidate). */
+export interface FNCandidate {
+  dialogue_id: string;
+  file_path: string;
+  snippet: string;
+  /** Vector similarity 0–1. */
+  score: number;
+  llm_label: ConfidenceLabel;
+  /** LLM confidence 0–1. */
+  llm_score: number;
+  /** One-sentence LLM justification. */
+  llm_reason: string;
+  /** LLM-proposed phrase for click-to-add (nullable). */
+  proposed_phrase: string | null;
+}
+
+/** Body for POST /mining/find_fn. */
+export interface FindFNRequest {
+  session_id: string;
+  job_id: string;
+  dictionary_id: string;
+  /** Min vector similarity for FN candidate. */
+  threshold?: number;
+}
+
+/** Response for POST /mining/find_fn (synchronous short version). */
+export interface FindFNResponse {
+  job_id: string;
+  dictionary_id: string;
+  total: number;
+  candidates: FNCandidate[];
+  partial: boolean;
+}
+
+/** Job result payload nested in MiningJobStatus for find_fn jobs (status=completed). */
+export interface FindFNJobResult {
+  candidates: FNCandidate[];
+}
+
+/** Audit recommendation (mirror backend AuditRecommendation). */
+export interface AuditRecommendation {
+  type: 'add_phrase' | 'remove_phrase' | 'adjust_word_distance' | 'add_exception';
+  phrase: string;
+  reason: string;
+  /** Set for adjust_word_distance. */
+  word_distance?: number | null;
+}
+
+/** Per-PhraseGroup audit block (mirror backend PhraseGroupAudit). */
+export interface PhraseGroupAudit {
+  phrase_group_id: string;
+  /** Joined phrase text for the group. */
+  phrase_text: string;
+  /** Coverage recall 0–1. */
+  recall: number;
+  /** Count of relevant dialogues the group misses. */
+  missed_count: number;
+  recommendations: AuditRecommendation[];
+  /** Markdown explanation from LLM. */
+  llm_explanation: string;
+}
+
+/** Body for POST /mining/audit. */
+export interface AuditRequest {
+  session_id: string;
+  job_id: string;
+  dictionary_id: string;
+}
+
+/** Response for POST /mining/audit (synchronous short version). */
+export interface AuditResponse {
+  job_id: string;
+  dictionary_id: string;
+  phrase_groups: PhraseGroupAudit[];
+  partial: boolean;
+}
+
+/** Job result payload nested in MiningJobStatus for audit jobs (status=completed). */
+export interface AuditJobResult {
+  phrase_groups: PhraseGroupAudit[];
+}
+
+/** Response for POST /mining/cancel/{job_id}. */
+export interface CancelMiningResponse {
+  status: 'cancelled';
 }

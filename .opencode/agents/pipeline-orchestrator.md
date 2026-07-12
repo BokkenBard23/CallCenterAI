@@ -21,6 +21,7 @@ mode: primary
 - `.opencode/rules/02-mcp-protocol.md`
 - `.opencode/rules/03-pipeline-transitions.md`
 - `.opencode/rules/04-ai-builder-updates.md`
+- `.opencode/rules/05-vision-gate.md` — **обязательный vision-анализ скриншотов для UI surface**
 - `docs/specs/pipeline-state.yaml`
 - `AGENTS.md`
 - `docs/brand/beeline-marketing-expression-kit.md` — local source for marketing brand expression; reference it, do not inline or regenerate it.

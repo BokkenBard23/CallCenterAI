@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RootDict>
+  <Greeting>
+    <PhraseGroup channel="ANY" logic="OR" dict_level="1">
+      <Phrase is_exact="0">Здравствуйте</Phrase>
+      <Phrase is_exact="0">Добрый день</Phrase>
+      <Phrase is_exact="0">Приветствую</Phrase>
+    </PhraseGroup>
+  </Greeting>
+  <Main>
+    <PhraseGroup channel="OPERATOR" logic="OR" dict_level="1">
+      <Phrase is_exact="0">Чем могу помочь</Phrase>
+      <Phrase is_exact="0">Чем я могу вам помочь</Phrase>
+    </PhraseGroup>
+    <PhraseGroup channel="CLIENT" logic="OR" dict_level="1">
+      <Phrase is_exact="0">Хочу узнать</Phrase>
+      <Phrase is_exact="0">Меня интересует</Phrase>
+      <Phrase is_exact="0">Подскажите</Phrase>
+    </PhraseGroup>
+  </Main>
+</RootDict>

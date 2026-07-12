@@ -7,7 +7,7 @@
  * Note: DS Tree component may not fully render interactive elements in jsdom.
  * Tests focus on data mapping and filtering behavior.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import SpeechLabTree from './SpeechLabTree';
 import { mapToTreeData, filterTreeNodes } from './treeDataMapper';
@@ -45,7 +45,6 @@ describe('SpeechLabTree', () => {
     render(
       <SpeechLabTree
         nodes={sampleNodes}
-        selectedNodeId={null}
         onSelectNode={() => {}}
       />,
     );
@@ -56,7 +55,6 @@ describe('SpeechLabTree', () => {
     render(
       <SpeechLabTree
         nodes={sampleNodes}
-        selectedNodeId={null}
         onSelectNode={() => {}}
         searchQuery="несуществующий запрос"
       />,
@@ -68,7 +66,6 @@ describe('SpeechLabTree', () => {
     render(
       <SpeechLabTree
         nodes={sampleNodes}
-        selectedNodeId={null}
         onSelectNode={() => {}}
         searchQuery="другой"
       />,

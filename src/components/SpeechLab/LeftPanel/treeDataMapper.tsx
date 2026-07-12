@@ -1,12 +1,12 @@
 /**
- * treeDataMapper — converts SpeechLabTreeNode[] to DS TreeData[] format.
+ * treeDataMapper — converts SpeechLabTreeNode[] to DS Tree data format.
  *
  * Wave UI-2: Replace ExpansionPanel tree with DS Tree component.
  *
  * Mapping:
- *   SpeechLabTreeNode.id          → TreeData.id
- *   SpeechLabTreeNode.name        → TreeData.title
- *   SpeechLabTreeNode.children    → TreeData.children (recursive)
+ *   SpeechLabTreeNode.id          → TreeNodeData.id
+ *   SpeechLabTreeNode.name        → TreeNodeData.title
+ *   SpeechLabTreeNode.children    → TreeNodeData.children (recursive)
  *   SpeechLabTreeNode.is_remainder → icon: WarningCircled
  *   SpeechLabTreeNode.has_children → icon: Folder (parent) / Book (leaf)
  *   SpeechLabTreeNode.children_count → amount prop (if > 0)
@@ -15,13 +15,29 @@
  *
  * Custom render: badges (Актуален/Отменён) are passed via `custom` prop
  * as React nodes, since DS Tree has no Badge slot natively.
+ *
+ * NOTE: DS does not export a TreeData type. We define a local contract
+ * matching the props consumed by the DS Tree `data` prop (id/title/icon/
+ * expanded/custom/children). This shape is intentionally permissive.
  */
 
-import type { TreeData } from '@beeline/design-system-react';
+import type { ReactNode } from 'react';
 import { Icons } from '@beeline/design-tokens/js/iconfont';
-import type { IconsType } from '@beeline/design-tokens/js/iconfont/icons';
 
-import type { SpeechLabTreeNode } from '../../types/speechlab';
+import type { SpeechLabTreeNode } from '../../../types/speechlab';
+
+/**
+ * Local TreeData contract for DS Tree `data` prop.
+ * Mirrors the subset of TreeNode props that Tree renders when given `data`.
+ */
+export interface TreeData {
+  id: string;
+  title: string;
+  icon?: { iconName: Icons };
+  expanded?: boolean;
+  custom?: ReactNode;
+  children?: TreeData[];
+}
 
 /**
  * Convert SpeechLabTreeNode[] to DS TreeData[] for the Tree component.
@@ -34,7 +50,7 @@ export function mapToTreeData(
   nodes: SpeechLabTreeNode[],
   expandedNodes?: Record<string, boolean>,
 ): TreeData[] {
-  return nodes.map((node) => mapNode(node, expandedNodes));
+  return nodes.map((node: SpeechLabTreeNode) => mapNode(node, expandedNodes));
 }
 
 function mapNode(
@@ -45,7 +61,7 @@ function mapNode(
   const isExpanded = expandedNodes?.[node.id] ?? false;
 
   // Icon: WarningCircled for remainder, Folder for parent, Book for leaf
-  const iconName: IconsType = node.is_remainder
+  const iconName: Icons = node.is_remainder
     ? Icons.WarningCircled
     : hasChildren
       ? Icons.Folder
@@ -62,7 +78,7 @@ function mapNode(
     // DS Tree amount prop shows child count; we also pass custom badges
     custom: customContent,
     children: hasChildren
-      ? node.children.map((child) => mapNode(child, expandedNodes))
+      ? node.children.map((child: SpeechLabTreeNode) => mapNode(child, expandedNodes))
       : undefined,
   };
 }
@@ -71,10 +87,10 @@ function mapNode(
  * Build custom React content for TreeData.custom slot.
  * Renders badges: "Актуален" (green) / "Отменён" (red) from saved_state.
  */
-function buildCustomContent(node: SpeechLabTreeNode): React.ReactNode | undefined {
+function buildCustomContent(node: SpeechLabTreeNode): ReactNode | undefined {
   if (!node.saved_state) return undefined;
 
-  const badges: React.ReactNode[] = [];
+  const badges: ReactNode[] = [];
 
   if (node.saved_state.is_actual) {
     badges.push(
@@ -132,8 +148,8 @@ export function filterTreeNodes(
   if (!query) return nodes;
   const q = query.toLowerCase();
   return nodes
-    .filter((node) => nodeMatchesSearch(node, q))
-    .map((node) => ({
+    .filter((node: SpeechLabTreeNode) => nodeMatchesSearch(node, q))
+    .map((node: SpeechLabTreeNode) => ({
       ...node,
       children: filterTreeNodes(node.children, query),
     }));
@@ -142,6 +158,6 @@ export function filterTreeNodes(
 /** Check if a node or any descendant matches the search query */
 function nodeMatchesSearch(node: SpeechLabTreeNode, lowerQuery: string): boolean {
   if (node.name.toLowerCase().includes(lowerQuery)) return true;
-  if (node.display_tokens?.some((t) => t.text.toLowerCase().includes(lowerQuery))) return true;
-  return node.children.some((child) => nodeMatchesSearch(child, lowerQuery));
+  if (node.display_tokens?.some((t: { text: string }) => t.text.toLowerCase().includes(lowerQuery))) return true;
+  return node.children.some((child: SpeechLabTreeNode) => nodeMatchesSearch(child, lowerQuery));
 }

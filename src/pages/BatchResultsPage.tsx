@@ -382,7 +382,8 @@ export default function BatchResultsPage() {
         <BlurFade delay={0} duration={0.4} direction="up" inView>
           <Card>
             <Stack direction="vertical" spacing="x4" align="center">
-              <Icon iconName={Icons.Archive} size="large" inactive />
+              {/* DS gap: no Icon disabled prop, using opacity workaround */}
+              <Icon iconName={Icons.Archive} size="large" style={{ opacity: 0.5 }} />
               <Typography variant="body1" inactive>
                 Нет файлов для анализа
               </Typography>

@@ -1,0 +1,115 @@
+/*
+ * DictionaryEditorPage styles.
+ *
+ * Theme strategy: rely on DS NextThemeProvider/ThemeProvider which injects CSS
+ * variables scoped to `.ds-theme--light` / `.ds-theme--dark` on <body>
+ * (isRoot mode). Variable names below are real DS token names verified in
+ * `node_modules/@beeline/design-system-react/build/components/NextThemeProvider/NextThemeProvider.css`.
+ * No theme-override blocks needed — vars auto-resolve per active theme.
+ *
+ * Token audit:
+ *   --color-background-base       → page surface (header, mobile sidebar)
+ *   --color-background-secondary  → muted surface (sidebar)
+ *   --color-border                → divider/border
+ *   --color-text-active           → primary title text (also used as focus ring)
+ *   --color-text-inactive         → muted tree title text
+ * All names confirmed via DS source, not invented.
+ */
+
+.dict-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+}
+
+.dict-editor__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 56px;
+  min-height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background-base);
+  display: flex;
+  align-items: center;
+}
+
+.dict-editor__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dict-editor__body--collapsed .dict-editor__main {
+  flex: 1;
+}
+
+.dict-editor__sidebar {
+  width: 280px;
+  min-width: 280px;
+  max-height: 100%;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-background-secondary);
+}
+
+.dict-editor__main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.dict-editor__backdrop {
+  display: none;
+}
+
+/* Tablet */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .dict-editor__sidebar {
+    width: 240px;
+    min-width: 240px;
+  }
+  .dict-editor__mobile-tree-toggle {
+    display: none;
+  }
+}
+
+/* Desktop */
+@media (min-width: 1024px) {
+  .dict-editor__mobile-tree-toggle {
+    display: none;
+  }
+}
+
+/* Mobile — mobile media queries removed (desktop-only internal tool, FullHD+). */
+
+/*
+ * M-2 fix: WCAG 2.4.7 Focus Visible.
+ * DS does not emit a visible focus ring for plain IconButtons inside our header.
+ * `--color-text-active` is black-ish in light theme and white-ish in dark theme,
+ * giving high contrast against the same theme's background. Using :focus-visible
+ * keeps the ring off mouse clicks.
+ */
+.dict-editor__header button:focus-visible,
+.dict-editor__sidebar button:focus-visible,
+.dict-editor__mobile-tree-toggle:focus-visible {
+  outline: 2px solid var(--color-text-active);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/*
+ * MiningPanel mobile responsive overrides REMOVED.
+ *
+ * mobile_relevance: none — internal tool, desktop only (FullHD+).
+ * The @media(max-width:767px) block that overrode DS Sidesheet width from
+ * 464px to 100vw has been removed. Desktop (1440px) renders the native
+ * DS Sidesheet at size=large (464px) which is correct for this tool.
+ */
+

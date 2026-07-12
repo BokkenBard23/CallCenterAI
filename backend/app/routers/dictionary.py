@@ -334,6 +334,26 @@ def _persist(session) -> None:
 
 
 @router.get(
+    "/{session_id}",
+    response_model=List[DictionaryNode],
+    summary="Get all dictionary trees in a session",
+)
+async def get_session_dictionaries(
+    session_id: str,
+) -> List[DictionaryNode]:
+    """Return all root dictionaries (with full subtrees) stored in a session.
+
+    Used by the FE dictionary editor to render the navigation tree on mount.
+    Additive endpoint — does not alter any of the 14 frozen editing endpoints.
+
+    Raises:
+        404: Session not found.
+    """
+    session = _resolve_session(session_id)
+    return list(session.dictionaries.values())
+
+
+@router.get(
     "/{session_id}/tokens",
     response_model=List[DisplayToken],
     summary="Get display tokens for a dictionary",

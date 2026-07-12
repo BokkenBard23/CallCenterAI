@@ -1,10 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { visualizer } from 'rollup-plugin-visualizer'
 import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), visualizer({ open: false, filename: 'dist/stats.html' })],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -19,6 +20,18 @@ export default defineConfig({
       '/health': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'ds-vendor': ['@beeline/design-system-react', '@beeline/design-tokens/js/iconfont'],
+          'table-vendor': ['@tanstack/react-table'],
+          'markdown-vendor': ['react-markdown'],
+        },
       },
     },
   },

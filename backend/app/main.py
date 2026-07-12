@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.middleware.rate_limiter import limiter
 from app.middleware.structured_logging import StructuredLoggingMiddleware, setup_structured_logging
-from app.routers import upload, analysis, batch, providers, embeddings, feedback, dictionary, export, rag, health, pii
+from app.routers import upload, analysis, batch, providers, embeddings, feedback, dictionary, export, rag, health, pii, mining
 
 
 # ── Make smartlogger importable ──────────────────────────────
@@ -37,6 +37,7 @@ _OPENAPI_TAGS = [
     {"name": "rag", "description": "RAG Q&A over analyzed dialogues (retrieval + LLM generation)"},
     {"name": "health", "description": "System health check and monitoring (ID-15)"},
     {"name": "pii", "description": "PII masking for 152-FZ compliance (Presidio + custom NER)"},
+    {"name": "mining", "description": "Offline corpus mining (discovery layer, НЕ production runtime)"},
 ]
 
 
@@ -94,6 +95,21 @@ def _init_services() -> None:
     app.state.vector_store = vector_store
     app.state.chunker = chunker
     app.state.hybrid_search_service = hybrid_search_service
+
+    # Track B — offline corpus mining (composition over FRIDA + FAISS + LLM).
+    # NEВ production-runtime: dict_mining does NOT call into search.py runtime.
+    from app.services.dict_mining import DictionaryMiningService
+    from app.services.session_store_sqlite import MiningStore
+
+    mining_store = MiningStore(db_path=str(settings.session_db_path))
+    mining_service = DictionaryMiningService(
+        embedding_service=embedding_service,
+        vector_store=vector_store,
+        chunker=chunker,
+        mining_store=mining_store,
+    )
+    app.state.mining_store = mining_store
+    app.state.mining_service = mining_service
 
     # RAG service (uses existing HybridSearch + FRIDA + LLM providers)
     from app.services.rag import RAGService
@@ -201,6 +217,7 @@ app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 app.include_router(health.router, prefix="/api/health", tags=["health"])
 app.include_router(pii.router, prefix="/api/pii", tags=["pii"])
+app.include_router(mining.router, prefix="/api", tags=["mining"])
 
 
 # ── Legacy healthcheck (kept for backward compatibility) ─────

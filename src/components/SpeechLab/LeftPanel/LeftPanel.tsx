@@ -60,7 +60,6 @@ interface LeftPanelProps {
 
 export default function LeftPanel({
   treeNodes,
-  selectedNodeId,
   onSelectNode,
   onToggleExpand,
   onDictionaryUploaded,
@@ -230,7 +229,6 @@ export default function LeftPanel({
         ) : (
           <SpeechLabTree
             nodes={treeNodes}
-            selectedNodeId={selectedNodeId}
             onSelectNode={onSelectNode}
             onToggleExpand={onToggleExpand}
             searchQuery={debouncedQuery}
@@ -280,7 +278,6 @@ export default function LeftPanel({
                 </Typography>
                 <SpeechLabTree
                   nodes={previewNodes}
-                  selectedNodeId={null}
                   onSelectNode={() => {}}
                 />
               </Box>

@@ -37,7 +37,7 @@ function SpeechLabPageContent() {
   const { state, actions, derived } = useSpeechLabState();
 
   return (
-    <Box style={{ height: 'calc(100vh - 56px)', display: 'flex', flexDirection: 'column' }} aria-label="SpeechLab — анализ диалогов">
+    <Box style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }} aria-label="SpeechLab — анализ диалогов">
       {/* P1-1: H1 for accessibility (visually hidden) */}
       <h1 className="sr-only">SpeechLab</h1>
 
