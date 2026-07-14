@@ -65,6 +65,18 @@
   padding: 16px;
 }
 
+/* H7 FIX (vision-audit): page-level empty-state for the main area when
+   no dictionary node is selected. Previously the main area rendered only
+   an empty ConditionsTable, which the vision audit flagged as a
+   "completely empty main area". Now it shows a clear CTA. */
+.dict-editor__empty-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  text-align: center;
+}
+
 .dict-editor__backdrop {
   display: none;
 }

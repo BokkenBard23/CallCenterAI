@@ -230,6 +230,17 @@ describe('UploadPage', () => {
 
   it('opens reset confirmation dialog on reset click', async () => {
     renderUploadPage();
+
+    // M9 FIX: Reset is now disabled when there is nothing to reset
+    // (vision-audit M9). Upload a file first so the Reset button becomes
+    // enabled and the dialog test exercises the actual reset flow.
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [file] } });
+    await waitFor(() => {
+      expect(screen.getByText('dialog.rtf')).toBeTruthy();
+    });
+
     const resetBtn = screen.getByText('Сбросить');
     fireEvent.click(resetBtn);
 
@@ -243,6 +254,15 @@ describe('UploadPage', () => {
 
   it('closes dialog on Отмена click', async () => {
     renderUploadPage();
+
+    // M9 FIX: same as above — upload a file first so Reset is enabled.
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [file] } });
+    await waitFor(() => {
+      expect(screen.getByText('dialog.rtf')).toBeTruthy();
+    });
+
     const resetBtn = screen.getByText('Сбросить');
     fireEvent.click(resetBtn);
 
@@ -259,8 +279,13 @@ describe('UploadPage', () => {
     await waitFor(() => {
       expect(document.querySelectorAll('[role="dialog"]').length).toBe(0);
     });
-    // Upload area should still be present
-    expect(screen.getByLabelText('Загрузить RTF-файл диалога')).toBeTruthy();
+    // M9 FIX: after Cancel, the upload state must be preserved (Cancel does
+    // not reset). The stepper auto-advances to the 'dict' step after a
+    // successful RTF upload, so we assert the 'dict' step heading is visible
+    // — that proves the RTF upload is still in effect and no reset occurred.
+    await waitFor(() => {
+      expect(screen.queryByText('Словари')).not.toBeNull();
+    });
   });
 
   it('resets data on dialog confirm', async () => {

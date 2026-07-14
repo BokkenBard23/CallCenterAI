@@ -20,7 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Badge,
-  Banner,
   Box,
   Button,
   Icon,
@@ -450,8 +449,12 @@ function ResultsPageContent() {
             searchResult={state.searchResult}
           />
 
-          {/* Collapse button */}
+          {/* Collapse button — H5 FIX: labelled footer row instead of an
+              isolated IconButton that read as a stray artifact. */}
           <Box className="results-sidebar__collapse">
+            <Typography variant="caption" className="results-sidebar__collapse-label">
+              Словарь
+            </Typography>
             <IconButton
               iconName={Icons.Collapse}
               variant="plain"
@@ -477,7 +480,28 @@ function ResultsPageContent() {
 
       {/* ═══ Main Content Area ═══ */}
       <Box className="results-main">
-        <Stack direction="vertical" spacing="x4" style={{ padding: '0 0 0 var(--sizeSpacingX4, 16px)' }}>
+        <Stack
+          direction="vertical"
+          spacing="x4"
+          align="stretch"
+          style={{ padding: '0 var(--sizeSpacingX4, 16px)', width: '100%', boxSizing: 'border-box' }}
+        >
+          {/* ── Partial-loaded indicator (shown while LLM analysis runs) ──
+              H4 FIX: instead of mixing "LLM выполняется..." (above) with
+              already-loaded metrics, we keep a single small inline status
+              pinned to the action bar context. The canonical loading card
+              remains inside SummaryView (active tab content).
+              H1 FIX: the wording is intentionally different from
+              SummaryView's "LLM-анализ выполняется..." so the page does not
+              show the same phrase twice. */}
+          {state.llmLoading && state.searchResult && (
+            <Stack direction="horizontal" spacing="x2" align="center" className="results-partial-status">
+              <Progress shape="animated" cycled />
+              <Typography variant="caption" className="text-info">
+                Идёт сводный анализ — совпадения уже доступны во вкладке «Выделенный текст»
+              </Typography>
+            </Stack>
+          )}
           {/* ── Header row ── */}
           <Stack direction="horizontal" spacing="x3" align="center" justify="space-between">
             <Stack direction="horizontal" spacing="x3" align="center">
@@ -597,27 +621,24 @@ function ResultsPageContent() {
             </InlineAlert>
           )}
 
-          {/* ── LLM loading state ── */}
-          {state.llmLoading && (
-            <Stack direction="vertical" spacing="x2">
-              <Typography variant="body2" className="text-info">
-                LLM-анализ выполняется...
-              </Typography>
-              <Progress shape="animated" cycled />
-            </Stack>
-          )}
+          {/* H1 FIX (vision-audit): removed duplicate LLM loading block here.
+              The single canonical loading state now lives inside SummaryView
+              (active tab content), avoiding the "two competing status blocks"
+              visual defect.
 
-          {/* ── LLM result unavailable (after loading complete) ── */}
-          {!state.llmLoading && !state.llmResult && state.searchResult && (
-            <Banner
-              title="LLM-сводка недоступна — анализ не выполнен или завершился с ошибкой"
-              color="warning"
-              iconName={Icons.Alarm}
-            />
-          )}
+              R-H1 FIX (vision-audit iter 3): the page-level Banner that
+              previously duplicated the LLM-unavailable status (banner + card
+              heading + body + stats shown simultaneously — R-H1-STATE-MIX)
+              is removed. The single canonical LLM-unavailable status now lives
+              inside SummaryView (active tab content) as a consolidated card
+              with heading, cause subtitle and actionable hint. */}
 
-          {/* ── Stats with NumberTicker ── */}
-          {state.searchResult && (
+          {/* ── Stats with NumberTicker ──
+              H4 FIX (vision-audit): hide aggregate stats while LLM analysis
+              is in progress to avoid the "loading + loaded metrics" mixed
+              state. Stats reappear as soon as LLM completes (success or
+              failure), giving a single coherent state per moment. */}
+          {state.searchResult && !state.llmLoading && (
             <BlurFade delay={0} duration={0.4} direction="up" inView={true}>
               <Box className="results-stats">
                 <MatchCounter

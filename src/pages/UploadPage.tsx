@@ -642,15 +642,38 @@ export default function UploadPage() {
       <Divider />
 
       <Stack direction="horizontal" spacing="x4" align="center" justify="end">
-        <Button variant="secondary" onClick={handleResetClick}>
+        {/* M9 FIX (vision-audit): disable "Сбросить" when there is nothing to
+            reset — previously it stayed active in the empty initial state,
+            contradicting the empty-state logic. */}
+        <Button
+          variant="secondary"
+          onClick={handleResetClick}
+          disabled={
+            !rtfFileName &&
+            dictFileNames.length === 0 &&
+            state.rtfUploadStatus !== 'success' &&
+            state.dictionaryUploadStatus !== 'success'
+          }
+        >
           Сбросить
         </Button>
+        {/* H10 FIX (vision-audit): when there is nothing to analyze yet
+            (no RTF + no dictionary + no provider), render the primary CTA
+            as a secondary variant so the disabled state reads unambiguously
+            as inactive. The vision audit flagged that DS Button
+            variant="primary" disabled still looked "active" on a dark theme.
+            Once canAnalyze becomes true, the button switches to primary. */}
         <Button
-          variant="primary"
+          variant={canAnalyze ? 'primary' : 'secondary'}
           disabled={!canAnalyze}
           onClick={handleAnalyze}
           startIcon={
             analyzing ? undefined : <Icon iconName={Icons.Search} />
+          }
+          title={
+            canAnalyze
+              ? undefined
+              : 'Загрузите RTF-файл, XML-словарь и выберите провайдера, чтобы запустить анализ'
           }
         >
           {analyzing ? 'Анализируем…' : 'Анализировать'}

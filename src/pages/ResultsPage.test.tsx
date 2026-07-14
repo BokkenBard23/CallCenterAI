@@ -195,15 +195,19 @@ describe('ResultsPage', () => {
     expect(screen.getByText('Результаты анализа')).toBeTruthy();
   });
 
-  it('shows LLM warning banner when no LLM result', () => {
+  it('shows LLM warning card when no LLM result', () => {
     renderWithProviders(
       <ResultsPage />,
       ['/results'],
       { searchResult: sampleSearchResult },
     );
-    // The LLM warning appears in both Banner and SummaryView
+    // R-H1 FIX (vision-audit iter 3): canonical "LLM-сводка недоступна" status
+    // appears ONLY inside the SummaryView consolidated card (active tab) —
+    // the page-level Banner was removed to avoid the state-mixing defect
+    // (banner + card heading + body + stats shown simultaneously).
+    // Exactly one occurrence expected.
     const warnings = screen.getAllByText(/LLM-сводка недоступна/);
-    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    expect(warnings.length).toBe(1);
   });
 
   it('shows stats line with match count', () => {

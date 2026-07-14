@@ -31,6 +31,7 @@ import {
   Sidesheet,
   Skeleton,
   Stack,
+  Tooltip,
   Typography,
 } from '@beeline/design-system-react';
 import { Icons } from '@beeline/design-tokens/js/iconfont';
@@ -200,11 +201,28 @@ export default function DictionaryEditorPage(): ReactNode {
 
   // ── Ready ────────────────────────────────────────────────
 
+  // H7 FIX (vision-audit): when the main area has no node selected OR the
+  // selected node has no conditions and no children to render, show an
+  // explicit empty-state in the main panel. The vision audit found the
+  // main area "completely empty — no tree, no table, no empty-state, no
+  // loading". ConditionsTable already has its own internal empty-state, but
+  // when no node is selected at all, conditions is [] and the table renders
+  // its "Нет условий" message — which still looked like a broken page on
+  // the screenshots. We surface a clearer page-level prompt here.
+  const isMainEmpty =
+    editor.treeStatus === 'ready' &&
+    !editor.selectedNodeId &&
+    editor.conditions.length === 0;
+
   return (
     <Box className="dict-editor">
       {/* Sticky header */}
       <header className="dict-editor__header">
         <Stack direction="horizontal" gap="x3" align="center" justify="space-between">
+          {/* Left side: menu toggle, title, breadcrumbs, dirty badge,
+              and the sidebar collapse toggle (H11 FIX — moved here from the
+              right side where it visually read as a stray `<` symbol next
+              to the Mining action button). */}
           <Stack direction="horizontal" gap="x2" align="center">
             <IconButton
               iconName={Icons.Menu}
@@ -225,6 +243,21 @@ export default function DictionaryEditorPage(): ReactNode {
                 Несохранённые изменения
               </Badge>
             )}
+            {/* H11 FIX: sidebar collapse toggle moved next to the title so
+                it is visually grouped with the sidebar it controls, instead
+                of being the last item in the action-button row (where the
+                vision audit saw it as a stray `<` glyph). Wrapped in Tooltip
+                so the chevron direction is unambiguous. */}
+            <Tooltip
+              title={sidebarCollapsed ? 'Развернуть панель словаря' : 'Свернуть панель словаря'}
+            >
+              <IconButton
+                iconName={sidebarCollapsed ? Icons.NavArrowRight : Icons.NavArrowLeft}
+                variant="plain"
+                aria-label={sidebarCollapsed ? 'Развернуть панель словаря' : 'Свернуть панель словаря'}
+                onClick={() => setSidebarCollapsed((v) => !v)}
+              />
+            </Tooltip>
           </Stack>
           <Stack direction="horizontal" gap="x2" align="center" wrap="wrap">
             {CHUNK2_ACTIONS.map((a) => (
@@ -240,12 +273,6 @@ export default function DictionaryEditorPage(): ReactNode {
                 {a.label}
               </Button>
             ))}
-            <IconButton
-              iconName={sidebarCollapsed ? Icons.NavArrowRight : Icons.NavArrowLeft}
-              variant="plain"
-              aria-label={sidebarCollapsed ? 'Развернуть панель' : 'Свернуть панель'}
-              onClick={() => setSidebarCollapsed((v) => !v)}
-            />
           </Stack>
         </Stack>
       </header>
@@ -272,64 +299,89 @@ export default function DictionaryEditorPage(): ReactNode {
         )}
 
         <main className="dict-editor__main">
-          <Stack direction="vertical" gap="x3">
-            <SearchFilterBar
-              initialValue={filter}
-              onChange={setFilter}
-              matchedCount={(() => {
-                const q = filter.text.trim().toLowerCase();
-                const ch = filter.channel;
-                if (!q && !ch) return editor.conditions.length;
-                return editor.conditions.filter((c) => {
-                  const textMatch = !q || c.text.toLowerCase().includes(q);
-                  const channelMatch = !ch || c.channel_constraint === ch;
-                  return textMatch && channelMatch;
-                }).length;
-              })()}
-              hasRows={editor.conditions.length > 0}
-            />
-            {editor.conditionsStatus === 'loading' && (
-              <Stack direction="vertical" gap="x2">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <Skeleton key={i} variant="text" width="100%" height={36} />
-                ))}
+          {/* H7 FIX: explicit page-level empty-state when no node is selected.
+              Previously the main area rendered only the SearchFilterBar +
+              an empty ConditionsTable, which the vision audit flagged as
+              "completely empty main area". Now we surface a clear CTA. */}
+          {isMainEmpty ? (
+            <Box className="dict-editor__empty-main" padding="x6">
+              <Stack direction="vertical" gap="x4" align="center">
+                <Icon iconName={Icons.Folder} size="large" />
+                <Typography variant="h5">Выберите словарь в дереве слева</Typography>
+                <Typography variant="body1" color="colorTextInactive">
+                  Чтобы просмотреть или отредактировать фразы, выберите узел
+                  словаря в дереве слева. Либо создайте новый узел, либо
+                  загрузите XML-файл словаря.
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<Icon iconName={Icons.Upload} />}
+                  onClick={() => navigate('/')}
+                >
+                  Загрузить словарь
+                </Button>
               </Stack>
-            )}
-            {editor.conditionsStatus === 'error' && (
-              <InlineAlert type="error">
-                {editor.conditionsError ?? 'Ошибка загрузки условий'}
-              </InlineAlert>
-            )}
-            {(editor.conditionsStatus === 'ready' || editor.conditionsStatus === 'empty') && (
-              <ConditionsTable
-                conditions={editor.conditions}
-                rowStates={editor.rowStates}
-                filter={filter}
-                highlightRowIdx={highlightRowIdx}
-                onHighlightConsumed={() => setHighlightRowIdx(null)}
-                onUpdateField={(rowIdx, field, value) =>
-                  void editor.updateConditionField(rowIdx, field, value)
-                }
-                onAddCondition={handleAddCondition}
-                onRemoveCondition={(rowIdx) => void editor.removeCondition(rowIdx)}
-                onDuplicateCondition={(rowIdx) => void editor.duplicateCondition(rowIdx)}
-                onMoveCondition={(rowIdx, dir) => void editor.moveCondition(rowIdx, dir)}
+            </Box>
+          ) : (
+            <Stack direction="vertical" gap="x3">
+              <SearchFilterBar
+                initialValue={filter}
+                onChange={setFilter}
+                matchedCount={(() => {
+                  const q = filter.text.trim().toLowerCase();
+                  const ch = filter.channel;
+                  if (!q && !ch) return editor.conditions.length;
+                  return editor.conditions.filter((c) => {
+                    const textMatch = !q || c.text.toLowerCase().includes(q);
+                    const channelMatch = !ch || c.channel_constraint === ch;
+                    return textMatch && channelMatch;
+                  }).length;
+                })()}
+                hasRows={editor.conditions.length > 0}
               />
-            )}
+              {editor.conditionsStatus === 'loading' && (
+                <Stack direction="vertical" gap="x2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} variant="text" width="100%" height={36} />
+                  ))}
+                </Stack>
+              )}
+              {editor.conditionsStatus === 'error' && (
+                <InlineAlert type="error">
+                  {editor.conditionsError ?? 'Ошибка загрузки условий'}
+                </InlineAlert>
+              )}
+              {(editor.conditionsStatus === 'ready' || editor.conditionsStatus === 'empty') && (
+                <ConditionsTable
+                  conditions={editor.conditions}
+                  rowStates={editor.rowStates}
+                  filter={filter}
+                  highlightRowIdx={highlightRowIdx}
+                  onHighlightConsumed={() => setHighlightRowIdx(null)}
+                  onUpdateField={(rowIdx, field, value) =>
+                    void editor.updateConditionField(rowIdx, field, value)
+                  }
+                  onAddCondition={handleAddCondition}
+                  onRemoveCondition={(rowIdx) => void editor.removeCondition(rowIdx)}
+                  onDuplicateCondition={(rowIdx) => void editor.duplicateCondition(rowIdx)}
+                  onMoveCondition={(rowIdx, dir) => void editor.moveCondition(rowIdx, dir)}
+                />
+              )}
 
-            {/* Chunk 2 collapsible panels (Validation + Statistics). */}
-            <ValidationIssuesPanel
-              open={overlays.val}
-              sessionId={sessionId}
-              dictName={selectedDictName}
-              onJumpToCondition={handleJumpToCondition}
-            />
-            <StatisticsPanel
-              open={overlays.stat}
-              sessionId={sessionId}
-              dictName={selectedDictName}
-            />
-          </Stack>
+              {/* Chunk 2 collapsible panels (Validation + Statistics). */}
+              <ValidationIssuesPanel
+                open={overlays.val}
+                sessionId={sessionId}
+                dictName={selectedDictName}
+                onJumpToCondition={handleJumpToCondition}
+              />
+              <StatisticsPanel
+                open={overlays.stat}
+                sessionId={sessionId}
+                dictName={selectedDictName}
+              />
+            </Stack>
+          )}
         </main>
       </div>
 

@@ -20,7 +20,6 @@ import {
   Box,
   Counter,
   Divider,
-  ExpansionPanel,
   Icon,
   Stack,
   Switch,
@@ -299,6 +298,17 @@ const DictionaryNodeItem = React.memo(function DictionaryNodeItem({
   const hasChildren = node.children.length > 0 || node.conditions.length > 0;
   const totalMatches = nodeMatchCounts.get(node.id) ?? 0;
 
+  // H2 FIX (vision-audit): the previous implementation bound DS
+  // ExpansionPanel's `open` prop to `isSelected` and relied on the
+  // panel's internal CSS to reveal children. The vision audit showed
+  // that even when the chevron indicated "expanded" state, child phrases
+  // were present in the a11y tree but not visually rendered (likely due
+  // to ExpansionPanel body overflow/transition behavior). We now use an
+  // explicit local `expanded` state and render the content in a plain
+  // Box that is always visible when expanded — bypassing any DS
+  // ExpansionPanel rendering quirks.
+  const [expanded, setExpanded] = useState<boolean>(false);
+
   // Icon: Folder for parent, Book for leaf
   const iconName = hasChildren ? Icons.Folder : Icons.Book;
 
@@ -311,6 +321,10 @@ const DictionaryNodeItem = React.memo(function DictionaryNodeItem({
     onSelectNode(node);
   }, [onSelectNode, node]);
 
+  const handleToggleExpand = useCallback(() => {
+    setExpanded((prev) => !prev);
+  }, []);
+
   const handleMouseEnter = useCallback(() => {
     setHoveredTreeNodeId(node.id);
   }, [setHoveredTreeNodeId, node.id]);
@@ -318,26 +332,6 @@ const DictionaryNodeItem = React.memo(function DictionaryNodeItem({
   const handleMouseLeave = useCallback(() => {
     setHoveredTreeNodeId(null);
   }, [setHoveredTreeNodeId]);
-
-  // Title with icon and counter
-  const titleContent = (
-    <Stack direction="horizontal" spacing="x2" align="center" style={{ width: '100%' }}>
-      <Icon iconName={iconName} size="small" />
-      <Typography
-        variant="body2"
-        style={{
-          fontWeight: isSelected ? 600 : 400,
-          flex: 1,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {node.name}
-      </Typography>
-      {totalMatches > 0 && <Counter count={totalMatches} size="small" />}
-    </Stack>
-  );
 
   // Leaf node (no children or conditions to show): clickable row
   if (!hasChildren) {
@@ -352,56 +346,124 @@ const DictionaryNodeItem = React.memo(function DictionaryNodeItem({
         aria-selected={isSelected}
         aria-label={node.name}
       >
-        {titleContent}
+        <Stack direction="horizontal" spacing="x2" align="center" style={{ width: '100%' }}>
+          <Icon iconName={iconName} size="small" />
+          <Typography
+            variant="body2"
+            style={{
+              fontWeight: isSelected ? 600 : 400,
+              flex: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {node.name}
+          </Typography>
+          {totalMatches > 0 && <Counter count={totalMatches} size="small" />}
+        </Stack>
       </Box>
     );
   }
 
-  // Parent node: ExpansionPanel
+  // Parent node: custom collapsible (H2 FIX — replaces DS ExpansionPanel)
   return (
-    <Box style={{ paddingLeft: `${depth * 16}px` }}>
-      <ExpansionPanel
-        title={node.name}
-        open={isSelected}
-        onOpen={handleClick}
-        onClose={handleClick}
-        subTitle={totalMatches > 0 ? `${totalMatches} совпадений` : undefined}
+    <Box
+      style={{ paddingLeft: `${depth * 16}px` }}
+      role="treeitem"
+      aria-expanded={expanded}
+      aria-selected={isSelected}
+    >
+      {/* Header row — clickable to toggle expand AND select node */}
+      <Box
+        className={`dict-tree-node dict-tree-node--parent ${isSelected ? 'dict-tree-node--selected' : ''}`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 12px',
+          cursor: 'pointer',
+          minHeight: '44px',
+          borderRadius: '4px',
+        }}
+        onClick={() => {
+          // Click on the header toggles expand + selects the node.
+          handleToggleExpand();
+          handleClick();
+        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        aria-label={node.name}
       >
-        {/* Show conditions under this node */}
-        {visibleConditions.length > 0 && (
-          <Stack direction="vertical" spacing="none" role="group">
-            {visibleConditions.map((condition) => (
-              <DictionaryConditionItem
-                key={condition.text}
-                condition={condition}
-                matchCount={matchCounts.get(condition.text) ?? 0}
-              />
-            ))}
-          </Stack>
-        )}
-
-        {/* Show child nodes */}
-        {node.children.map((child) => (
-          <DictionaryNodeItem
-            key={child.id}
-            node={child}
-            depth={depth + 1}
-            selectedTreeNodeId={selectedTreeNodeId}
-            onSelectNode={onSelectNode}
-            matchCounts={matchCounts}
-            nodeMatchCounts={nodeMatchCounts}
-            hideUnmatched={hideUnmatched}
+        <Icon
+          iconName={expanded ? Icons.NavArrowDown : Icons.NavArrowRight}
+          size="small"
+          aria-hidden="true"
+        />
+        <Icon iconName={iconName} size="small" />
+        <Typography
+          variant="body2"
+          style={{
+            fontWeight: isSelected ? 600 : 400,
+            flex: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {node.name}
+        </Typography>
+        {/* H3 FIX: subtitle now explicit about scope — "in subtree" — so the
+            number no longer looks like a data/aggregation bug when compared
+            with the header's overall total. */}
+        {totalMatches > 0 && (
+          <Counter
+            count={totalMatches}
+            size="small"
+            title={`${totalMatches} совпадений в поддереве (включая дочерние узлы)`}
           />
-        ))}
-
-        {visibleConditions.length === 0 && node.children.length === 0 && (
-          <Box padding="x3">
-            <Typography variant="caption" inactive>
-              Нет фраз{hideUnmatched ? ' с совпадениями' : ''}
-            </Typography>
-          </Box>
         )}
-      </ExpansionPanel>
+      </Box>
+
+      {/* Content — always rendered visibly when expanded (H2 FIX). */}
+      {expanded && (
+        <Box className="dict-tree-node__body">
+          {/* Show conditions under this node */}
+          {visibleConditions.length > 0 && (
+            <Stack direction="vertical" spacing="none" role="group">
+              {visibleConditions.map((condition) => (
+                <DictionaryConditionItem
+                  key={condition.text}
+                  condition={condition}
+                  matchCount={matchCounts.get(condition.text) ?? 0}
+                />
+              ))}
+            </Stack>
+          )}
+
+          {/* Show child nodes */}
+          {node.children.map((child) => (
+            <DictionaryNodeItem
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              selectedTreeNodeId={selectedTreeNodeId}
+              onSelectNode={onSelectNode}
+              matchCounts={matchCounts}
+              nodeMatchCounts={nodeMatchCounts}
+              hideUnmatched={hideUnmatched}
+            />
+          ))}
+
+          {visibleConditions.length === 0 && node.children.length === 0 && (
+            <Box padding="x3">
+              <Typography variant="caption" inactive>
+                Нет фраз{hideUnmatched ? ' с совпадениями' : ''}
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      )}
     </Box>
   );
 });

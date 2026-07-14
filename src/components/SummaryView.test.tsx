@@ -35,14 +35,24 @@ const fullSearchResult: SearchResult = {
 // ─── Tests ────────────────────────────────────────────────
 
 describe('SummaryView', () => {
-  it('shows "LLM-сводка недоступна" when no LLM result', () => {
+  // R-H1 FIX (vision-audit iter 3): canonical "LLM-сводка недоступна" status
+  // lives HERE in SummaryView as the single consolidated card (heading +
+  // cause subtitle + actionable hint). The page-level Banner was removed
+  // to avoid the duplicate-status state-mix defect.
+  it('shows consolidated LLM-unavailable card with heading when no LLM result', () => {
     render(<SummaryView llmResult={null} searchResult={null} />);
     expect(screen.getByText('LLM-сводка недоступна')).toBeTruthy();
+    expect(screen.getByText(/Сводный анализ не выполнен/)).toBeTruthy();
   });
 
   it('shows hint about highlighted text tab when no LLM result', () => {
     render(<SummaryView llmResult={null} searchResult={null} />);
     expect(screen.getByText(/Выделенный текст/)).toBeTruthy();
+  });
+
+  it('shows "Анализ не выполнен" badge in LLM-unavailable state', () => {
+    render(<SummaryView llmResult={null} searchResult={null} />);
+    expect(screen.getByText('Анализ не выполнен')).toBeTruthy();
   });
 
   it('renders topic when present', () => {

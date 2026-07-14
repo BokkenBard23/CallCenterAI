@@ -445,7 +445,7 @@ Stage-agent **обязан** вернуть **`directive_ack`**; если бло
 - `designer` создаёт design hub/chunks, `user-scenarios.json`, scratchpad и DQG. После этого orchestrator обязан выполнить UI intent lock-in и только затем запускать `ui-coder`.
 - `ui-coder` создаёт код, тесты и `implementation-chunk-{N}.md`. После ответа проверь `implementation_evidence`: заявленные файлы существуют в `APP_ROOT`, ключевые секции/route реально найдены, отчёт совпадает с файловой системой. Несовпадение → `critical: implementation_report_without_files` и re-route/blocked, не happy-path.
 - Если profile-aware visual gate нужен — `ui-tester`; если нужна бизнес-логика без отдельного visual gate — `coder`; иначе `reviewer`. Если проблема в design-spec — rework в `designer`.
-- `ui-tester` не просто опционален: запускай его для любого UI surface при `quality_profile: lean` как минимум visual smoke, для visual-heavy/product задач, и всегда для `quality_profile: hardened`. `visual_gate.status: skipped_mcp_unavailable` не является pass; нужен blocker или явный `risk_acceptance.result_after_iteration_limit`.
+- `ui-tester` не просто опционален: запускай его для любого UI surface при `quality_profile: lean` как минимум visual smoke, для visual-heavy/product задач, и всегда для `quality_profile: hardened`. `visual_gate.status: skipped_mcp_unavailable` не является pass; нужен blocker или явный `risk_acceptance.result_after_iteration_limit`. **И сам orchestrator при любом скриншоте UI обязан запускать `vision_analysis.py` — см. Vision Gate Invariant ниже.**
 - `coder` заменяет logic stubs и передаёт в `reviewer`.
 - `reviewer` approved → `tester`; rejected → нужный stage по issue type.
 - `tester` passed → `done`; critical bugs → `request-analyst`, пока `iteration_critical_bug_reentry < 2`, иначе blocker / human decision.
@@ -504,6 +504,45 @@ Stage-agent **обязан** вернуть **`directive_ack`**; если бло
 Если лимит достигнут, не запускай stage снова. Обнови blockers и попроси пользователя принять решение.
 Для `quality_profile: hardened` не предлагай «принять как есть» без явного `risk_acceptance.result_after_iteration_limit`.
 
+## Vision Gate Invariant (orchestrator-self, non-overridable)
+
+**Это правило применяется к самому orchestrator-у, не только к stage-agents.** Оно не может быть обойдено молча — ни при `lean`, ни при `product`, ни при ручном тестировании UI вживую.
+
+### Когда обязательно
+
+Для **любого** UI surface, где получен скриншот (CDP/MCP `take_screenshot`, playwright `browser_take_screenshot`, или любой другой источник) и нужно оценить визуальное состояние:
+
+1. **Никогда не заканчивай визуальную проверку только CDP-snapshot-ом / a11y-tree.** DOM-дерево не видит: наложение текста, рендеринг иконок как строк, обрезание шрифтов, визуальные коллизии, склеенные tab-ы, пустые места где должны быть иконки.
+2. **После каждого скриншота UI** запускай vision-анализ через CLI:
+   ```bash
+   cd backend
+   $env:PYTHONPATH="."; $env:PYTHONIOENCODING="utf-8"
+   & "<venv>\Scripts\python.exe" -m app.services.vision_analysis `
+     --image "<абсолютный или относительный путь к .png>" `
+     --prompt "<конкретные визуальные критерии для этой страницы>" `
+     --output "../docs/specs/screenshots/ai-analysis-<screenshot-name>.md"
+   ```
+   - Fallback-цепочка уже встроена: `gpt-5.4 → qwen-medium-dense → qwen-medium` (см. `.opencode/rules/05-vision-gate.md`).
+   - Файл анализа сохраняется в `docs/specs/screenshots/ai-analysis-*.md`.
+3. **Текущая модель orchestrator-а (GLM-5.2) не поддерживает image input** — это не оправдание для пропуска vision-проверки. Vision выполняется внешним модулем `vision_analysis.py`, а не самой моделью сессии. Никогда не пиши «не могу проверить визуально, модель не поддерживает» вместо запуска CLI.
+4. **Запрещённые оправдания для пропуска:**
+   - «CDP snapshot показал чистый DOM» — DOM ≠ рендеринг.
+   - «Модель не читает изображения» — vision запускается внешним модулем, не через Read.
+   - «Это быстрый smoke» — для UI surface исключений нет.
+   - «Пользователь не просил явно» — правило действует по умолчанию.
+5. **Результат vision-анализа фиксируется в `pipeline-state.yaml`** → `visual_gate.screenshots_or_notes` со ссылкой на файл анализа. Если visual gate требуется, а vision не выполнен — `visual_gate.status: blocked`, не `passed`.
+6. **Если vision-модуль недоступен** (backend не запущен, нет API key, все 3 модели упали): `visual_gate.status: blocked` + blocker с описанием ошибки. Запрещено объявлять `passed` без vision evidence. Только явный `risk_acceptance.result_after_iteration_limit` от пользователя снимает блок.
+
+### Исключения (когда vision НЕ нужен)
+
+- `visual_gate.required: false` (явно в brief)
+- `design_input: null` (logic-only, без UI surface вообще)
+- Скриншот чисто инфраструктурный (например, консоль DevTools без UI) — явно пометь в notes
+
+### Аудит
+
+После каждого прогона с UI surface проверяй: для каждого `.png` в `docs/specs/screenshots/` с таймстампом текущей сессии должен существовать парный `ai-analysis-*.md`. Если пары нет — это нарушение, которое нужно устранить до `done`.
+
 ## Stop Policy
 
 Остановись, если:
@@ -515,7 +554,8 @@ Stage-agent **обязан** вернуть **`directive_ack`**; если бло
 - обязательный артефакт отсутствует и stage не объяснил controlled fallback;
 - MCP design-system недоступен и DS compliance критична для следующего шага;
 - одно и то же действие повторилось 3 раза без прогресса;
-- команда требует опасного действия (`git push`, force, удаление данных, внешние директории без явного разрешения).
+- команда требует опасного действия (`git push`, force, удаление данных, внешние директории без явного разрешения);
+- **UI surface проверяется без vision-анализа**: если сделан скриншот UI, но vision-модуль не запущен и нет явного исключения выше — это stop-условие, не happy-path.
 
 ## User-Facing Output
 

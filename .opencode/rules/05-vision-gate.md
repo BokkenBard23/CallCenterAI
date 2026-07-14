@@ -33,13 +33,19 @@ gpt-5.4 → qwen-medium-dense → qwen-medium
 | claude-sonnet-4-5 | 67% | 6.4s | Не используется (хуже gpt-5.4, медленнее qwen) |
 | claude-opus-4-6 | 67% | 6.7s | Не используется |
 | gemini-2.5-pro | 67% | 12.8s | Не используется (самая медленная) |
-| qwen-medium-preview | 67% | 4.7s | Не используется (qwen-medium-dense быстрее) |
+| qwen-medium-preview | 67% | 4.7s | **НЕ ИСПОЛЬЗУЕТСЯ** — limited context (~47.8K tokens) |
 
 - `gpt-5.4` может давать **Guardrails Exo** ошибки (intermittent).
 - Модели `qwen-medium*` — direct Beeline infrastructure, **не** проходят через Guardrails,
   гарантированный last-resort fallback.
 - Все модели используют один OpenAI-compatible endpoint `api.ai.beeline.ru/api/v3/chat/completions`.
 - API key берётся из `backend/.env` (`BEELINE_API_KEY`).
+
+⚠️ **ВАЖНО: Ограничение qwen-medium-preview**
+- Заявлено: 262K токенов
+- Фактически: ~47.8K токенов (проверено 2026-07-14)
+- **НЕ использовать для long-context задач**
+- Использовать `qwen-medium-dense` или `qwen-medium` вместо него
 
 ### CLI usage (для stage-агентов)
 
@@ -114,16 +120,29 @@ print(result["attempts"])  # per-model attempt log
 
 ```
 1. gpt-5.4             → если Guardrails Exo →
-2. qwen-medium-dense   → direct Beeline infra, NO Guardrails (самая быстрая: 3.6s)
-3. qwen-medium         → direct Beeline infra, NO Guardrails (гарантированный recovery)
+2. qwen-medium-dense   → direct Beeline infra, NO Guardrails (самая быстрая: 3.6s, 262K context)
+3. qwen-medium         → direct Beeline infra, NO Guardrails (гарантированный recovery, 262K context)
 ```
 
 - Модуль автоматически переходит к следующей модели при ошибке.
 - `gpt-5.4` — primary (100% точность в бенчмарке, единственная модель без false positives
   на тонких визуальных нюансах).
 - Qwen модели — **гарантированный** recovery: они никогда не дают Guardrails Exo.
+- **qwen-medium-preview НЕ используется** — имеет ограниченный контекст (~47.8K токенов).
 - Лог попыток сохраняется в `result["attempts"]` для аудита.
 - Бенчмарк: `docs/specs/screenshots/vision-benchmark/VISION_BENCHMARK_RESULTS.md`
+
+## Обновление моделей (2026-07-27)
+
+⚠️ **Qwen 3.5 35B и Qwen 3.6 35B выводятся из эксплуатации с 27 июля 2026**
+
+Новая внутренняя модель **Qwen3.6 27B** уже доступна:
+- `Qwen3.6-27B-textonly` — текстовая модель
+- `coding-medium` — для кодирования
+- `qwen-medium-dense` — с vision (262K context) ✅ **РЕКОМЕНДУЕТСЯ**
+- `qwen-medium-dense-fast` — быстрый режим без рассуждений
+
+Legacy коды (`universal-large`, `universal-medium`) автоматически перенаправят на новую модель.
 
 ## Detect Guardrails Exo
 

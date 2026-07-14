@@ -598,6 +598,27 @@
   }
 }
 
+/* H2 FIX (vision-audit): parent node header — replaces DS ExpansionPanel
+   header so child phrases always render visibly when expanded. */
+.dict-tree-node--parent {
+  transition: background-color 150ms ease;
+
+  &:hover {
+    background-color: var(--color-background-base-hover, rgba(0, 0, 0, 0.04));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+.dict-tree-node__body {
+  /* Render the body visibly (not collapsed/animated) so the vision audit
+     defect "expansion shows but children don't" cannot recur. */
+  display: block;
+  overflow: visible;
+}
+
 .dict-tree-phrase-row--unmatched {
   opacity: 0.5;
 }

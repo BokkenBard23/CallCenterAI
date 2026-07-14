@@ -8,3 +8,29 @@
  * DS Tabs header `overflow: hidden` is fine on desktop where 3 short tab labels
  * fit without truncation (after Bug 2 fix: "LLM-аудит словаря" → "LLM-аудит").
  */
+
+/* H9 FIX (vision-audit): the vision audit found that the "LLM-аудит" tab
+   label was being truncated to "LLM-ауд…" inside the Sidesheet. Force the
+   DS Tabs header to:
+     1. allow horizontal scroll if labels don't fit (instead of clipping);
+     2. give each Tab a min-width that comfortably fits its label;
+     3. disable text truncation / ellipsis inside tab labels. */
+.mining-panel :where([class*="Tabs"], [class*="tabs"]) {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  max-width: 100%;
+}
+
+.mining-panel :where([class*="Tab"], [class*="tab"]):not([class*="TabPanel"]):not([class*="tabpanel"]) {
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: max-content;
+}
+
+/* Some DS versions render the tab label inside an inner span/text node
+   that inherits `text-overflow: ellipsis` from a parent. Reset that. */
+.mining-panel :where([class*="Tab"], [class*="tab"]) :where(span, div, p) {
+  text-overflow: clip !important;
+  overflow: visible !important;
+  white-space: nowrap !important;
+}

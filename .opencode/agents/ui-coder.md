@@ -22,7 +22,7 @@ mode: subagent
 - OpenCode не использует RooCode `switch_mode`; в happy path следующий stage запускает `pipeline-orchestrator`, а текстовый handoff нужен только как fallback / audit trail.
 - OpenCode subagent flow для helper-а: `Task` или `@mcp-researcher`, результатом служит короткий summary + путь к артефакту.
 - Для пакетного DS discovery вызывай helper через OpenCode Task / `@mcp-researcher`, а не как основной handoff.
-- Референс-скрины: опирайся на `design-spec`, `ui-implementation-brief` и `reference_evidence`; при `model does not support image input` продолжай по текстовым артефактам.
+- Референс-скрины: опирайся на `design-spec`, `ui-implementation-brief` и `reference_evidence`. **Текущая модель (GLM-5.2) не поддерживает image input** — это НЕ оправдание для пропуска vision-проверки. Vision выполняется внешним модулем `backend/app/services/vision_analysis.py` через CLI, а не через `Read` файл. Никогда не пиши «не могу прочитать изображение, модель не поддерживает» — вместо этого **запусти** vision_analysis.py (см. ниже «Vision self-check» и `.opencode/rules/05-vision-gate.md`).
 
 ### Pipeline state (edit protocol)
 
@@ -217,12 +217,14 @@ Handoff и stop-policy:
 ШАГ 6: Следующий файл; для новых DS-компонентов не из списка → direct MCP по правилам п. 2 выше или точечный повторный brief через `Task` / `@mcp-researcher`, если накопился новый bundle; если всплыл alias/custom type ambiguity или непонятен usage pattern — тоже повторный helper-вызов
 ШАГ 7: Self-check: чеклист «Layout перед сдачей» + landing-specific self-check (если нужен) + review colors/tokens claims в своих стилях
 ШАГ 8: npm run dev → chrome-devtools-mcp: 375 / 768 / 1440, сравнить с wireframe
-ШАГ 8a: **Vision self-check (рекомендуется, см. `.opencode/rules/05-vision-gate.md`)**: после Шага 8 сделай скриншот через CDP/MCP и запусти vision-анализ для раннего обнаружения проблем (наложение текста, иконки как строки, склеенные tab-ы). Это не заменяет ui-tester visual gate, но сокращает итерации:
+ШАГ 8a: **Vision self-check (ОБЯЗАТЕЛЬНО при UI surface changes, см. `.opencode/rules/05-vision-gate.md`)**: после Шага 8 сделай скриншот через CDP/MCP и **обязательно** запусти vision-анализ через CLI — не через `Read` файла (модель GLM-5.2 не поддерживает image input, но vision_analysis.py обращается к gpt-5.4/qwen по API). Если ты написал «не могу прочитать изображение» вместо запуска CLI — это нарушение правила. Fallback-цепочка: gpt-5.4 → qwen-medium-dense → qwen-medium (100% / 67% / 67% точность по бенчмарку). Это не заменяет ui-tester visual gate, но сокращает итерации. Не пиши `model does not support image input` — пиши bash-команду:
    ```bash
-   cd backend && PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m app.services.vision_analysis \
-     --image ../docs/specs/screenshots/{screenshot}.png \
-     --prompt "Проверь визуальные проблемы: наложение текста, иконки как строки, склеенные tab-ы, обрезание." \
-     --output ../docs/specs/screenshots/ai-selfcheck-{screenshot}.md
+   cd backend
+   $env:PYTHONPATH="."; $env:PYTHONIOENCODING="utf-8"
+   & "<venv>\Scripts\python.exe" -m app.services.vision_analysis `
+     --image "../docs/specs/screenshots/{screenshot}.png" `
+     --prompt "Проверь визуальные проблемы: наложение текста, иконки как строки, склеенные tab-ы, обрезание." `
+     --output "../docs/specs/screenshots/ai-selfcheck-{screenshot}.md"
    ```
 ШАГ 9: write `docs/specs/implementation-chunk-{N}.md` (полный §4.2) → кратко в чат → handoff на `ui-tester`, `coder` или `reviewer` по `quality_profile`, наличию UI surface и logic stubs
 ```

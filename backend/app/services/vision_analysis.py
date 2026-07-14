@@ -14,7 +14,7 @@ Benchmark results (3 tests, 7 models):
     claude-sonnet-4-5   —  67% accuracy, 6.4s avg
     claude-opus-4-6     —  67% accuracy, 6.7s avg
     gemini-2.5-pro      —  67% accuracy, 12.8s avg (slowest)
-    qwen-medium-preview —  67% accuracy, 4.7s avg
+    qwen-medium-preview —  67% accuracy, 4.7s avg (DEPRECATED: limited to ~47.8K tokens)
 
 gpt-5.4 is primary — it was the ONLY model that correctly identified that
 tab text was NOT truncated (all others gave false positives on a 19px button
@@ -22,6 +22,9 @@ background clip while text was fully visible).
 
 qwen-medium-dense and qwen-medium are fallbacks: direct Beeline infrastructure,
 no Guardrails Exo errors, guaranteed recovery.
+
+⚠️ IMPORTANT: qwen-medium-preview has limited context (~47.8K tokens vs 262K advertised)
+and is NOT included in fallback chain. Use qwen-medium-dense instead.
 
 Usage:
     from app.services.vision_analysis import analyze_screenshot
@@ -66,8 +69,10 @@ _MAX_RETRIES = 1  # per-model retry before falling through
 
 # Fallback chain based on vision benchmark (2026-07-12):
 # 1. gpt-5.4 (best accuracy 100%, may hit Guardrails Exo)
-# 2. qwen-medium-dense (fastest 3.6s, 67% accuracy, no Guardrails — direct Beeline infra)
-# 3. qwen-medium (guaranteed available, no Guardrails — direct Beeline infra)
+# 2. qwen-medium-dense (fastest 3.6s, 67% accuracy, no Guardrails — direct Beeline infra, 262K context)
+# 3. qwen-medium (guaranteed available, no Guardrails — direct Beeline infra, 262K context)
+#
+# ⚠️ qwen-medium-preview has limited context (~47.8K tokens) and is NOT used.
 #
 # Benchmark details: docs/specs/screenshots/vision-benchmark/VISION_BENCHMARK_RESULTS.md
 _VISION_MODELS: List[str] = [
@@ -290,7 +295,9 @@ async def analyze_screenshot(
     Tries models in order: gpt-5.4 → qwen-medium-dense → qwen-medium.
 
     gpt-5.4 is primary (100% accuracy in vision benchmark).
-    Qwen models are guaranteed fallback (direct Beeline infra, no Guardrails Exo).
+    Qwen models are guaranteed fallback (direct Beeline infra, no Guardrails Exo, 262K context).
+    
+    ⚠️ qwen-medium-preview is NOT used due to limited context (~47.8K tokens vs 262K).
 
     Args:
         image_path: Path to PNG or JPEG screenshot.

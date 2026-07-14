@@ -91,17 +91,39 @@ export default memo(function SummaryView({ llmResult, searchResult, llmLoading }
   }
 
   // ─── No LLM result ───────────────────────────────────
+  // R-H1 FIX (vision-audit iter 3): canonical "LLM-unavailable" status lives
+  // HERE as the single consolidated status block — the page-level Banner in
+  // ResultsPage was removed to avoid the state-mixing defect (banner + card
+  // heading + body + stats shown simultaneously — vision audit R-H1-STATE-MIX).
+  // This Card now carries: heading (h5) → cause subtitle → actionable hint,
+  // giving ONE unambiguous status representation in the LLM-unavailable state.
   if (!llmResult) {
     return (
-      <Card>
+      <Card className="summary-unavailable-card">
         <Box padding="x6">
-          <Stack direction="vertical" spacing="x4" align="center">
-            <Typography variant="h5" inactive>
-              LLM-сводка недоступна
+          <Stack direction="vertical" spacing="x4" align="stretch">
+            <Stack direction="horizontal" spacing="x3" align="center">
+              <Typography variant="h5" style={{ margin: 0 }}>
+                LLM-сводка недоступна
+              </Typography>
+              <Badge semantic="warning" type="tertiary" dot>
+                Анализ не выполнен
+              </Badge>
+            </Stack>
+            <Typography variant="body1" inactive>
+              Сводный анализ не выполнен или завершился с ошибкой.
+              Причины: провайдер недоступен, превышен лимит запросов
+              или внутренняя ошибка LLM.
             </Typography>
-            <Typography variant="body2" inactive>
-              Анализ текста диалога доступен на вкладке «Выделенный текст».
-            </Typography>
+            <Divider />
+            <Stack direction="horizontal" spacing="x3" align="center" justify="space-between" wrap="wrap">
+              <Typography variant="body2" inactive>
+                Результаты поиска по словарю доступны во вкладке «Выделенный текст».
+              </Typography>
+              <Typography variant="caption" inactive>
+                Повторите анализ позже или обратитесь к администратору.
+              </Typography>
+            </Stack>
           </Stack>
         </Box>
       </Card>

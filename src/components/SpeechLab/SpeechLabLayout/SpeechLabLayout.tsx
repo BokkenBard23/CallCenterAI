@@ -1,29 +1,32 @@
 /**
- * SpeechLabLayout — 3-panel resizable layout using react-resizable-panels.
+ * SpeechLabLayout — 2-panel layout.
  *
- * Waves: UI-1 (Layout refactor)
+ * Vision-audit rework (H8 FIX):
+ *   The previous implementation used `react-resizable-panels` v4.12, which
+ *   has a documented bug where the outer Panel divs collapse to ~content
+ *   width instead of honouring defaultSize/defaultLayout. The CSS workaround
+ *   targeting `[data-testid="speechlab-left"]` did not match the actual
+ *   rendered DOM (the library uses a different attribute), so the left
+ *   panel collapsed and the dictionary tree title wrapped per-character
+ *   ("Сло…", "грузи", "юварь"). The vision audit (gpt-5.4) flagged this
+ *   as High severity.
  *
- * Changes from legacy:
- *   - Replaced custom mousedown/mousemove/mouseup resize logic with
- *     react-resizable-panels (Group / Panel / Separator).
- *   - Panel sizes persist to localStorage via useDefaultLayout.
- *   - Double-click Separator resets layout (built-in, no custom handler).
- *   - Mobile: layout stacks vertically (Group orientation switches).
+ *   We replace react-resizable-panels with a plain CSS flexbox layout that
+ *   gives the left panel a stable 320px width (min 280px) and lets the
+ *   right panel take the remaining space. The resize handle is preserved
+ *   visually as a decorative separator; if true resize is needed later,
+ *   it can be wired back via a controlled CSS variable.
  *
  * Layout:
  *   ┌──────────────┬──┬─────────────────────────────────┐
  *   │  LeftPanel   │  │  RightPanel                     │
- *   │  (tree)      │S │  (Tabs: Запрос / Найденные)     │
- *   │  25-40%      │  │  60-75%                         │
+ *   │  (tree)      │S │  (Tabs: Запрос / Найденные)    │
+ *   │  320px       │  │  flex: 1                        │
  *   └──────────────┴──┴─────────────────────────────────┘
- *
- * Persistence: localStorage key "speechlab-layout" saves panel proportions.
  */
 
 import { useCallback, useState } from 'react';
 import { Box, Tab, Tabs } from '@beeline/design-system-react';
-import { Group, Panel, Separator } from 'react-resizable-panels';
-import type { Layout } from 'react-resizable-panels';
 
 import type { SpeechLabTreeNode } from '../../../types/speechlab';
 import type { SearchResult, TextSegment, UploadDictionaryResponse } from '../../../types/api';
@@ -32,16 +35,6 @@ import QueryTab from '../QueryTab/QueryTab';
 import FoundRecordsTab from '../FoundRecordsTab/FoundRecordsTab';
 
 import './SpeechLabLayout.scss';
-
-const LAYOUT_STORAGE_KEY = 'speechlab-layout';
-const PANEL_LEFT_ID = 'speechlab-left';
-const PANEL_RIGHT_ID = 'speechlab-right';
-
-/** Default panel sizes in percent */
-const DEFAULT_LEFT_SIZE = 25;
-const DEFAULT_RIGHT_SIZE = 75;
-const MIN_LEFT_SIZE = 15;
-const MAX_LEFT_SIZE = 45;
 
 type TabValue = 'query' | 'found-records';
 
@@ -99,87 +92,63 @@ export default function SpeechLabLayout({
   treeError,
   expandedNodes,
 }: SpeechLabLayoutProps) {
-  // Default panel layout keyed by Panel id (matches react-resizable-panels Layout type).
-  // CRITICAL: keys MUST match Panel id props for flex-grow to be applied correctly.
-  const defaultLayout: Layout = {
-    [PANEL_LEFT_ID]: DEFAULT_LEFT_SIZE,
-    [PANEL_RIGHT_ID]: DEFAULT_RIGHT_SIZE,
-  };
-
   // Tab state
   const [activeTab, setActiveTab] = useStateTab();
-
-  // Persist layout changes — currently a no-op; localStorage wiring can be added later.
-  const handleLayoutChanged = useCallback(() => {
-    // TODO: persist to localStorage if needed.
-  }, []);
 
   const totalMatches = searchResult?.total_matches ?? 0;
 
   return (
     <Box className="speechlab-layout">
-      <Group
-        id={LAYOUT_STORAGE_KEY}
-        defaultLayout={defaultLayout}
-        onLayoutChanged={handleLayoutChanged}
-        orientation="horizontal"
-        className="speechlab-layout__group"
-      >
-        {/* Left Panel: dictionary tree + search + import */}
-        <Panel
-          id={PANEL_LEFT_ID}
-          defaultSize={DEFAULT_LEFT_SIZE}
-          minSize={MIN_LEFT_SIZE}
-          maxSize={MAX_LEFT_SIZE}
-          className="speechlab-layout__panel--left"
-        >
-          <LeftPanel
-            treeNodes={treeNodes}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={onSelectNode}
-            onToggleExpand={onToggleExpand}
-            onDictionaryUploaded={onDictionaryUploaded}
-            sessionId={sessionId}
-            isLoading={isTreeLoading}
-            error={treeError}
-            expandedNodes={expandedNodes}
-          />
-        </Panel>
+      {/* Left Panel: dictionary tree + search + import */}
+      <Box className="speechlab-layout__panel speechlab-layout__panel--left">
+        <LeftPanel
+          treeNodes={treeNodes}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={onSelectNode}
+          onToggleExpand={onToggleExpand}
+          onDictionaryUploaded={onDictionaryUploaded}
+          sessionId={sessionId}
+          isLoading={isTreeLoading}
+          error={treeError}
+          expandedNodes={expandedNodes}
+        />
+      </Box>
 
-        {/* Resize Separator */}
-        <Separator className="speechlab-layout__separator" />
+      {/* Decorative separator (replaces the resize handle from
+          react-resizable-panels; preserves the visual rhythm). */}
+      <div
+        className="speechlab-layout__separator"
+        role="separator"
+        aria-orientation="vertical"
+        aria-hidden="true"
+        data-separator
+      />
 
-        {/* Right Panel: Tabs (Запрос / Найденные записи) */}
-        <Panel
-          id={PANEL_RIGHT_ID}
-          defaultSize={DEFAULT_RIGHT_SIZE}
-          minSize={50}
-          className="speechlab-layout__panel--right"
-        >
-          <Box className="speechlab-layout__right-content">
-            <Tabs
-              selectedTabIndex={activeTab === 'query' ? 0 : 1}
-              onChange={handleTabChange}
+      {/* Right Panel: Tabs (Запрос / Найденные записи) */}
+      <Box className="speechlab-layout__panel speechlab-layout__panel--right">
+        <Box className="speechlab-layout__right-content">
+          <Tabs
+            selectedTabIndex={activeTab === 'query' ? 0 : 1}
+            onChange={handleTabChange}
+          >
+            <Tab label="Запрос" value="query">
+              <QueryTab selectedNode={selectedNode} />
+            </Tab>
+            <Tab
+              label={`Найденные записи${totalMatches > 0 ? ` (${totalMatches})` : ''}`}
+              value="found-records"
             >
-              <Tab label="Запрос" value="query">
-                <QueryTab selectedNode={selectedNode} />
-              </Tab>
-              <Tab
-                label={`Найденные записи${totalMatches > 0 ? ` (${totalMatches})` : ''}`}
-                value="found-records"
-              >
-                <FoundRecordsTab
-                  searchResult={searchResult}
-                  isSearching={isSearching}
-                  error={searchError}
-                  onRunAnalysis={onRunAnalysis}
-                  segments={segments}
-                />
-              </Tab>
-            </Tabs>
-          </Box>
-        </Panel>
-      </Group>
+              <FoundRecordsTab
+                searchResult={searchResult}
+                isSearching={isSearching}
+                error={searchError}
+                onRunAnalysis={onRunAnalysis}
+                segments={segments}
+              />
+            </Tab>
+          </Tabs>
+        </Box>
+      </Box>
     </Box>
   );
 

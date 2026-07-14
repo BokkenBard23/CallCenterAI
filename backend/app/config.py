@@ -53,12 +53,29 @@ class Settings(BaseSettings):
     beeline_default_model: str = "glm-xlarge"  # GLM-5.2 family, serious tasks (summary, quality, dict_analysis, restructured)
     beeline_fast_model: str = "glm-xlarge-fast"  # GLM-5.2 fast, short classifications (shares GLM slots)
     # ── LLM: Qwen family via Beeline AI (OpenAI-compatible endpoint) ──
-    # `qwen-medium`        — Qwen3.5-35B stable family code (3 parallel slots)
-    # `qwen-medium-preview` — Qwen3.6-35B temporary preview code (3 parallel slots)
-    qwen35_model: str = "qwen-medium"             # Qwen3.5-35B (stable)
+    # ⚠️ IMPORTANT: Qwen 3.5 35B and Qwen 3.6 35B DEPRECATED as of 2026-07-27
+    # 
+    # Current stable codes (working until 2026-07-27):
+    #   qwen-medium            — Qwen3.5-35B (262K context, vision)
+    #   qwen-medium-preview    — Qwen3.6-35B (LIMITED: ~47.8K tokens, DO NOT USE for long context)
+    #   qwen-medium-fast       — Qwen3.5-35B fast
+    #   qwen-medium-preview-fast — Qwen3.6-35B fast
+    #
+    # New model available NOW (recommended for future-proofing):
+    #   Qwen3.6-27B-textonly   — Dense text-only model (262K context)
+    #   coding-medium          — Coding-focused model
+    #   qwen-medium-dense      — Dense model with vision (262K context) ✅ RECOMMENDED
+    #   qwen-medium-dense-fast — Fast mode without reasoning
+    #
+    # Legacy stable codes (universal-large, universal-medium) will automatically
+    # redirect to new model as of 2026-07-27.
+    #
+    # Context window: 262K tokens (verified for qwen-medium, qwen-medium-dense)
+    # Parallelism: 3 slots per model
+    qwen35_model: str = "qwen-medium"             # Qwen3.5-35B (stable, 262K context)
     qwen35_fast_model: str = "qwen-medium-fast"   # Qwen3.5-35B fast
-    qwen36_model: str = "qwen-medium-preview"     # Qwen3.6-35B (preview)
-    qwen36_fast_model: str = "qwen-medium-preview-fast"  # Qwen3.6-35B fast (preview)
+    qwen36_model: str = "qwen-medium-dense"       # Qwen3.6-27B (262K context, vision) ✅ RECOMMENDED
+    qwen36_fast_model: str = "qwen-medium-dense-fast" # Qwen3.6-27B fast
 
     # ── Per-provider parallelism (asyncio.Semaphore sizes) ──
     # Total max parallel = 2 (GLM) + 3 (Qwen3.5) + 3 (Qwen3.6) = 8

@@ -15,9 +15,28 @@
   overflow: hidden;
 }
 
+/* H5 FIX (vision-audit): the bottom collapse strip used to render as an
+   isolated IconButton, which the vision audit flagged as "обрезанные
+   символы/мусорные строки/стрелки у нижней границы панели". Now it is
+   a labelled footer row with a clear text label + chevron, so it reads
+   as an intentional UI element rather than a stray artifact. */
 .results-sidebar__collapse {
   border-top: 1px solid var(--color-border);
   padding: var(--sizeSpacingX2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sizeSpacingX2);
+  background: var(--color-background-base);
+  flex-shrink: 0;
+}
+
+.results-sidebar__collapse-label {
+  font-size: 0.75rem;
+  color: var(--color-text-inactive);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Main content area ── */
@@ -25,6 +44,93 @@
   flex: 1 1 0;
   min-width: 0;
   overflow: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* R-H6 FIX (vision-audit iter 3): the previous iter used [class*="Stack"] /
+   [class*="stack"] case-SENSITIVE selectors, but DS Stack renders the
+   lowercase className `dsb_stack` and Card renders `dsb_card`. The previous
+   selectors were dead code, so cards/stacks collapsed to natural width and
+   the right half of the screen stayed visually empty in the
+   LLM-unavailable state. Now we target the real DS class names directly.
+
+   IMPORTANT: only DIRECT children of the root vertical Stack inside
+   .results-main are stretched to full width. Nested Stacks (e.g. the
+   Tabs + Switch action row, the Switch wrapper) keep their natural flex
+   sizing. This avoids the regression where an empty Switch wrapper
+   took 50% of the row (collapsing the Tabs to half-width). */
+
+/* Every direct child of the root Stack inside .results-main fills width. */
+.results-main > * {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* The root vertical Stack itself fills the main area width. */
+.results-main > .dsb_stack {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Stretch every DS Card + drop any default max-width that would leave the
+   right side empty. Applies to all states (loading, loaded-with-LLM,
+   LLM-unavailable). */
+.results-main .dsb_card,
+.results-main .dsb_card-root {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+/* Stretch DS Tabs body + tabpanel wrapper so the active tab content
+   (SummaryView, HighlightedTextView) fills the available width.
+   R-H6 FIX (vision-audit iter 3): the Tabs lives inside a horizontal Stack
+   with `justify="space-between"`. As a flex item with default `flex-grow: 0`
+   it collapsed to natural content width (≈514px), leaving the right half of
+   the main area visually empty in the LLM-unavailable state. Adding
+   `flex-grow: 1` makes Tabs absorb the leftover horizontal space so the
+   tab body (and the SummaryView card inside it) spans the full row width.
+   `flex-basis: auto` keeps the width:100% declaration meaningful as the
+   starting size, then grow distributes the remaining free space. */
+.results-main .dsb_tabs,
+.results-main .dsb_tabs__body {
+  width: 100%;
+  box-sizing: border-box;
+  flex-grow: 1;
+  flex-basis: auto;
+  min-width: 0;
+}
+
+.results-tabpanel {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.results-tabpanel > * {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* BlurFade motion.div wrapper is a plain div; force it to full width so the
+   Card / Stack it wraps also fills the row. */
+.results-tabpanel .motion-div,
+.results-tabpanel > div {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* LLM-unavailable consolidated card: ensure internal horizontal rows span
+   the full card width so the right side is not visually empty. */
+.summary-unavailable-card .dsb_stack {
+  width: 100%;
+}
+
+/* H4 FIX: subtle inline partial-status row (LLM running while matches
+   are already loaded). Kept small and informational — not a duplicate
+   of the canonical loading card inside SummaryView. */
+.results-partial-status {
+  opacity: 0.9;
 }
 
 /* ── Semantic color classes (replacing inline styles) ── */

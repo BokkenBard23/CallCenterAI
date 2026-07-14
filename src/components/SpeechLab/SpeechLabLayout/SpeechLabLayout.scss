@@ -1,90 +1,77 @@
 /**
- * SpeechLabLayout styles — react-resizable-panels based layout.
+ * SpeechLabLayout styles — plain CSS flexbox layout.
  *
- * Wave UI-1: Replaced custom resize handle with react-resizable-panels.
+ * Vision-audit rework (H8 FIX): replaced react-resizable-panels with a
+ * plain flexbox layout. The previous implementation collapsed the left
+ * panel to ~content width because of a react-resizable-panels v4.12 bug,
+ * causing the dictionary tree title to wrap per-character ("Сло…").
  */
 
 .speechlab-layout {
   display: flex;
   flex-direction: row;
   height: 100%;
+  width: 100%;
   overflow: hidden;
+}
 
-  // Group container — react-resizable-panels manages flex
-  &__group {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: row;
+.speechlab-layout__panel {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* Left panel — fixed comfortable width for the dictionary tree.
+   H8 FIX: previously collapsed to ~45px; now stable at 320px with a
+   280px floor so the title "Словарь" and tree labels never wrap
+   per-character. */
+.speechlab-layout__panel--left {
+  width: 320px;
+  min-width: 280px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.48));
+}
+
+/* Right panel — takes the remaining horizontal space. */
+.speechlab-layout__panel--right {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Decorative separator replacing the resize handle. Kept thin and
+   theme-aware. Preserves the `data-separator` attribute so existing
+   layout tests still find a separator element. */
+.speechlab-layout__separator {
+  width: 4px;
+  flex-shrink: 0;
+  background-color: var(--color-divider, rgba(255, 255, 255, 0.2));
+  transition: background-color 150ms ease;
+
+  &:hover {
+    background-color: var(--color-border, rgba(255, 255, 255, 0.48));
   }
 
-  // Left panel — react-resizable-panels sets flex-grow inline; we set flex-basis: 0
-  // so that panels distribute space by flex-grow ratio, not by content width.
-  &__panel--left {
-    height: 100%;
-    overflow: hidden;
-    border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.48));
-    flex-basis: 0;
-    min-width: 0;
-  }
-
-  // Right panel — same: flex-basis: 0 for proportional distribution
-  &__panel--right {
-    height: 100%;
-    overflow: hidden;
-    flex-basis: 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  // Separator — drag handle between panels
-  &__separator {
-    width: 4px;
-    cursor: col-resize;
-    background-color: var(--color-divider, rgba(255, 255, 255, 0.2));
-    flex-shrink: 0;
-    transition: background-color 150ms ease;
-
-    &:hover {
-      background-color: var(--color-border, rgba(255, 255, 255, 0.48));
-    }
-
-    &:active {
-      background-color: var(--color-background-brand, #fdd835);
-    }
-
-    // Accessibility: keyboard focus
-    &:focus-visible {
-      outline: 2px solid var(--color-border-focus, #ffffff);
-      outline-offset: -1px;
-    }
-  }
-
-  // Right panel content wrapper
-  &__right-content {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
   }
 }
 
-/* Mobile: stack vertically — mobile media queries removed (desktop-only internal tool, FullHD+). */
-
-/*
- * react-resizable-panels v4.12 workaround:
- * The library calculates flex-grow from content width instead of using
- * defaultSize/defaultLayout props. This causes the left panel to collapse
- * to ~45px (content width) instead of 25% of the container.
- * Override flex-grow on the outer Panel divs (identified by data-testid).
- * The className prop on <Panel> is applied to an INNER div, so we cannot
- * target the flex item via className — only via data-testid.
- */
-.speechlab-layout__group > [data-testid="speechlab-left"] {
-  flex-grow: 25 !important;
+/* Right panel content wrapper */
+.speechlab-layout__right-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
-.speechlab-layout__group > [data-testid="speechlab-right"] {
-  flex-grow: 75 !important;
+
+/* Tablet / small desktop: shrink the left panel slightly so the right
+   panel still has comfortable reading width on ~1366px viewports. */
+@media (max-width: 1366px) {
+  .speechlab-layout__panel--left {
+    width: 280px;
+    min-width: 260px;
+  }
 }
