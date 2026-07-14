@@ -214,11 +214,16 @@ def get_circuit_breaker_stats() -> Dict[str, Dict[str, Any]]:
 def _get_fallback_order(primary_provider_id: str) -> List[str]:
     """Get ordered list of provider IDs for fallback chain.
 
-    New priority (per official Beeline AI model codes — glm-xlarge is GLM-5.2 family):
-      beeline (glm-xlarge) → qwen36 → qwen35 → beeline_fast (shared GLM slot)
-      → ollama (local) → yandexgpt → gigachat (Guardrails, unreliable, last resort)
+    New priority (since 2026-07-14 — Qwen3.6-27B Dense promoted to PRIMARY):
+      qwen36 (qwen-medium-dense, 6 slots) → beeline (glm-xlarge, FALLBACK) →
+      qwen35 (qwen-medium, FALLBACK) → qwen36_fast (dense-fast, classification) →
+      beeline_fast (glm-xlarge-fast, shared GLM slot, LAST RESORT) →
+      ollama (local) → yandexgpt → gigachat (Guardrails, unreliable, last resort)
 
-    The requested provider comes first, then the rest in the canonical order.
+    NOTE: ``qwen36_fast`` is intentionally placed AFTER ``qwen35`` in the canonical
+    order because it is a *classification* specialist (no reasoning). When used as
+    the primary (classification tasks), it is moved to the front by the
+    ``[primary, ...rest]`` reconstruction below.
 
     Args:
         primary_provider_id: The initially requested provider.
@@ -227,9 +232,10 @@ def _get_fallback_order(primary_provider_id: str) -> List[str]:
         List of provider IDs starting with the primary, then others.
     """
     all_providers = [
-        "beeline",
         "qwen36",
+        "beeline",
         "qwen35",
+        "qwen36_fast",
         "beeline_fast",
         "ollama",
         "yandexgpt",
@@ -786,17 +792,47 @@ class Qwen35Provider(QwenProvider):
 
 
 class Qwen36Provider(QwenProvider):
-    """Qwen 3.6 — primary for medium tasks + fallback for GLM. 3 parallel slots.
+    """Qwen 3.6-27B Dense — PRIMARY LLM provider for all long/medium analysis tasks.
 
-    Uses the `qwen-medium-preview` family code (Qwen3.6-35B preview per Beeline AI docs).
+    Uses the ``qwen-medium-dense`` family code (Qwen3.6-27B Dense, 262K context,
+    6 parallel slots per Beeline AI /me/limits API). Promoted to PRIMARY on
+    2026-07-14 (was qwen-medium-preview with 3 slots). GLM is now FALLBACK only.
+
+    NOTE: text-only model — NOT suitable for vision tasks. Vision analysis
+    (``vision_analysis.py``) keeps its own fallback chain and is NOT affected
+    by this provider's default.
     """
 
-    def __init__(self, api_key: str, default_model: str = "qwen-medium-preview") -> None:
+    def __init__(self, api_key: str, default_model: str = "qwen-medium-dense") -> None:
         super().__init__(
             api_key=api_key,
             default_model=default_model,
             max_concurrent=settings.qwen36_max_concurrent,
             provider_id="qwen36",
+        )
+
+
+class Qwen36FastProvider(QwenProvider):
+    """Qwen 3.6-27B Dense fast — PRIMARY for short classifications.
+
+    Uses the ``qwen-medium-dense-fast`` family code (Qwen3.6-27B Dense fast,
+    no reasoning, 6 parallel slots). Promoted to PRIMARY for classification
+    tasks (sentiment, profanity, validation, error_classifier) on 2026-07-14
+    (replaced ``beeline_fast`` / glm-xlarge-fast which is now LAST RESORT only).
+
+    Has its OWN 6-slot semaphore (independent of :class:`Qwen36Provider`).
+    Per Beeline AI /me/limits API, dense and dense-fast each expose their own
+    6-slot concurrent capacity; if a future API check reveals they actually
+    share a backend pool, this should be migrated to a shared semaphore like
+    the GLM family — see :func:`_get_glm_semaphore` for the pattern.
+    """
+
+    def __init__(self, api_key: str, default_model: str = "qwen-medium-dense-fast") -> None:
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_concurrent=settings.qwen36_max_concurrent,
+            provider_id="qwen36_fast",
         )
 
 
@@ -1130,7 +1166,8 @@ def get_provider(provider_id: str) -> Optional[LLMProvider]:
 
     Args:
         provider_id: Provider identifier
-            (beeline, beeline_fast, qwen35, qwen36, ollama, yandexgpt, gigachat).
+            (qwen36, qwen36_fast, beeline, beeline_fast, qwen35, ollama,
+            yandexgpt, gigachat).
 
     Returns:
         LLMProvider instance, or None if unknown provider.
@@ -1174,6 +1211,11 @@ def get_provider(provider_id: str) -> Optional[LLMProvider]:
             api_key=settings.beeline_api_key,
             default_model=settings.qwen36_model,
         )
+    elif provider_id == "qwen36_fast":
+        provider = Qwen36FastProvider(
+            api_key=settings.beeline_api_key,
+            default_model=settings.qwen36_fast_model,
+        )
     else:
         return None
 
@@ -1185,10 +1227,11 @@ def get_all_providers() -> Dict[str, LLMProvider]:
     """Get all configured providers."""
     result: Dict[str, LLMProvider] = {}
     for pid in (
-        "beeline",
-        "beeline_fast",
         "qwen36",
+        "qwen36_fast",
+        "beeline",
         "qwen35",
+        "beeline_fast",
         "ollama",
         "yandexgpt",
         "gigachat",
@@ -1201,7 +1244,7 @@ def get_all_providers() -> Dict[str, LLMProvider]:
 
 async def analyze_dialogue(
     dialogue_text: str,
-    provider_id: str = "ollama",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> LLMResult:
     """Analyze a dialogue with fallback chain across LLM providers.
@@ -1209,10 +1252,13 @@ async def analyze_dialogue(
     Sends the dialogue text with the critical restructuring prompt,
     parses the JSON response, and returns a structured LLMResult.
 
-    Fallback order:
-      1. Try requested provider
-      2. Try other available providers (beeline → qwen36 → qwen35 →
-         beeline_fast → ollama → yandexgpt → gigachat)
+    Default provider is ``qwen36`` (Qwen3.6-27B Dense, 6 slots, 262K context)
+    as of 2026-07-14 — was ``ollama`` previously.
+
+    Fallback order (canonical):
+      1. Try requested provider (default qwen36)
+      2. Try other available providers (qwen36 → beeline → qwen35 →
+         qwen36_fast → beeline_fast → ollama → yandexgpt → gigachat)
       3. If all fail, return LLMResult with empty summary and provider="none"
 
     Circuit breaker:
@@ -1222,7 +1268,7 @@ async def analyze_dialogue(
 
     Args:
         dialogue_text: Full dialogue text for analysis.
-        provider_id: LLM provider id (ollama, yandexgpt, gigachat, beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -1823,7 +1869,7 @@ async def _run_llm_analysis(
     system_prompt: str,
     model_class: type,
     default_instance: Any,
-    provider_id: str = "beeline",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> Any:
     """Run an LLM analysis with circuit breaker and fallback chain.
@@ -1831,12 +1877,15 @@ async def _run_llm_analysis(
     Follows the same pattern as :func:`analyze_dialogue`:
     try requested provider → try others → return default on total failure.
 
+    Default provider is ``qwen36`` (Qwen3.6-27B Dense, PRIMARY since 2026-07-14;
+    was ``beeline`` previously — GLM demoted to FALLBACK).
+
     Args:
         dialogue_text: Full dialogue text for analysis.
         system_prompt: Analysis-specific system prompt.
         model_class: Pydantic model class for response validation.
         default_instance: Default instance to return on total failure.
-        provider_id: Primary LLM provider id.
+        provider_id: Primary LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -1910,14 +1959,14 @@ async def _run_llm_analysis(
 
 async def analyze_sentiment(
     dialogue_text: str,
-    provider_id: str = "beeline",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> SentimentAnalysisResult:
     """Analyze per-utterance sentiment of a dialogue (IP-3.2).
 
     Args:
         dialogue_text: Full dialogue text for analysis.
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -1944,14 +1993,14 @@ async def analyze_sentiment(
 
 async def analyze_conflict(
     dialogue_text: str,
-    provider_id: str = "beeline",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> ConflictAnalysisResult:
     """Detect conflict and aggression in a dialogue (IP-3.3).
 
     Args:
         dialogue_text: Full dialogue text for analysis.
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -1980,14 +2029,14 @@ async def analyze_conflict(
 
 async def analyze_profanity(
     dialogue_text: str,
-    provider_id: str = "beeline",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> ProfanityAnalysisResult:
     """Detect profanity and offensive language in a dialogue (IP-3.4).
 
     Args:
         dialogue_text: Full dialogue text for analysis.
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -2014,14 +2063,14 @@ async def analyze_profanity(
 
 async def analyze_topic(
     dialogue_text: str,
-    provider_id: str = "beeline",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> TopicAnalysisResult:
     """Detect topics discussed in a dialogue (IP-3.5).
 
     Args:
         dialogue_text: Full dialogue text for analysis.
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -2127,7 +2176,7 @@ def _build_quality_fallback_result(session_id: str) -> QualityScoreResult:
 async def analyze_quality(
     dialogue_text: str,
     session_id: str,
-    provider_id: str = "beeline",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> QualityScoreResult:
     """Analyse dialogue quality across 12 categories (IP-4.1).
@@ -2143,7 +2192,7 @@ async def analyze_quality(
     Args:
         dialogue_text: Full dialogue text for analysis.
         session_id: Session identifier (included in result).
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -2183,7 +2232,7 @@ async def analyze_quality(
 
 async def analyze_dialogue_validation(
     dialogue_text: str,
-    provider_id: str = "beeline",
+    provider_id: str = "qwen36",
     model: Optional[str] = None,
 ) -> DialogueValidationResult:
     """Validate whether a text is a meaningful client-operator dialogue (ID-12).
@@ -2195,7 +2244,7 @@ async def analyze_dialogue_validation(
 
     Args:
         dialogue_text: Full dialogue text for validation.
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
 
     Returns:
@@ -2244,7 +2293,7 @@ async def analyze_resolution_sentiment(
     Args:
         dialogue_text: Full dialogue text for analysis.
         session_id: Session identifier (included in result).
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
         domain: Domain type for domain-specific prompt addition (default: general).
 
@@ -2322,7 +2371,7 @@ async def analyze_errors(
     Args:
         dialogue_text: Full dialogue text for analysis.
         session_id: Session identifier (included in result).
-        provider_id: LLM provider id (default: beeline).
+        provider_id: LLM provider id (default: qwen36).
         model: Optional model override.
         domain: Domain type for domain-specific prompt addition (default: general).
 
@@ -2388,27 +2437,29 @@ from app.models import AnalysisAnnotation, ProgressInfo
 # is open. Keys mirror the analysis-function / step names.
 #
 # Model codes per official Beeline AI docs (https://docs.ai.beeline.ru/quickstart/models/):
-#   - glm-xlarge         (GLM-5.2, serious tasks, 245K context, reasoning on) → 2 slots
-#   - glm-xlarge-fast    (GLM-5.2 fast, short classifications, no reasoning) → shares GLM slots
-#   - qwen-medium-preview (Qwen3.6-35B preview)                               → 3 slots
-#   - qwen-medium        (Qwen3.5-35B stable)                                 → 3 slots
+# Since 2026-07-14 — Qwen3.6-27B Dense family promoted to PRIMARY (GLM demoted to FALLBACK):
+#   - qwen-medium-dense       (Qwen3.6-27B Dense, 262K context, reasoning on, 6 slots) → PRIMARY
+#   - qwen-medium-dense-fast  (Qwen3.6-27B Dense fast, no reasoning, 6 slots) → CLASSIFICATION
+#   - glm-xlarge              (GLM-5.2, 245K context, reasoning on, 2 slots) → FALLBACK
+#   - glm-xlarge-fast         (GLM-5.2 fast, no reasoning) → LAST RESORT (shares GLM slot)
+#   - qwen-medium              (Qwen3.5-35B, 262K context) → FALLBACK
 _TASK_MODEL_PREFERENCE: Dict[str, List[str]] = {
-    # Long generations → glm-xlarge (GLM-5.2, 245K context, reasoning on)
-    "summary": ["beeline", "qwen36"],            # glm-xlarge → qwen-medium-preview
-    "restructured": ["beeline", "qwen36"],
-    "quality": ["beeline", "qwen36"],
-    "resolution_sentiment": ["beeline", "qwen36"],
-    "dict_analysis": ["beeline", "qwen36"],
-    "dict_suggest": ["beeline", "qwen36"],
-    # Medium tasks → qwen-medium-preview (Qwen3.6, 3 slots) → qwen-medium
-    "topic": ["qwen36", "qwen35", "beeline"],    # qwen-medium-preview → qwen-medium → glm-xlarge
-    "conflict": ["qwen36", "qwen35", "beeline_fast"],
-    # Short classifications → glm-xlarge-fast (fast, no reasoning)
-    "sentiment": ["beeline_fast", "qwen36", "qwen35"],  # glm-xlarge-fast → qwen-medium-preview → qwen-medium
-    "profanity": ["beeline_fast", "qwen36"],     # shortest → fast
-    "validation": ["beeline_fast", "qwen36"],
-    "error_classifier": ["beeline_fast", "qwen36"],
-    # RAG forces GLM (frida embeddings require GLM backing)
+    # Long generations → qwen-medium-dense (6 slots, 262K context, reasoning)
+    "summary": ["qwen36", "beeline"],               # dense → glm-xlarge (FALLBACK)
+    "restructured": ["qwen36", "beeline"],
+    "quality": ["qwen36", "beeline"],
+    "resolution_sentiment": ["qwen36", "beeline"],
+    "dict_analysis": ["qwen36", "beeline"],
+    "dict_suggest": ["qwen36", "beeline"],
+    # Medium tasks → qwen-medium-dense → qwen-medium (Qwen3.5) → glm-xlarge
+    "topic": ["qwen36", "qwen35", "beeline"],
+    "conflict": ["qwen36", "qwen35", "beeline"],
+    # Short classifications → qwen-medium-dense-fast (no reasoning, 6 slots) → qwen-medium-dense
+    "sentiment": ["qwen36_fast", "qwen36", "qwen35"],      # dense-fast → dense → qwen-medium
+    "profanity": ["qwen36_fast", "qwen36"],                # shortest → dense-fast → dense
+    "validation": ["qwen36_fast", "qwen36"],
+    "error_classifier": ["qwen36_fast", "qwen36"],
+    # RAG forces GLM (frida embeddings require GLM backing) — keep as is
     "rag": ["beeline"],  # glm-xlarge
 }
 
@@ -2431,8 +2482,9 @@ class LLMOrchestrator:
 
     Supports two execution modes:
       - **parallel** (default): steps run concurrently via ``asyncio.gather``.
-        Each step's provider acquires its own semaphore, so the 8-slot global
-        budget (2 GLM + 3 Qwen3.5 + 3 Qwen3.6) is respected.
+        Each step's provider acquires its own semaphore, so the global parallel
+        budget (2 GLM + 3 Qwen3.5 + 6 qwen-medium-dense + 6 qwen-medium-dense-fast = 17)
+        is respected.
       - **sequential**: steps run one after another (``parallel=False``).
         Kept for deterministic ordering in tests and debugging.
 
@@ -2501,18 +2553,22 @@ class LLMOrchestrator:
         self,
         dialogue_text: str,
         session_id: str,
-        provider_id: str = "beeline",
+        provider_id: str = "qwen36",
         include_summary: bool = False,
         domain: str = "general",
         parallel: Optional[bool] = None,
     ) -> AnalysisAnnotation:
         """Run all configured LLM analyses.
 
+        Default provider is ``qwen36`` (Qwen3.6-27B Dense, PRIMARY since 2026-07-14;
+        was ``beeline`` previously — GLM demoted to FALLBACK). Pass ``None`` to
+        use per-task smart routing via :data:`_TASK_MODEL_PREFERENCE`.
+
         Args:
             dialogue_text: Full dialogue text for analysis.
             session_id: Session identifier.
-            provider_id: LLM provider id (default: beeline). Pass None to
-                use per-task smart routing via ``_TASK_MODEL_PREFERENCE``.
+            provider_id: LLM provider id (default: qwen36). Pass None to
+                use per-task smart routing via :data:`_TASK_MODEL_PREFERENCE`.
             include_summary: If True, also run ``analyze_dialogue()``
                 and include the summary in the result.
             domain: Domain type for domain-specific prompt additions

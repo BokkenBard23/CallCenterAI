@@ -26,18 +26,40 @@ no Guardrails Exo errors, guaranteed recovery.
 ⚠️ IMPORTANT: qwen-medium-preview has limited context (~47.8K tokens vs 262K advertised)
 and is NOT included in fallback chain. Use qwen-medium-dense instead.
 
-Usage:
-    from app.services.vision_analysis import analyze_screenshot
+Parallelism:
+    gpt-5.4 supports 3 concurrent requests (per Beeline AI /me/limits API).
+    qwen-medium-dense supports 6 concurrent requests.
+    qwen-medium supports 3 concurrent requests.
+    Batch mode uses asyncio.Semaphore to respect per-model limits.
 
+Usage:
+    from app.services.vision_analysis import analyze_screenshot, analyze_screenshots_batch
+
+    # Single screenshot
     result = await analyze_screenshot(
         image_path="docs/specs/screenshots/mining-desktop-1440.png",
         prompt="Опиши визуальные проблемы на скриншоте.",
     )
     # → {"text": "...", "model": "gpt-5.4"}
 
+    # Batch: 3+ screenshots in parallel
+    results = await analyze_screenshots_batch(
+        images=[
+            {"path": "screenshots/page1.png", "prompt": "Проверь UI"},
+            {"path": "screenshots/page2.png", "prompt": "Проверь UI"},
+            {"path": "screenshots/page3.png", "prompt": "Проверь UI"},
+        ],
+        max_concurrent=3,  # respects gpt-5.4 3-slot limit
+    )
+    # → [{"text": "...", "model": "gpt-5.4"}, ...]
+
 CLI (for ui-tester / orchestrator without Python httpx in Node.js):
+    # Single
     python -m app.services.vision_analysis --image <path> --prompt <text>
     python -m app.services.vision_analysis --image <path> --prompt-file <path>
+
+    # Batch (3 at a time)
+    python -m app.services.vision_analysis --batch <dir> --prompt <text> --max-concurrent 3
 
 OpenAI-compatible chat completions API at api.ai.beeline.ru.
 """
@@ -66,6 +88,17 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = 120.0  # vision models are slower than text
 _MAX_RETRIES = 1  # per-model retry before falling through
+
+# Per-model concurrency limits (per Beeline AI /me/limits API).
+# Used by batch mode to avoid exceeding API rate limits.
+_VISION_MODEL_CONCURRENCY: Dict[str, int] = {
+    "gpt-5.4": 3,            # 3 parallel slots
+    "qwen-medium-dense": 6,  # 6 parallel slots
+    "qwen-medium": 3,        # 3 parallel slots
+}
+
+# Default concurrency for batch mode — limited by the primary model (gpt-5.4 = 3).
+_DEFAULT_BATCH_CONCURRENCY = 3
 
 # Fallback chain based on vision benchmark (2026-07-12):
 # 1. gpt-5.4 (best accuracy 100%, may hit Guardrails Exo)
@@ -377,6 +410,97 @@ async def analyze_screenshot(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Batch mode — parallel screenshot analysis
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def analyze_screenshots_batch(
+    images: List[Dict[str, Any]],
+    max_concurrent: int = _DEFAULT_BATCH_CONCURRENCY,
+    system_prompt: Optional[str] = None,
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+    models: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Analyze multiple screenshots in parallel with per-model concurrency control.
+
+    Uses asyncio.Semaphore to respect gpt-5.4's 3-slot limit (or qwen's 6 slots).
+    Each screenshot is processed independently — failure of one does NOT block others.
+
+    Args:
+        images: List of dicts with keys:
+            - path (str): Path to PNG/JPEG screenshot.
+            - prompt (str): Analysis prompt for this screenshot.
+            - output (str, optional): Path to write result .md file.
+        max_concurrent: Max parallel requests (default 3 = gpt-5.4 limit).
+        system_prompt: Optional system prompt for all screenshots.
+        temperature: Sampling temperature (default 0.3).
+        max_tokens: Max tokens in response (default 4096).
+        models: Override fallback chain (for testing).
+
+    Returns:
+        List of result dicts (same order as input images), each with keys:
+            - text: str — LLM response text (empty on failure)
+            - model: str — model that succeeded (empty on failure)
+            - attempts: List[Dict] — per-model attempt log
+            - success: bool
+            - image_path: str — original image path
+            - output_path: str | None — where result was saved (if requested)
+            - error: str | None — error message on failure
+    """
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _process_one(img: Dict[str, Any]) -> Dict[str, Any]:
+        path = img["path"]
+        prompt = img["prompt"]
+        output_path = img.get("output")
+
+        async with semaphore:
+            try:
+                result = await analyze_screenshot(
+                    image_path=path,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    models=models,
+                )
+                # Save to file if requested
+                if output_path and result.get("text"):
+                    Path(output_path).write_text(
+                        result["text"], encoding="utf-8"
+                    )
+                    logger.info(
+                        "Vision batch: saved %s (model=%s, %d chars)",
+                        output_path,
+                        result["model"],
+                        len(result["text"]),
+                    )
+                return {
+                    **result,
+                    "image_path": str(path),
+                    "output_path": output_path,
+                    "error": None,
+                }
+            except Exception as exc:
+                logger.error("Vision batch: failed for %s: %s", path, exc)
+                return {
+                    "text": "",
+                    "model": "",
+                    "attempts": [],
+                    "success": False,
+                    "image_path": str(path),
+                    "output_path": output_path,
+                    "error": str(exc),
+                }
+
+    # Run all in parallel with semaphore-controlled concurrency
+    tasks = [_process_one(img) for img in images]
+    results = await asyncio.gather(*tasks)
+    return list(results)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI entry point (for use from Node.js/OpenCode agents)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -385,28 +509,52 @@ def _cli() -> int:
     """CLI entry point for vision analysis.
 
     Usage:
+        # Single screenshot
         python -m app.services.vision_analysis --image <path> --prompt <text>
         python -m app.services.vision_analysis --image <path> --prompt-file <path>
         python -m app.services.vision_analysis --image <path> --prompt <text> --output <path>
 
+        # Batch: analyze all .png in a directory (3 at a time)
+        python -m app.services.vision_analysis --batch <dir> --prompt <text> --max-concurrent 3
+        python -m app.services.vision_analysis --batch <dir> --prompt <text> --output-dir <dir>
+
     Exit codes:
-        0 — success
-        1 — all models failed
+        0 — success (all images analyzed)
+        1 — all models failed for one or more images
         2 — invalid arguments
         3 — file not found / unsupported format
     """
     parser = argparse.ArgumentParser(
-        description="Analyze a screenshot using multimodal LLM with fallback chain"
+        description="Analyze screenshots using multimodal LLM with fallback chain"
     )
+    # Single mode
     parser.add_argument(
         "--image",
-        required=True,
-        help="Path to PNG or JPEG screenshot",
+        default=None,
+        help="Path to a single PNG or JPEG screenshot",
     )
+    # Batch mode
+    parser.add_argument(
+        "--batch",
+        default=None,
+        help="Directory containing .png/.jpg screenshots to analyze in parallel",
+    )
+    parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=_DEFAULT_BATCH_CONCURRENCY,
+        help=f"Max parallel requests for batch mode (default {_DEFAULT_BATCH_CONCURRENCY} = gpt-5.4 limit)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory to write ai-analysis-*.md results for batch mode",
+    )
+    # Common
     parser.add_argument(
         "--prompt",
         default=None,
-        help="Analysis prompt (inline)",
+        help="Analysis prompt (inline, used for all images in batch mode)",
     )
     parser.add_argument(
         "--prompt-file",
@@ -421,7 +569,7 @@ def _cli() -> int:
     parser.add_argument(
         "--output",
         default=None,
-        help="Path to write analysis result (UTF-8). If omitted, prints to stdout.",
+        help="Path to write analysis result (UTF-8). If omitted, prints to stdout. Single mode only.",
     )
     parser.add_argument(
         "--json",
@@ -429,6 +577,14 @@ def _cli() -> int:
         help="Output full JSON result (attempts, model, text) instead of just text",
     )
     args = parser.parse_args()
+
+    # Validate mode
+    if not args.image and not args.batch:
+        print("Error: either --image or --batch is required", file=sys.stderr)
+        return 2
+    if args.image and args.batch:
+        print("Error: use either --image or --batch, not both", file=sys.stderr)
+        return 2
 
     # Resolve prompt
     if args.prompt:
@@ -439,7 +595,77 @@ def _cli() -> int:
         print("Error: either --prompt or --prompt-file is required", file=sys.stderr)
         return 2
 
-    # Run async analysis
+    # ── Batch mode ──
+    if args.batch:
+        batch_dir = Path(args.batch)
+        if not batch_dir.is_dir():
+            print(f"Error: batch directory not found: {batch_dir}", file=sys.stderr)
+            return 3
+
+        # Find all .png/.jpg screenshots
+        extensions = ("*.png", "*.jpg", "*.jpeg")
+        screenshots: List[Path] = []
+        for ext in extensions:
+            screenshots.extend(batch_dir.glob(ext))
+        screenshots.sort()
+
+        if not screenshots:
+            print(f"Error: no screenshots found in {batch_dir}", file=sys.stderr)
+            return 3
+
+        # Determine output directory
+        output_dir = Path(args.output_dir) if args.output_dir else batch_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build image specs
+        images: List[Dict[str, Any]] = []
+        for shot in screenshots:
+            output_name = f"ai-analysis-{shot.stem}.md"
+            images.append({
+                "path": str(shot),
+                "prompt": prompt,
+                "output": str(output_dir / output_name),
+            })
+
+        print(
+            f"Batch: analyzing {len(screenshots)} screenshots, "
+            f"max_concurrent={args.max_concurrent}",
+            file=sys.stderr,
+        )
+
+        try:
+            results = asyncio.run(
+                analyze_screenshots_batch(
+                    images=images,
+                    max_concurrent=args.max_concurrent,
+                    system_prompt=args.system_prompt,
+                )
+            )
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+        # Summary
+        succeeded = sum(1 for r in results if r["success"])
+        failed = len(results) - succeeded
+        for r in results:
+            status = "OK" if r["success"] else "FAIL"
+            model = r.get("model", "")
+            error = r.get("error", "")
+            out = r.get("output_path", "")
+            print(
+                f"  [{status}] {r['image_path']} → {out}"
+                f"{f' (model={model})' if model else ''}"
+                f"{f' ERROR: {error}' if error else ''}",
+                file=sys.stderr,
+            )
+        print(
+            f"\nBatch complete: {succeeded} succeeded, {failed} failed",
+            file=sys.stderr,
+        )
+        return 0 if failed == 0 else 1
+
+    # ── Single mode ──
     try:
         result = asyncio.run(
             analyze_screenshot(

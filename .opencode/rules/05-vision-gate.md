@@ -25,15 +25,22 @@ gpt-5.4 → qwen-medium-dense → qwen-medium
 
 **Бенчмарк (3 теста, 7 моделей):**
 
-| Модель | Точность | Скорость | Роль |
-|--------|----------|----------|------|
-| **gpt-5.4** | **100%** | 5.5s | Primary — единственная модель без false positives |
-| qwen-medium-dense | 67% | 3.6s | Fallback 1 — самая быстрая |
-| qwen-medium | 67% | 4.8s | Fallback 2 — гарантированно доступна (Beeline infra) |
-| claude-sonnet-4-5 | 67% | 6.4s | Не используется (хуже gpt-5.4, медленнее qwen) |
-| claude-opus-4-6 | 67% | 6.7s | Не используется |
-| gemini-2.5-pro | 67% | 12.8s | Не используется (самая медленная) |
-| qwen-medium-preview | 67% | 4.7s | **НЕ ИСПОЛЬЗУЕТСЯ** — limited context (~47.8K tokens) |
+| Модель | Точность | Скорость | Параллелизм | Роль |
+|--------|----------|----------|-------------|------|
+| **gpt-5.4** | **100%** | 5.5s | **3 слота** | Primary — единственная модель без false positives |
+| qwen-medium-dense | 67% | 3.6s | **6 слотов** | Fallback 1 — самая быстрая, 262K context |
+| qwen-medium | 67% | 4.8s | **3 слота** | Fallback 2 — гарантированно доступна (Beeline infra) |
+| claude-sonnet-4-5 | 67% | 6.4s | — | Не используется |
+| claude-opus-4-6 | 67% | 6.7s | — | Не используется |
+| gemini-2.5-pro | 67% | 12.8s | — | Не используется (самая медленная) |
+| qwen-medium-preview | 67% | 4.7s | — | **НЕ ИСПОЛЬЗУЕТСЯ** — limited context (~47.8K tokens) |
+
+**Параллелизм (batch mode):**
+- `gpt-5.4` — 3 параллельных запроса (primary, лучшая точность)
+- `qwen-medium-dense` — 6 параллельных запросов (fallback, самая быстрая)
+- `qwen-medium` — 3 параллельных запроса (fallback, гарантированный recovery)
+- Batch mode: `analyze_screenshots_batch()` с `asyncio.Semaphore(max_concurrent=3)` по умолчанию
+- CLI: `--batch <dir> --max-concurrent 3` для параллельной обработки каталога скриншотов
 
 - `gpt-5.4` может давать **Guardrails Exo** ошибки (intermittent).
 - Модели `qwen-medium*` — direct Beeline infrastructure, **не** проходят через Guardrails,
@@ -50,19 +57,29 @@ gpt-5.4 → qwen-medium-dense → qwen-medium
 ### CLI usage (для stage-агентов)
 
 ```bash
-# Backend must be running OR just use PYTHONPATH
+# Single screenshot
 cd backend
 PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m app.services.vision_analysis \
   --image ../docs/specs/screenshots/some-screenshot.png \
   --prompt "Опиши визуальные проблемы: наложение текста, обрезание, рендеринг иконок." \
   --output ../docs/specs/screenshots/ai-analysis-some-screenshot.md
+
+# Batch: 3 скриншота за раз (gpt-5.4 = 3 параллельных слота)
+cd backend
+PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m app.services.vision_analysis \
+  --batch ../docs/specs/screenshots/ \
+  --prompt "Опиши визуальные проблемы: наложение текста, обрезание, рендеринг иконок." \
+  --max-concurrent 3 \
+  --output-dir ../docs/specs/screenshots/
+# → создаёт ai-analysis-*.md для каждого .png в каталоге
 ```
 
 ### Python API (для backend integration)
 
 ```python
-from app.services.vision_analysis import analyze_screenshot
+from app.services.vision_analysis import analyze_screenshot, analyze_screenshots_batch
 
+# Single
 result = await analyze_screenshot(
     image_path="docs/specs/screenshots/some.png",
     prompt="Опиши визуальные проблемы.",
@@ -70,6 +87,17 @@ result = await analyze_screenshot(
 print(result["text"])  # LLM response
 print(result["model"])  # "gpt-5.4" (or fallback model)
 print(result["attempts"])  # per-model attempt log
+
+# Batch: 3+ screenshots in parallel (gpt-5.4 = 3 slots)
+results = await analyze_screenshots_batch(
+    images=[
+        {"path": "screenshots/page1.png", "prompt": "Проверь UI"},
+        {"path": "screenshots/page2.png", "prompt": "Проверь UI"},
+        {"path": "screenshots/page3.png", "prompt": "Проверь UI"},
+    ],
+    max_concurrent=3,  # respects gpt-5.4 3-slot limit
+)
+# → [{"text": "...", "model": "gpt-5.4", "success": True}, ...]
 ```
 
 ## Обязательные правила для stage-агентов

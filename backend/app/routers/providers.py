@@ -53,7 +53,7 @@ async def provider_status(provider_id: str):
             status_code=404,
             detail=(
                 f"Unknown provider: '{provider_id}'. Supported: "
-                "beeline, beeline_fast, qwen35, qwen36, ollama, yandexgpt, gigachat"
+                "qwen36, qwen36_fast, beeline, beeline_fast, qwen35, ollama, yandexgpt, gigachat"
             ),
         )
 

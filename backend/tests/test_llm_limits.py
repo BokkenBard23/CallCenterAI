@@ -235,20 +235,24 @@ async def test_fetch_and_log_all_limits_happy_path() -> None:
     def _factory(json_data: Dict[str, Any]) -> _FakeClient:
         return _FakeClient(_make_response(json_data=json_data))
 
-    # 4 configured models (glm-xlarge, glm-xlarge-fast, qwen-medium, qwen-medium-preview)
+    # 5 configured models (glm-xlarge, glm-xlarge-fast, qwen-medium,
+    #                       qwen-medium-dense, qwen-medium-dense-fast)
     responses = [
         _factory({"requestCapacity": {"limit": 2}}),  # glm-xlarge
         _factory({"requestCapacity": {"limit": 2}}),  # glm-xlarge-fast
         _factory({"requestCapacity": {"limit": 3}}),  # qwen-medium
-        _factory({"requestCapacity": {"limit": 3}}),  # qwen-medium-preview
+        _factory({"requestCapacity": {"limit": 6}}),  # qwen-medium-dense
+        _factory({"requestCapacity": {"limit": 6}}),  # qwen-medium-dense-fast
     ]
     with patch("httpx.AsyncClient", side_effect=responses):
         result = await fetch_and_log_all_limits(api_key="key")
     assert set(result.keys()) == {
-        "glm-xlarge", "glm-xlarge-fast", "qwen-medium", "qwen-medium-preview",
+        "glm-xlarge", "glm-xlarge-fast", "qwen-medium",
+        "qwen-medium-dense", "qwen-medium-dense-fast",
     }
     assert result["glm-xlarge"] == 2
     assert result["qwen-medium"] == 3
+    assert result["qwen-medium-dense"] == 6
 
 
 @pytest.mark.asyncio
@@ -264,7 +268,8 @@ async def test_fetch_and_log_all_limits_logs_warning_on_mismatch(
         _factory(5),  # glm-xlarge
         _factory(2),  # glm-xlarge-fast
         _factory(3),  # qwen-medium
-        _factory(3),  # qwen-medium-preview
+        _factory(6),  # qwen-medium-dense
+        _factory(6),  # qwen-medium-dense-fast
     ]
     with patch("httpx.AsyncClient", side_effect=responses):
         with caplog.at_level("WARNING", logger="app.services.llm_limits"):

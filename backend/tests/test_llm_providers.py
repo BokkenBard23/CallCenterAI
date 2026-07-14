@@ -1,12 +1,12 @@
 ﻿"""Tests for new LLM providers (Qwen, BeelineFast) and per-provider semaphores.
 
 Covers:
-  - BeelineFastProvider / Qwen35Provider / Qwen36Provider instantiation & defaults
+  - BeelineFastProvider / Qwen35Provider / Qwen36Provider / Qwen36FastProvider instantiation & defaults
   - Per-provider asyncio.Semaphore lazy creation inside an event loop
   - Shared GLM-family semaphore between BeelineProvider and BeelineFastProvider
   - Parallel execution respects semaphore limits (concurrency capped)
   - Circuit breaker isolation per provider id
-  - get_all_providers registers all 7 providers
+  - get_all_providers registers all 8 providers
   - Task → model preference routing hint
 """
 
@@ -26,6 +26,7 @@ from app.services.llm import (
     BeelineFastProvider,
     Qwen35Provider,
     Qwen36Provider,
+    Qwen36FastProvider,
     QwenProvider,
     _get_glm_semaphore,
     _TASK_MODEL_PREFERENCE,
@@ -65,7 +66,12 @@ class TestProviderInstantiation:
     def test_qwen36_provider_defaults(self) -> None:
         p = Qwen36Provider(api_key="key")
         assert p.get_name() == "qwen36"
-        assert p.get_default_model() == "qwen-medium-preview"
+        assert p.get_default_model() == "qwen-medium-dense"
+
+    def test_qwen36_fast_provider_defaults(self) -> None:
+        p = Qwen36FastProvider(api_key="key")
+        assert p.get_name() == "qwen36_fast"
+        assert p.get_default_model() == "qwen-medium-dense-fast"
 
     def test_qwen_provider_is_beeline_ai_subclass(self) -> None:
         """QwenProvider reuses BeelineAIProvider HTTP logic."""
@@ -184,7 +190,10 @@ class TestProviderRegistry:
 
     def test_all_seven_providers_registered(self) -> None:
         providers = get_all_providers()
-        expected = {"beeline", "beeline_fast", "qwen36", "qwen35", "ollama", "yandexgpt", "gigachat"}
+        expected = {
+            "qwen36", "qwen36_fast", "beeline", "beeline_fast",
+            "qwen35", "ollama", "yandexgpt", "gigachat",
+        }
         assert set(providers.keys()) == expected
 
     def test_get_provider_beeline_fast(self) -> None:
@@ -200,7 +209,13 @@ class TestProviderRegistry:
     def test_get_provider_qwen36(self) -> None:
         p = get_provider("qwen36")
         assert p is not None
-        assert p.get_default_model() == "qwen-medium-preview"
+        assert p.get_default_model() == "qwen-medium-dense"
+
+    def test_get_provider_qwen36_fast(self) -> None:
+        p = get_provider("qwen36_fast")
+        assert p is not None
+        assert p.get_name() == "qwen36_fast"
+        assert p.get_default_model() == "qwen-medium-dense-fast"
 
     def test_get_provider_unknown_returns_none(self) -> None:
         assert get_provider("nonexistent") is None
@@ -224,7 +239,7 @@ class TestCircuitBreakerIsolation:
         _circuit_breakers.clear()
 
     def test_each_provider_has_own_circuit_breaker(self) -> None:
-        for pid in ["beeline", "beeline_fast", "qwen35", "qwen36"]:
+        for pid in ["beeline", "beeline_fast", "qwen35", "qwen36", "qwen36_fast"]:
             cb = _get_circuit_breaker(pid)
             assert cb._provider_name == pid
 
@@ -253,22 +268,22 @@ class TestTaskModelPreference:
             assert len(_TASK_MODEL_PREFERENCE[step]) > 0
 
     def test_sentiment_prefers_fast(self) -> None:
-        """Short classifications prefer beeline_fast (glm-xlarge-fast)."""
-        assert _TASK_MODEL_PREFERENCE["sentiment"][0] == "beeline_fast"
+        """Short classifications prefer qwen36_fast (qwen-medium-dense-fast)."""
+        assert _TASK_MODEL_PREFERENCE["sentiment"][0] == "qwen36_fast"
 
-    def test_summary_prefers_glm(self) -> None:
-        """Long generations prefer beeline (glm-xlarge)."""
-        assert _TASK_MODEL_PREFERENCE["summary"][0] == "beeline"
+    def test_summary_prefers_qwen36(self) -> None:
+        """Long generations prefer qwen36 (qwen-medium-dense, PRIMARY)."""
+        assert _TASK_MODEL_PREFERENCE["summary"][0] == "qwen36"
 
     def test_resolve_preferred_provider_returns_first_available(self) -> None:
         _circuit_breakers.clear()
         result = _resolve_preferred_provider("sentiment")
-        assert result == "beeline_fast"
+        assert result == "qwen36_fast"
 
     def test_resolve_skips_open_circuit_breakers(self) -> None:
-        """If beeline_fast CB is open, fall back to next preference."""
+        """If qwen36_fast CB is open, fall back to next preference."""
         _circuit_breakers.clear()
-        cb = _get_circuit_breaker("beeline_fast")
+        cb = _get_circuit_breaker("qwen36_fast")
         for _ in range(5):
             cb.record_failure()
         assert cb.state == "open"
@@ -299,18 +314,21 @@ class TestProviderConfig:
         assert s.beeline_default_model == "glm-xlarge"
         assert s.beeline_fast_model == "glm-xlarge-fast"
         assert s.qwen35_model == "qwen-medium"
-        assert s.qwen36_model == "qwen-medium-preview"
+        assert s.qwen36_model == "qwen-medium-dense"
+        assert s.qwen36_fast_model == "qwen-medium-dense-fast"
 
     def test_concurrency_limits(self) -> None:
         s = Settings()
         assert s.glm_max_concurrent == 2
         assert s.qwen35_max_concurrent == 3
-        assert s.qwen36_max_concurrent == 3
+        assert s.qwen36_max_concurrent == 6
 
-    def test_total_parallel_budget_is_8(self) -> None:
+    def test_total_parallel_budget_is_17(self) -> None:
         s = Settings()
-        total = s.glm_max_concurrent + s.qwen35_max_concurrent + s.qwen36_max_concurrent
-        assert total == 8
+        # 2 (GLM, shared) + 3 (Qwen3.5) + 6 (qwen-medium-dense) + 6 (qwen-medium-dense-fast) = 17
+        # NOTE: qwen36 and qwen36_fast have INDEPENDENT 6-slot semaphores (per Beeline AI /me/limits).
+        total = s.glm_max_concurrent + s.qwen35_max_concurrent + s.qwen36_max_concurrent + s.qwen36_max_concurrent
+        assert total == 17
 
     def test_orchestrator_parallel_default_true(self) -> None:
         s = Settings()

@@ -837,14 +837,14 @@ class TestTopicEndpoint:
 
 
 class TestDefaultProvider:
-    """All 4 endpoints default to provider_id='beeline'."""
+    """All 4 analysis functions default to provider_id='qwen36' (since 2026-07-14)."""
 
     @pytest.mark.asyncio
     async def test_sentiment_default_provider(self) -> None:
         with patch("app.services.llm.get_provider") as mock_get:
             mock_get.return_value = _mock_provider(_valid_sentiment_json())
             result = await analyze_sentiment("dialogue text")
-            # Default provider_id is "beeline"
+            # Default provider_id is "qwen36" (Qwen3.6-27B Dense, PRIMARY)
             assert isinstance(result, SentimentAnalysisResult)
 
     @pytest.mark.asyncio

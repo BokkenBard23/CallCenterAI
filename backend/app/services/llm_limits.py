@@ -173,6 +173,7 @@ async def fetch_and_log_all_limits(
             settings.beeline_fast_model,
             settings.qwen35_model,
             settings.qwen36_model,
+            settings.qwen36_fast_model,
         )
 
     # Map model family code → configured fallback semaphore size.
@@ -181,6 +182,7 @@ async def fetch_and_log_all_limits(
         settings.beeline_fast_model: settings.glm_max_concurrent,
         settings.qwen35_model: settings.qwen35_max_concurrent,
         settings.qwen36_model: settings.qwen36_max_concurrent,
+        settings.qwen36_fast_model: settings.qwen36_max_concurrent,
     }
 
     results: Dict[str, int] = {}

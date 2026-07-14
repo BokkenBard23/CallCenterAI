@@ -524,6 +524,14 @@ Stage-agent **обязан** вернуть **`directive_ack`**; если бло
    ```
    - Fallback-цепочка уже встроена: `gpt-5.4 → qwen-medium-dense → qwen-medium` (см. `.opencode/rules/05-vision-gate.md`).
    - Файл анализа сохраняется в `docs/specs/screenshots/ai-analysis-*.md`.
+   - **Batch mode** (3+ скриншота за раз, gpt-5.4 = 3 параллельных слота):
+     ```bash
+     & "<venv>\Scripts\python.exe" -m app.services.vision_analysis `
+       --batch "../docs/specs/screenshots/" `
+       --prompt "<критерии>" `
+       --max-concurrent 3 `
+       --output-dir "../docs/specs/screenshots/"
+     ```
 3. **Текущая модель orchestrator-а (GLM-5.2) не поддерживает image input** — это не оправдание для пропуска vision-проверки. Vision выполняется внешним модулем `vision_analysis.py`, а не самой моделью сессии. Никогда не пиши «не могу проверить визуально, модель не поддерживает» вместо запуска CLI.
 4. **Запрещённые оправдания для пропуска:**
    - «CDP snapshot показал чистый DOM» — DOM ≠ рендеринг.

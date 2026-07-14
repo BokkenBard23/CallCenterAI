@@ -53,38 +53,37 @@ class Settings(BaseSettings):
     beeline_default_model: str = "glm-xlarge"  # GLM-5.2 family, serious tasks (summary, quality, dict_analysis, restructured)
     beeline_fast_model: str = "glm-xlarge-fast"  # GLM-5.2 fast, short classifications (shares GLM slots)
     # ── LLM: Qwen family via Beeline AI (OpenAI-compatible endpoint) ──
-    # ⚠️ IMPORTANT: Qwen 3.5 35B and Qwen 3.6 35B DEPRECATED as of 2026-07-27
-    # 
-    # Current stable codes (working until 2026-07-27):
-    #   qwen-medium            — Qwen3.5-35B (262K context, vision)
-    #   qwen-medium-preview    — Qwen3.6-35B (LIMITED: ~47.8K tokens, DO NOT USE for long context)
-    #   qwen-medium-fast       — Qwen3.5-35B fast
-    #   qwen-medium-preview-fast — Qwen3.6-35B fast
+    # Current primary codes (Qwen3.6-27B Dense family — PRIMARY since 2026-07-14):
+    #   qwen-medium-dense       — Qwen3.6-27B Dense (text-only, 262K context, 6 slots) ✅ PRIMARY
+    #   qwen-medium-dense-fast  — Qwen3.6-27B Dense fast (no reasoning, 6 slots) ✅ CLASSIFICATION
     #
-    # New model available NOW (recommended for future-proofing):
-    #   Qwen3.6-27B-textonly   — Dense text-only model (262K context)
-    #   coding-medium          — Coding-focused model
-    #   qwen-medium-dense      — Dense model with vision (262K context) ✅ RECOMMENDED
-    #   qwen-medium-dense-fast — Fast mode without reasoning
+    # Legacy fallback codes (Qwen3.5-35B — FALLBACK):
+    #   qwen-medium            — Qwen3.5-35B (262K context, 3 slots) — FALLBACK
+    #   qwen-medium-fast       — Qwen3.5-35B fast — FALLBACK
     #
-    # Legacy stable codes (universal-large, universal-medium) will automatically
-    # redirect to new model as of 2026-07-27.
+    # ⚠️ DEPRECATED (do NOT use — limited context ~47.8K, scheduled for removal 2026-07-27):
+    #   qwen-medium-preview / qwen-medium-preview-fast (Qwen3.6-35B preview)
+    #
+    # Auxiliary model:
+    #   coding-medium          — Coding-focused model (used by dict_ai structured output)
     #
     # Context window: 262K tokens (verified for qwen-medium, qwen-medium-dense)
-    # Parallelism: 3 slots per model
-    qwen35_model: str = "qwen-medium"             # Qwen3.5-35B (stable, 262K context)
-    qwen35_fast_model: str = "qwen-medium-fast"   # Qwen3.5-35B fast
-    qwen36_model: str = "qwen-medium-dense"       # Qwen3.6-27B (262K context, vision) ✅ RECOMMENDED
-    qwen36_fast_model: str = "qwen-medium-dense-fast" # Qwen3.6-27B fast
+    # Parallelism: 6 slots per Qwen3.6 Dense model (per Beeline AI /me/limits API)
+    qwen35_model: str = "qwen-medium"                  # Qwen3.5-35B (FALLBACK, 262K context)
+    qwen35_fast_model: str = "qwen-medium-fast"        # Qwen3.5-35B fast (FALLBACK)
+    qwen36_model: str = "qwen-medium-dense"            # Qwen3.6-27B Dense ✅ PRIMARY (6 slots)
+    qwen36_fast_model: str = "qwen-medium-dense-fast"   # Qwen3.6-27B Dense fast ✅ CLASSIFICATION (6 slots)
+    coding_model: str = "coding-medium"                # Coding-focused model (for dict_ai structured output)
 
     # ── Per-provider parallelism (asyncio.Semaphore sizes) ──
-    # Total max parallel = 2 (GLM) + 3 (Qwen3.5) + 3 (Qwen3.6) = 8
+    # Total max parallel = 2 (GLM, FALLBACK) + 3 (Qwen3.5, FALLBACK) +
+    #                       6 (qwen-medium-dense, PRIMARY) + 6 (qwen-medium-dense-fast, CLASSIFICATION) = 17
     # NOTE: actual concurrent limits are also exposed dynamically via
     # GET /api/v3/me/limits?model={publicModelName} (see app.services.llm_limits).
     # These values are fallback defaults used when the limits API is unreachable.
-    glm_max_concurrent: int = 2      # shared between glm-xlarge and glm-xlarge-fast
-    qwen35_max_concurrent: int = 3
-    qwen36_max_concurrent: int = 3
+    glm_max_concurrent: int = 2      # shared between glm-xlarge and glm-xlarge-fast (FALLBACK)
+    qwen35_max_concurrent: int = 3    # Qwen3.5 (FALLBACK)
+    qwen36_max_concurrent: int = 6    # qwen-medium-dense ✅ 6 parallel slots (was 3)
 
     # ── Embeddings: FRIDA (Beeline AI) ──
     frida_base_url: str = "https://api.ai.beeline.ru/api/v3"
