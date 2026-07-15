@@ -24,6 +24,7 @@ from app.services.llm import (
     BeelineAIProvider,
     BeelineProvider,
     BeelineFastProvider,
+    CodingProvider,
     Qwen35Provider,
     Qwen36Provider,
     Qwen36FastProvider,
@@ -72,6 +73,11 @@ class TestProviderInstantiation:
         p = Qwen36FastProvider(api_key="key")
         assert p.get_name() == "qwen36_fast"
         assert p.get_default_model() == "qwen-medium-dense-fast"
+
+    def test_coding_provider_defaults(self) -> None:
+        p = CodingProvider(api_key="key")
+        assert p.get_name() == "coding"
+        assert p.get_default_model() == "coding-medium"
 
     def test_qwen_provider_is_beeline_ai_subclass(self) -> None:
         """QwenProvider reuses BeelineAIProvider HTTP logic."""
@@ -191,7 +197,7 @@ class TestProviderRegistry:
     def test_all_seven_providers_registered(self) -> None:
         providers = get_all_providers()
         expected = {
-            "qwen36", "qwen36_fast", "beeline", "beeline_fast",
+            "qwen36", "qwen36_fast", "coding", "beeline", "beeline_fast",
             "qwen35", "ollama", "yandexgpt", "gigachat",
         }
         assert set(providers.keys()) == expected
@@ -217,6 +223,12 @@ class TestProviderRegistry:
         assert p.get_name() == "qwen36_fast"
         assert p.get_default_model() == "qwen-medium-dense-fast"
 
+    def test_get_provider_coding(self) -> None:
+        p = get_provider("coding")
+        assert p is not None
+        assert p.get_name() == "coding"
+        assert p.get_default_model() == "coding-medium"
+
     def test_get_provider_unknown_returns_none(self) -> None:
         assert get_provider("nonexistent") is None
 
@@ -239,7 +251,7 @@ class TestCircuitBreakerIsolation:
         _circuit_breakers.clear()
 
     def test_each_provider_has_own_circuit_breaker(self) -> None:
-        for pid in ["beeline", "beeline_fast", "qwen35", "qwen36", "qwen36_fast"]:
+        for pid in ["beeline", "beeline_fast", "qwen35", "qwen36", "qwen36_fast", "coding"]:
             cb = _get_circuit_breaker(pid)
             assert cb._provider_name == pid
 
@@ -323,12 +335,20 @@ class TestProviderConfig:
         assert s.qwen35_max_concurrent == 3
         assert s.qwen36_max_concurrent == 6
 
-    def test_total_parallel_budget_is_17(self) -> None:
+    def test_total_parallel_budget_is_23(self) -> None:
         s = Settings()
-        # 2 (GLM, shared) + 3 (Qwen3.5) + 6 (qwen-medium-dense) + 6 (qwen-medium-dense-fast) = 17
-        # NOTE: qwen36 and qwen36_fast have INDEPENDENT 6-slot semaphores (per Beeline AI /me/limits).
-        total = s.glm_max_concurrent + s.qwen35_max_concurrent + s.qwen36_max_concurrent + s.qwen36_max_concurrent
-        assert total == 17
+        # 2 (GLM, shared) + 3 (Qwen3.5) + 6 (qwen-medium-dense) +
+        # 6 (qwen-medium-dense-fast) + 6 (coding-medium) = 23
+        # NOTE: qwen36, qwen36_fast and coding have INDEPENDENT 6-slot semaphores
+        # (per Beeline AI /me/limits).
+        total = (
+            s.glm_max_concurrent
+            + s.qwen35_max_concurrent
+            + s.qwen36_max_concurrent
+            + s.qwen36_max_concurrent
+            + s.qwen36_max_concurrent  # coding reuses qwen36_max_concurrent
+        )
+        assert total == 23
 
     def test_orchestrator_parallel_default_true(self) -> None:
         s = Settings()

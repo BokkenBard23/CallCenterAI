@@ -236,6 +236,7 @@ def _get_fallback_order(primary_provider_id: str) -> List[str]:
         "beeline",
         "qwen35",
         "qwen36_fast",
+        "coding",
         "beeline_fast",
         "ollama",
         "yandexgpt",
@@ -255,6 +256,10 @@ def _get_fallback_order(primary_provider_id: str) -> List[str]:
 # System prompt — critical for dialogue restructuring
 # ═══════════════════════════════════════════════════════════
 
+# Legacy monolithic prompt (7 fields in one call). Kept for backward compat
+# with OllamaProvider / other providers that fall back to _SYSTEM_PROMPT when
+# no explicit system_prompt is passed. analyze_dialogue() now uses the split
+# prompts below for parallel execution.
 _SYSTEM_PROMPT = """Ты — аналитик колл-центра. Проанализируй следующий диалог между клиентом и сотрудником.
 
 ВАЖНО — ИГНОРИРУЙ артефакты сплошного текста:
@@ -270,6 +275,48 @@ _SYSTEM_PROMPT = """Ты — аналитик колл-центра. Проан�
   "resolution": "resolved/unresolved/escalated/partial",
   "summary": "Краткое резюме диалога в 2-3 предложениях",
   "restructured_dialogue": "Восстановленный диалог в виде чередующихся коротких реплик:\\nКлиент: ...\\nСотрудник: ...\\nКлиент: ...\\n..."
+}
+
+Ответь ТОЛЬКО валидным JSON, без markdown-обёрток."""
+
+# ── Split prompts (Task 2: parallel restructured_dialogue) ──
+# analyze_dialogue() now runs TWO parallel LLM calls:
+#   1. _DIALOGUE_ANALYSIS_SYSTEM_PROMPT — 6 analysis fields (fast, short output)
+#   2. _RESTRUCTURE_SYSTEM_PROMPT — restructured_dialogue only (slow, long output)
+# This avoids the expensive dialogue rewrite blocking all other analysis results.
+
+_DIALOGUE_ANALYSIS_SYSTEM_PROMPT = """\
+Ты — аналитик колл-центра. Проанализируй следующий диалог между клиентом и сотрудником.
+
+ВАЖНО — ИГНОРИРУЙ артефакты сплошного текста:
+Группировка большими блоками является артефактом записи, а не реальной структурой диалога.
+Восстанови истинный порядок коротких реплик клиента и сотрудника — они чередуются.
+
+Ответь в формате JSON со следующей структурой:
+{
+  "topic": "Краткая тема диалога",
+  "result": "Общий исход (решено/не решено/эскалация/частично)",
+  "key_points": ["ключевой момент 1", "ключевой момент 2", ...],
+  "client_sentiment": "positive/neutral/negative/mixed",
+  "resolution": "resolved/unresolved/escalated/partial",
+  "summary": "Краткое резюме диалога в 2-3 предложениях"
+}
+
+Ответь ТОЛЬКО валидным JSON, без markdown-обёрток."""
+
+_RESTRUCTURE_SYSTEM_PROMPT = """\
+Ты — аналитик колл-центра. Перед тобой диалог между клиентом и сотрудником,
+записанный сплошным текстом.
+
+ВАЖНО — ИГНОРИРУЙ артефакты сплошного текста:
+Группировка большими блоками является артефактом записи, а не реальной структурой диалога.
+Восстанови истинный порядок коротких реплик клиента и сотрудника — они чередуются.
+
+Восстанови диалог в виде чередующихся коротких реплик.
+
+Ответь в формате JSON:
+{
+  "restructured_dialogue": "Клиент: ...\\nСотрудник: ...\\nКлиент: ...\\n..."
 }
 
 Ответь ТОЛЬКО валидным JSON, без markdown-обёрток."""
@@ -836,6 +883,32 @@ class Qwen36FastProvider(QwenProvider):
         )
 
 
+class CodingProvider(QwenProvider):
+    """Coding-focused model via Beeline AI (OpenAI-compatible endpoint).
+
+    Uses the ``coding-medium`` family code (settings.coding_model). This model
+    is optimised for structured output and code/JSON generation, making it the
+    PRIMARY provider for :mod:`app.services.dictionary_ai` (structured dict
+    analysis + phrase suggestions).
+
+    Has its OWN 6-slot semaphore (independent of Qwen36Provider / Qwen36FastProvider),
+    reusing ``settings.qwen36_max_concurrent`` as a reasonable default since
+    coding-medium is a separate Beeline AI model with its own capacity pool.
+
+    Integrated as Task 4 (2026-07-15): ``config.py`` had ``coding_model`` defined
+    but unused. Now wired into the fallback chain and used as default by
+    ``dictionary_ai._call_llm_with_fallback``.
+    """
+
+    def __init__(self, api_key: str, default_model: str = "coding-medium") -> None:
+        super().__init__(
+            api_key=api_key,
+            default_model=default_model,
+            max_concurrent=settings.qwen36_max_concurrent,
+            provider_id="coding",
+        )
+
+
 # ═══════════════════════════════════════════════════════════
 # LLM response validation (IP-3.1)
 # ═══════════════════════════════════════════════════════════
@@ -1166,8 +1239,8 @@ def get_provider(provider_id: str) -> Optional[LLMProvider]:
 
     Args:
         provider_id: Provider identifier
-            (qwen36, qwen36_fast, beeline, beeline_fast, qwen35, ollama,
-            yandexgpt, gigachat).
+            (qwen36, qwen36_fast, coding, beeline, beeline_fast, qwen35,
+            ollama, yandexgpt, gigachat).
 
     Returns:
         LLMProvider instance, or None if unknown provider.
@@ -1216,6 +1289,11 @@ def get_provider(provider_id: str) -> Optional[LLMProvider]:
             api_key=settings.beeline_api_key,
             default_model=settings.qwen36_fast_model,
         )
+    elif provider_id == "coding":
+        provider = CodingProvider(
+            api_key=settings.beeline_api_key,
+            default_model=settings.coding_model,
+        )
     else:
         return None
 
@@ -1229,6 +1307,7 @@ def get_all_providers() -> Dict[str, LLMProvider]:
     for pid in (
         "qwen36",
         "qwen36_fast",
+        "coding",
         "beeline",
         "qwen35",
         "beeline_fast",
@@ -1249,8 +1328,16 @@ async def analyze_dialogue(
 ) -> LLMResult:
     """Analyze a dialogue with fallback chain across LLM providers.
 
-    Sends the dialogue text with the critical restructuring prompt,
-    parses the JSON response, and returns a structured LLMResult.
+    Runs **two parallel LLM calls** (Task 2, 2026-07-15):
+      1. **Analysis call** — 6 fields (topic, result, key_points,
+         client_sentiment, resolution, summary) using
+         :data:`_DIALOGUE_ANALYSIS_SYSTEM_PROMPT`. Fast, short output.
+      2. **Restructure call** — ``restructured_dialogue`` only using
+         :data:`_RESTRUCTURE_SYSTEM_PROMPT`. Slow, long output but
+         runs concurrently with the analysis call so it does NOT block.
+
+    Both calls use the same fallback chain (circuit breaker + provider
+    ordering). Results are merged into a single :class:`LLMResult`.
 
     Default provider is ``qwen36`` (Qwen3.6-27B Dense, 6 slots, 262K context)
     as of 2026-07-14 — was ``ollama`` previously.
@@ -1258,7 +1345,7 @@ async def analyze_dialogue(
     Fallback order (canonical):
       1. Try requested provider (default qwen36)
       2. Try other available providers (qwen36 → beeline → qwen35 →
-         qwen36_fast → beeline_fast → ollama → yandexgpt → gigachat)
+         qwen36_fast → coding → beeline_fast → ollama → yandexgpt → gigachat)
       3. If all fail, return LLMResult with empty summary and provider="none"
 
     Circuit breaker:
@@ -1275,18 +1362,91 @@ async def analyze_dialogue(
         LLMResult with structured analysis. If all providers fail,
         returns a degraded result with empty summary and provider="none".
     """
-    # Build ordered list of providers to try
-    provider_order = _get_fallback_order(provider_id)
+    # Run analysis (6 fields) and restructure (1 field) in parallel.
+    analysis_result, restructure_result = await asyncio.gather(
+        _run_dialogue_analysis_call(dialogue_text, provider_id, model),
+        _run_restructure_call(dialogue_text, provider_id, model),
+    )
 
+    # Merge results. Prefer analysis provider/model for the merged LLMResult.
+    # If analysis succeeded, use its 6 fields + restructure's restructured_dialogue.
+    # If only restructure succeeded, use defaults for 6 fields + restructured_dialogue.
+    if analysis_result is not None:
+        validated, analysis_pid, analysis_model, analysis_raw = analysis_result
+        restructured = (
+            restructure_result[0] if restructure_result is not None else ""
+        )
+        return LLMResult(
+            summary=validated.summary,
+            restructured_dialogue=restructured,
+            topic=validated.topic,
+            result=validated.result,
+            key_points=validated.key_points,
+            client_sentiment=validated.client_sentiment,
+            resolution=validated.resolution,
+            provider=analysis_pid,
+            model=analysis_model,
+            raw_response=analysis_raw if settings.debug else None,
+        )
+
+    # Analysis failed — check if restructure succeeded
+    if restructure_result is not None:
+        restructured, restructure_pid, restructure_model, restructure_raw = restructure_result
+        logger.warning(
+            "analyze_dialogue: analysis call failed but restructure succeeded "
+            "(provider=%s) — returning restructured_dialogue with default analysis fields",
+            restructure_pid,
+        )
+        return LLMResult(
+            summary="",
+            restructured_dialogue=restructured,
+            topic="",
+            result="",
+            key_points=[],
+            client_sentiment=ClientSentiment.neutral.value,
+            resolution=Resolution.unresolved.value,
+            provider=restructure_pid,
+            model=restructure_model,
+            raw_response=restructure_raw if settings.debug else None,
+        )
+
+    # Both calls failed — return degraded result
+    logger.error(
+        "All LLM providers failed for both analysis and restructure calls."
+    )
+    return LLMResult(
+        summary="",
+        restructured_dialogue="",
+        topic="",
+        result="",
+        key_points=[],
+        client_sentiment=ClientSentiment.neutral.value,
+        resolution=Resolution.unresolved.value,
+        provider="none",
+        model="",
+        raw_response=None,
+    )
+
+
+async def _run_dialogue_analysis_call(
+    dialogue_text: str,
+    provider_id: str,
+    model: Optional[str],
+) -> Optional[tuple]:
+    """Run the 6-field analysis LLM call with fallback chain.
+
+    Returns ``(ValidatedLLMResult, provider_id_used, model_used, raw_response)``
+    on success, or ``None`` if all providers fail.
+    """
+    provider_order = _get_fallback_order(provider_id)
     last_error: Optional[Exception] = None
 
     for pid in provider_order:
         cb = _get_circuit_breaker(pid)
 
-        # Check circuit breaker
         if not cb.can_execute():
             logger.info(
-                "Circuit breaker [%s] is %s — skipping",
+                "Circuit breaker [%s] is %s — skipping (analysis call)",
                 pid,
                 cb.state,
             )
@@ -1302,39 +1462,27 @@ async def analyze_dialogue(
                 pid,
             )
 
-        # Try to generate
         try:
-            raw_response = await provider.generate(dialogue_text, model=model)
+            raw_response = await provider.generate(
+                dialogue_text,
+                model=model,
+                system_prompt=_DIALOGUE_ANALYSIS_SYSTEM_PROMPT,
+            )
 
-            # Validate and parse using LLMResultHandler
             handler = LLMResultHandler()
             validated = handler.validate_and_parse(raw_response)
 
-            # Record success in circuit breaker
             cb.record_success()
 
-            return LLMResult(
-                summary=validated.summary,
-                restructured_dialogue=validated.restructured_dialogue,
-                topic=validated.topic,
-                result=validated.result,
-                key_points=validated.key_points,
-                client_sentiment=validated.client_sentiment,
-                resolution=validated.resolution,
-                provider=pid,
-                model=model or provider.get_default_model(),
-                raw_response=raw_response if settings.debug else None,
-            )
+            return (validated, pid, model or provider.get_default_model(), raw_response)
 
         except (ConnectionError, TimeoutError) as exc:
-            # Only record circuit breaker failure for transient errors,
-            # not for "not configured" errors (which are permanent)
             error_msg = str(exc).lower()
             if "not configured" not in error_msg:
                 cb.record_failure()
             last_error = exc
             logger.warning(
-                "Provider %s failed: %s — trying next provider",
+                "Provider %s failed (analysis call): %s — trying next provider",
                 pid,
                 exc,
             )
@@ -1343,29 +1491,102 @@ async def analyze_dialogue(
             cb.record_failure()
             last_error = exc
             logger.error(
-                "Provider %s unexpected error: %s",
+                "Provider %s unexpected error (analysis call): %s",
                 pid,
                 exc,
             )
             continue
 
-    # All providers failed — return degraded result
     logger.error(
-        "All LLM providers failed. Last error: %s",
+        "All LLM providers failed for analysis call. Last error: %s",
         last_error,
     )
-    return LLMResult(
-        summary="",
-        restructured_dialogue="",
-        topic="",
-        result="",
-        key_points=[],
-        client_sentiment=ClientSentiment.neutral.value,
-        resolution=Resolution.unresolved.value,
-        provider="none",
-        model="",
-        raw_response=None,
+    return None
+
+
+async def _run_restructure_call(
+    dialogue_text: str,
+    provider_id: str,
+    model: Optional[str],
+) -> Optional[tuple]:
+    """Run the restructured_dialogue LLM call with fallback chain.
+
+    Returns ``(restructured_str, provider_id_used, model_used, raw_response)``
+    on success, or ``None`` if all providers fail.
+    """
+    provider_order = _get_fallback_order(provider_id)
+    last_error: Optional[Exception] = None
+
+    for pid in provider_order:
+        cb = _get_circuit_breaker(pid)
+
+        if not cb.can_execute():
+            logger.info(
+                "Circuit breaker [%s] is %s — skipping (restructure call)",
+                pid,
+                cb.state,
+            )
+            continue
+
+        provider = get_provider(pid)
+        if provider is None:
+            continue
+
+        if pid in _GUARDRAILS_PROVIDERS:
+            logger.warning(
+                "Using %s which goes through Guardrails — may fail (last-resort fallback)",
+                pid,
+            )
+
+        try:
+            raw_response = await provider.generate(
+                dialogue_text,
+                model=model,
+                system_prompt=_RESTRUCTURE_SYSTEM_PROMPT,
+            )
+
+            # Parse restructured_dialogue from the JSON response.
+            # LLMResultHandler extracts all fields; we only need
+            # restructured_dialogue. This also tolerates responses that
+            # include all 7 fields (backward compat with mock tests).
+            handler = LLMResultHandler()
+            validated = handler.validate_and_parse(raw_response)
+
+            cb.record_success()
+
+            return (
+                validated.restructured_dialogue,
+                pid,
+                model or provider.get_default_model(),
+                raw_response,
+            )
+
+        except (ConnectionError, TimeoutError) as exc:
+            error_msg = str(exc).lower()
+            if "not configured" not in error_msg:
+                cb.record_failure()
+            last_error = exc
+            logger.warning(
+                "Provider %s failed (restructure call): %s — trying next provider",
+                pid,
+                exc,
+            )
+            continue
+        except Exception as exc:
+            cb.record_failure()
+            last_error = exc
+            logger.error(
+                "Provider %s unexpected error (restructure call): %s",
+                pid,
+                exc,
+            )
+            continue
+
+    logger.error(
+        "All LLM providers failed for restructure call. Last error: %s",
+        last_error,
     )
+    return None
 
 
 def _parse_llm_response(raw: str) -> Dict[str, Any]:
@@ -2449,8 +2670,8 @@ _TASK_MODEL_PREFERENCE: Dict[str, List[str]] = {
     "restructured": ["qwen36", "beeline"],
     "quality": ["qwen36", "beeline"],
     "resolution_sentiment": ["qwen36", "beeline"],
-    "dict_analysis": ["qwen36", "beeline"],
-    "dict_suggest": ["qwen36", "beeline"],
+    "dict_analysis": ["coding", "qwen36", "beeline"],   # coding-medium → dense → glm-xlarge
+    "dict_suggest": ["coding", "qwen36", "beeline"],    # coding-medium → dense → glm-xlarge
     # Medium tasks → qwen-medium-dense → qwen-medium (Qwen3.5) → glm-xlarge
     "topic": ["qwen36", "qwen35", "beeline"],
     "conflict": ["qwen36", "qwen35", "beeline"],

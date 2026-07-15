@@ -226,35 +226,40 @@ class TestFallbackOrder:
     """Test provider fallback order."""
 
     _ALL = {
-        "qwen36", "qwen36_fast", "beeline", "beeline_fast",
+        "qwen36", "qwen36_fast", "coding", "beeline", "beeline_fast",
         "qwen35", "ollama", "yandexgpt", "gigachat",
     }
 
     def test_ollama_primary(self) -> None:
         order = _get_fallback_order("ollama")
         assert order[0] == "ollama"
-        assert len(order) == 8
+        assert len(order) == 9
         assert set(order) == self._ALL
 
     def test_beeline_primary(self) -> None:
         order = _get_fallback_order("beeline")
         assert order[0] == "beeline"
-        assert len(order) == 8
+        assert len(order) == 9
 
     def test_qwen36_primary(self) -> None:
         order = _get_fallback_order("qwen36")
         assert order[0] == "qwen36"
-        assert len(order) == 8
+        assert len(order) == 9
 
     def test_qwen36_fast_primary(self) -> None:
         order = _get_fallback_order("qwen36_fast")
         assert order[0] == "qwen36_fast"
-        assert len(order) == 8
+        assert len(order) == 9
+
+    def test_coding_primary(self) -> None:
+        order = _get_fallback_order("coding")
+        assert order[0] == "coding"
+        assert len(order) == 9
 
     def test_beeline_fast_primary(self) -> None:
         order = _get_fallback_order("beeline_fast")
         assert order[0] == "beeline_fast"
-        assert len(order) == 8
+        assert len(order) == 9
 
     def test_unknown_primary(self) -> None:
         order = _get_fallback_order("unknown")
@@ -264,13 +269,13 @@ class TestFallbackOrder:
 
     def test_all_providers_included(self) -> None:
         for primary in [
-            "qwen36", "qwen36_fast", "beeline", "beeline_fast",
+            "qwen36", "qwen36_fast", "coding", "beeline", "beeline_fast",
             "qwen35", "ollama", "yandexgpt", "gigachat",
         ]:
             order = _get_fallback_order(primary)
-            assert len(order) == 8
+            assert len(order) == 9
             assert order[0] == primary
-            assert len(set(order)) == 8  # No duplicates
+            assert len(set(order)) == 9  # No duplicates
 
     def test_guardrails_providers_last(self) -> None:
         """YandexGPT and GigaChat (Guardrails, unreliable) are last in the chain."""

@@ -10,18 +10,31 @@
  */
 
 /* H9 FIX (vision-audit): the vision audit found that the "LLM-аудит" tab
-   label was being truncated to "LLM-ауд…" inside the Sidesheet. Force the
-   DS Tabs header to:
-     1. allow horizontal scroll if labels don't fit (instead of clipping);
-     2. give each Tab a min-width that comfortably fits its label;
-     3. disable text truncation / ellipsis inside tab labels. */
-.mining-panel :where([class*="Tabs"], [class*="tabs"]) {
+   label was being truncated to "LLM-ауд…" inside the Sidesheet.
+   m-3 FIX (open-tasks-cleanup): replaced fragile wildcard attribute
+   selectors (:where([class*="Tabs"], [class*="tabs"])) with specific DS
+   class names confirmed from the DS source (Tabs.css / Tab.css):
+     .dsb_tabs            — root Tabs container
+     .dsb_tabs__header    — header (DS sets overflow:hidden, needs override)
+     .dsb_tabs__header-tabs — tab list (flex row of tab buttons)
+     .dsb_tab-new         — individual tab button
+     .dsb_tab-new__label  — tab label text span
+   This is robust against DS internal renames as long as the public
+   component API stays stable. */
+.mining-panel .dsb_tabs {
+  max-width: 100%;
+}
+
+.mining-panel .dsb_tabs__header,
+.mining-panel .dsb_tabs__header-tabs {
   overflow-x: auto !important;
   overflow-y: hidden !important;
   max-width: 100%;
 }
 
-.mining-panel :where([class*="Tab"], [class*="tab"]):not([class*="TabPanel"]):not([class*="tabpanel"]) {
+/* Prevent tab button truncation: each tab keeps its natural width and
+   does not shrink, so the header scrolls horizontally instead of clipping. */
+.mining-panel .dsb_tab-new {
   white-space: nowrap;
   flex-shrink: 0;
   min-width: max-content;
@@ -29,7 +42,8 @@
 
 /* Some DS versions render the tab label inside an inner span/text node
    that inherits `text-overflow: ellipsis` from a parent. Reset that. */
-.mining-panel :where([class*="Tab"], [class*="tab"]) :where(span, div, p) {
+.mining-panel .dsb_tab-new__label,
+.mining-panel .dsb_tab-new__content {
   text-overflow: clip !important;
   overflow: visible !important;
   white-space: nowrap !important;

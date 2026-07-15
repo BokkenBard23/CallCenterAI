@@ -1008,8 +1008,19 @@ class TestBackwardCompatibility:
 
     @pytest.mark.asyncio
     async def test_analyze_dialogue_no_system_prompt_override(self) -> None:
-        """analyze_dialogue uses default system prompt (no override)."""
-        from app.services.llm import analyze_dialogue
+        """analyze_dialogue passes split system prompts (Task 2: parallel split).
+
+        Since Task 2 (2026-07-15), analyze_dialogue runs TWO parallel LLM
+        calls: one for the 6 analysis fields (using _DIALOGUE_ANALYSIS_SYSTEM_PROMPT)
+        and one for restructured_dialogue (using _RESTRUCTURE_SYSTEM_PROMPT).
+        Both calls pass an explicit system_prompt — neither uses the default
+        _SYSTEM_PROMPT anymore.
+        """
+        from app.services.llm import (
+            _DIALOGUE_ANALYSIS_SYSTEM_PROMPT,
+            _RESTRUCTURE_SYSTEM_PROMPT,
+            analyze_dialogue,
+        )
 
         valid_response = json.dumps({
             "topic": "test",
@@ -1025,7 +1036,11 @@ class TestBackwardCompatibility:
 
             await analyze_dialogue("dialogue text", provider_id="ollama")
 
-            # analyze_dialogue doesn't pass system_prompt
-            call_kwargs = mock_provider.generate.call_args
-            # Should NOT have system_prompt kwarg (uses default)
-            assert "system_prompt" not in call_kwargs.kwargs or call_kwargs.kwargs.get("system_prompt") is None
+            # Both calls should pass explicit system_prompt (not None / default)
+            assert mock_provider.generate.call_count == 2
+            used_prompts = [
+                call.kwargs.get("system_prompt")
+                for call in mock_provider.generate.call_args_list
+            ]
+            assert _DIALOGUE_ANALYSIS_SYSTEM_PROMPT in used_prompts
+            assert _RESTRUCTURE_SYSTEM_PROMPT in used_prompts

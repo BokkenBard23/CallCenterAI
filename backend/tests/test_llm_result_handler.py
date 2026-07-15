@@ -547,8 +547,12 @@ class TestAnalyzeDialogueContract:
         """
         result = await analyze_dialogue("text", provider_id="nonexistent")
         assert isinstance(result, LLMResult)
-        # Result may be from a working provider (e.g. beeline) or degraded
-        assert result.provider in ("ollama", "yandexgpt", "gigachat", "beeline", "none")
+        # Result may be from a working provider (e.g. qwen36, beeline, ollama)
+        # or degraded (provider='none') if no providers are configured.
+        assert result.provider in (
+            "qwen36", "qwen36_fast", "coding", "beeline",
+            "ollama", "yandexgpt", "gigachat", "none",
+        )
 
     @pytest.mark.asyncio
     async def test_analyze_dialogue_broken_json(self) -> None:

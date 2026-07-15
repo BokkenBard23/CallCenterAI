@@ -1,0 +1,761 @@
+﻿{
+    "$schema":  "https://opencode.ai/config.json",
+    "default_agent":  "pipeline-orchestrator",
+    "agent":  {
+                  "pipeline-orchestrator":  {
+                                                "description":  "╨Х╨┤╨╕╨╜╨░╤П ╤В╨╛╤З╨║╨░ ╨▓╤Е╨╛╨┤╨░ OpenCode Pipeline: ╨░╨▓╤В╨╛╨╝╨░╤В╨╕╤З╨╡╤Б╨║╨╕ ╨╖╨░╨┐╤Г╤Б╨║╨░╨╡╤В stage agents, ╨┐╤А╨╛╨▓╨╡╤А╤П╨╡╤В ╨░╤А╤В╨╡╤Д╨░╨║╤В╤Л ╨╕ ╨▓╨╡╨┤╤С╤В pipeline-state ╨▒╨╡╨╖ ╤А╤Г╤З╨╜╨╛╨│╨╛ ╨┐╨╡╤А╨╡╨║╨╗╤О╤З╨╡╨╜╨╕╤П ╤А╨╡╨╢╨╕╨╝╨╛╨▓.",
+                                                "mode":  "primary",
+                                                "permission":  {
+                                                                   "read":  "allow",
+                                                                   "glob":  "allow",
+                                                                   "grep":  "allow",
+                                                                   "list":  "allow",
+                                                                   "edit":  "allow",
+                                                                   "bash":  {
+                                                                                "*":  "allow",
+                                                                                "git status*":  "allow",
+                                                                                "npx --yes @beeline/yellowbe-opencode-pipeline@latest check-update*":  "allow",
+                                                                                "npx --yes @beeline/yellowbe-opencode-pipeline@latest safe-update*":  "allow",
+                                                                                "*yellowbe-opencode-pipeline.mjs check-update*":  "allow",
+                                                                                "*yellowbe-opencode-pipeline.mjs safe-update*":  "allow",
+                                                                                "npm run*":  "allow",
+                                                                                "npm install*":  "allow",
+                                                                                "npx tsc*":  "allow",
+                                                                                "npx vitest*":  "allow",
+                                                                                "git push*":  "deny",
+                                                                                "rm *":  "deny"
+                                                                            },
+                                                                   "task":  {
+                                                                                "*":  "deny",
+                                                                                "request-analyst":  "allow",
+                                                                                "request-analyst-product":  "allow",
+                                                                                "request-analyst-marketing":  "allow",
+                                                                                "project-setup":  "allow",
+                                                                                "designer":  "allow",
+                                                                                "ui-coder":  "allow",
+                                                                                "ui-tester":  "allow",
+                                                                                "coder":  "allow",
+                                                                                "reviewer":  "allow",
+                                                                                "tester":  "allow",
+                                                                                "mcp-researcher":  "allow"
+                                                                            },
+                                                                   "webfetch":  "allow",
+                                                                   "websearch":  "allow",
+                                                                   "chrome-devtools-mcp_*":  "allow",
+                                                                   "chrome_devtools_mcp_*":  "allow"
+                                                               }
+                                            },
+                  "request-analyst":  {
+                                          "description":  "╨Ы╤С╨│╨║╨╕╨╣ ╨▓╤Е╨╛╨┤╨╜╨╛╨╣ ╤А╨╡╨╢╨╕╨╝: ╨▓╤Л╨▒╨╕╤А╨░╨╡╤В ╤В╤А╨╡╨║ `product` ╨╕╨╗╨╕ `marketing`, ╨╛╨▒╨╜╨╛╨▓╨╗╤П╨╡╤В pipeline-state ╨╕ ╨╝╨░╤А╤И╤А╤Г╤В╨╕╨╖╨╕╤А╤Г╨╡╤В ╨╖╨░╨┤╨░╤З╤Г ╨┤╨░╨╗╤М╤И╨╡.",
+                                          "mode":  "subagent",
+                                          "permission":  {
+                                                             "read":  "allow",
+                                                             "glob":  "allow",
+                                                             "grep":  "allow",
+                                                             "list":  "allow",
+                                                             "edit":  "allow",
+                                                             "bash":  {
+                                                                          "*":  "deny"
+                                                                      },
+                                                             "task":  {
+                                                                          "*":  "deny"
+                                                                      },
+                                                             "webfetch":  "allow",
+                                                             "websearch":  "allow"
+                                                         }
+                                      },
+                  "request-analyst-product":  {
+                                                  "description":  "Product/app ╨░╨╜╨░╨╗╨╕╤В╨╕╨║╨░: hub `spec.md` + `spec-chunk-{N}.md` ╨┤╨╗╤П app/process-heavy ╨╖╨░╨┤╨░╤З.",
+                                                  "mode":  "subagent",
+                                                  "permission":  {
+                                                                     "read":  "allow",
+                                                                     "glob":  "allow",
+                                                                     "grep":  "allow",
+                                                                     "list":  "allow",
+                                                                     "edit":  "allow",
+                                                                     "bash":  {
+                                                                                  "*":  "deny"
+                                                                              },
+                                                                     "task":  {
+                                                                                  "*":  "deny"
+                                                                              },
+                                                                     "webfetch":  "allow",
+                                                                     "websearch":  "allow"
+                                                                 }
+                                              },
+                  "request-analyst-marketing":  {
+                                                    "description":  "Marketing/landing ╨░╨╜╨░╨╗╨╕╤В╨╕╨║╨░: hub `spec.md` + `spec-chunk-{N}.md`, messaging ╨╕ content matrix.",
+                                                    "mode":  "subagent",
+                                                    "permission":  {
+                                                                       "read":  "allow",
+                                                                       "glob":  "allow",
+                                                                       "grep":  "allow",
+                                                                       "list":  "allow",
+                                                                       "edit":  "allow",
+                                                                       "bash":  {
+                                                                                    "*":  "deny"
+                                                                                },
+                                                                       "task":  {
+                                                                                    "*":  "deny"
+                                                                                },
+                                                                       "webfetch":  "allow",
+                                                                       "websearch":  "allow"
+                                                                   }
+                                                },
+                  "project-setup":  {
+                                        "description":  "╨Ш╨╜╨╕╤Ж╨╕╨░╨╗╨╕╨╖╨░╤Ж╨╕╤П ╨╕╨╗╨╕ ╨▓╨░╨╗╨╕╨┤╨░╤Ж╨╕╤П ╨┐╤А╨╛╨╡╨║╤В╨░ ╨╕ ╨┐╨╛╨┤╨│╨╛╤В╨╛╨▓╨║╨░ ╨╛╨║╤А╤Г╨╢╨╡╨╜╨╕╤П ╨┐╨╡╤А╨╡╨┤ ╤Б╨╗╨╡╨┤╤Г╤О╤Й╨╕╨╝ ╤Н╤В╨░╨┐╨╛╨╝ ╨┐╨░╨╣╨┐╨╗╨░╨╣╨╜╨░.",
+                                        "mode":  "subagent",
+                                        "permission":  {
+                                                           "read":  "allow",
+                                                           "glob":  "allow",
+                                                           "grep":  "allow",
+                                                           "list":  "allow",
+                                                           "edit":  "allow",
+                                                           "bash":  {
+                                                                        "*":  "allow",
+                                                                        "git status*":  "allow",
+                                                                        "npm run*":  "allow",
+                                                                        "npm install*":  "allow",
+                                                                        "npx tsc*":  "allow",
+                                                                        "npx vitest*":  "allow",
+                                                                        "git push*":  "deny",
+                                                                        "rm *":  "deny"
+                                                                    },
+                                                           "task":  {
+                                                                        "*":  "deny"
+                                                                    },
+                                                           "webfetch":  "allow",
+                                                           "websearch":  "allow"
+                                                       }
+                                    },
+                  "designer":  {
+                                   "description":  "UI/UX ╨╜╨░ Beeline DS: hub `design-spec.md` + `design-spec-chunk-{N}.md`, scratchpad hub/chunk, `user-scenarios.json`, DQG.",
+                                   "mode":  "subagent",
+                                   "permission":  {
+                                                      "read":  "allow",
+                                                      "glob":  "allow",
+                                                      "grep":  "allow",
+                                                      "list":  "allow",
+                                                      "edit":  "allow",
+                                                      "bash":  {
+                                                                   "*":  "deny"
+                                                               },
+                                                      "task":  {
+                                                                   "*":  "deny",
+                                                                   "mcp-researcher":  "allow"
+                                                               },
+                                                      "webfetch":  "allow",
+                                                      "websearch":  "allow",
+                                                      "prod-design-system-http_*":  "allow",
+                                                      "prod_design_system_http_*":  "allow",
+                                                      "local-design-system-http_*":  "allow",
+                                                      "local_design_system_http_*":  "allow",
+                                                      "chrome-devtools-mcp_*":  "allow",
+                                                      "chrome_devtools_mcp_*":  "allow",
+                                                      "figma_*":  "allow",
+                                                      "storybook_*":  "allow",
+                                                      "sentry_*":  "allow",
+                                                      "ux-mcp-server_*":  "allow",
+                                                      "vuda_*":  "allow",
+                                                      "tactual_*":  "allow",
+                                                      "ui-ux-pro-mcp_*":  "allow",
+                                                      "playwright-mcp_*":  "allow",
+                                                      "playwright_mcp_*":  "allow",
+                                                      "local-faiss-mcp_*":  "allow",
+                                                      "local_faiss_mcp_*":  "allow",
+                                                      "openapi-schema-explorer_*":  "allow",
+                                                      "openapi_schema_explorer_*":  "allow",
+                                                      "brave-search_*":  "allow"
+                                                  }
+                               },
+                  "ui-coder":  {
+                                   "description":  "React/TS ╨╜╨░ Beeline DS: hub+chunk spec/design, ╨║╨╛╨┤ ╨╕ ╤В╨╡╤Б╤В╤Л, `implementation-chunk-{N}.md`, build ╨╕ devtools loop.",
+                                   "mode":  "subagent",
+                                   "permission":  {
+                                                      "read":  "allow",
+                                                      "glob":  "allow",
+                                                      "grep":  "allow",
+                                                      "list":  "allow",
+                                                      "edit":  "allow",
+                                                      "bash":  {
+                                                                   "*":  "allow",
+                                                                   "git status*":  "allow",
+                                                                   "npm run*":  "allow",
+                                                                   "npm install*":  "allow",
+                                                                   "npx tsc*":  "allow",
+                                                                   "npx vitest*":  "allow",
+                                                                   "git push*":  "deny",
+                                                                   "rm *":  "deny"
+                                                               },
+                                                      "task":  {
+                                                                   "*":  "deny",
+                                                                   "mcp-researcher":  "allow"
+                                                               },
+                                                      "webfetch":  "allow",
+                                                      "websearch":  "allow",
+                                                      "prod-design-system-http_*":  "allow",
+                                                      "prod_design_system_http_*":  "allow",
+                                                      "local-design-system-http_*":  "allow",
+                                                      "local_design_system_http_*":  "allow",
+                                                      "chrome-devtools-mcp_*":  "allow",
+                                                      "chrome_devtools_mcp_*":  "allow",
+                                                      "figma_*":  "allow",
+                                                      "storybook_*":  "allow",
+                                                      "sentry_*":  "allow",
+                                                      "playwright-mcp_*":  "allow",
+                                                      "playwright_mcp_*":  "allow",
+                                                      "ux-mcp-server_*":  "allow",
+                                                      "vuda_*":  "allow",
+                                                      "tactual_*":  "allow",
+                                                      "ui-ux-pro-mcp_*":  "allow",
+                                                      "local-faiss-mcp_*":  "allow",
+                                                      "local_faiss_mcp_*":  "allow",
+                                                      "openapi-schema-explorer_*":  "allow",
+                                                      "openapi_schema_explorer_*":  "allow",
+                                                      "brave-search_*":  "allow"
+                                                  }
+                               },
+                  "ui-tester":  {
+                                    "description":  "╨Т╨╕╨╖╤Г╨░╨╗╤М╨╜╨░╤П ╨╕ a11y-╨┐╤А╨╛╨▓╨╡╤А╨║╨░ UI ╤З╨╡╤А╨╡╨╖ browser/devtools ╨╜╨░ 375 / 768 / 1440.",
+                                    "mode":  "subagent",
+                                    "permission":  {
+                                                       "read":  "allow",
+                                                       "glob":  "allow",
+                                                       "grep":  "allow",
+                                                       "list":  "allow",
+                                                       "edit":  "allow",
+                                                       "bash":  {
+                                                                    "*":  "allow",
+                                                                    "git status*":  "allow",
+                                                                    "npm run*":  "allow",
+                                                                    "npm install*":  "allow",
+                                                                    "npx tsc*":  "allow",
+                                                                    "npx vitest*":  "allow",
+                                                                    "git push*":  "deny",
+                                                                    "rm *":  "deny"
+                                                                },
+                                                       "task":  {
+                                                                    "*":  "deny"
+                                                                },
+                                                       "webfetch":  "allow",
+                                                       "websearch":  "allow",
+                                                       "chrome-devtools-mcp_*":  "allow",
+                                                       "chrome_devtools_mcp_*":  "allow",
+                                                       "figma_*":  "allow",
+                                                       "storybook_*":  "allow",
+                                                       "sentry_*":  "allow",
+                                                       "playwright-mcp_*":  "allow",
+                                                       "playwright_mcp_*":  "allow",
+                                                       "ux-mcp-server_*":  "allow",
+                                                       "vuda_*":  "allow",
+                                                       "tactual_*":  "allow",
+                                                       "ui-ux-pro-mcp_*":  "allow",
+                                                       "local-faiss-mcp_*":  "allow",
+                                                       "local_faiss_mcp_*":  "allow",
+                                                       "openapi-schema-explorer_*":  "allow",
+                                                       "openapi_schema_explorer_*":  "allow",
+                                                       "brave-search_*":  "allow"
+                                                   }
+                                },
+                  "coder":  {
+                                "description":  "╨С╨╕╨╖╨╜╨╡╤Б-╨╗╨╛╨│╨╕╨║╨░: API, hooks, stores, ╨▓╨░╨╗╨╕╨┤╨░╤Ж╨╕╤П, ╨╖╨░╨╝╨╡╨╜╨░ ╤В╨╕╨┐╨╕╨╖╨╕╤А╨╛╨▓╨░╨╜╨╜╤Л╤Е UI-╨╖╨░╨│╨╗╤Г╤И╨╡╨║.",
+                                "mode":  "subagent",
+                                "permission":  {
+                                                   "read":  "allow",
+                                                   "glob":  "allow",
+                                                   "grep":  "allow",
+                                                   "list":  "allow",
+                                                   "edit":  "allow",
+                                                   "bash":  {
+                                                                "*":  "allow",
+                                                                "git status*":  "allow",
+                                                                "npm run*":  "allow",
+                                                                "npm install*":  "allow",
+                                                                "npx tsc*":  "allow",
+                                                                "npx vitest*":  "allow",
+                                                                "git push*":  "deny",
+                                                                "rm *":  "deny"
+                                                            },
+                                                   "task":  {
+                                                                "*":  "deny"
+                                                            },
+                                                   "webfetch":  "allow",
+                                                   "websearch":  "allow",
+                                                   "prod-design-system-http_*":  "allow",
+                                                   "prod_design_system_http_*":  "allow",
+                                                   "local-design-system-http_*":  "allow",
+                                                   "local_design_system_http_*":  "allow",
+                                                   "microsoft-learn_*":  "allow",
+                                                   "context7_*":  "allow",
+                                                   "figma_*":  "allow",
+                                                   "storybook_*":  "allow",
+                                                   "postgres_*":  "allow",
+                                                   "sentry_*":  "allow",
+                                                   "openapi-schema-explorer_*":  "allow",
+                                                   "openapi_schema_explorer_*":  "allow",
+                                                   "brave-search_*":  "allow",
+                                                   "ux-mcp-server_*":  "allow"
+                                               }
+                            },
+                  "reviewer":  {
+                                   "description":  "╨Ъ╨╛╨┤-╤А╨╡╨▓╤М╤О: spec compliance, DS compliance, build/type/lint checks, tests ╨╕ rework routing.",
+                                   "mode":  "subagent",
+                                   "permission":  {
+                                                      "read":  "allow",
+                                                      "glob":  "allow",
+                                                      "grep":  "allow",
+                                                      "list":  "allow",
+                                                      "edit":  "allow",
+                                                      "bash":  {
+                                                                   "*":  "allow",
+                                                                   "git status*":  "allow",
+                                                                   "npm run*":  "allow",
+                                                                   "npm install*":  "allow",
+                                                                   "npx tsc*":  "allow",
+                                                                   "npx vitest*":  "allow",
+                                                                   "git push*":  "deny",
+                                                                   "rm *":  "deny"
+                                                               },
+                                                      "task":  {
+                                                                   "*":  "deny",
+                                                                   "mcp-researcher":  "allow"
+                                                               },
+                                                      "webfetch":  "allow",
+                                                      "websearch":  "allow",
+                                                      "prod-design-system-http_*":  "allow",
+                                                      "prod_design_system_http_*":  "allow",
+                                                      "local-design-system-http_*":  "allow",
+                                                      "local_design_system_http_*":  "allow",
+                                                      "microsoft-learn_*":  "allow",
+                                                      "context7_*":  "allow",
+                                                      "figma_*":  "allow",
+                                                      "storybook_*":  "allow",
+                                                      "postgres_*":  "allow",
+                                                      "sentry_*":  "allow",
+                                                      "openapi-schema-explorer_*":  "allow",
+                                                      "openapi_schema_explorer_*":  "allow",
+                                                      "brave-search_*":  "allow",
+                                                      "ux-mcp-server_*":  "allow"
+                                                  }
+                               },
+                  "mcp-researcher":  {
+                                         "description":  "╨б╨▒╨╛╤А ╨┤╨░╨╜╨╜╤Л╤Е ╨╕╨╖ Excel ╨╕ Microsoft Learn MCP, ╨║╨╛╨╜╤Б╨╛╨╗╨╕╨┤╨░╤Ж╨╕╤П ╨╕ ╨╖╨░╨┐╨╕╤Б╤М research-╨░╤А╤В╨╡╤Д╨░╨║╤В╨░.",
+                                         "mode":  "subagent",
+                                         "permission":  {
+                                                            "read":  "allow",
+                                                            "glob":  "allow",
+                                                            "grep":  "allow",
+                                                            "list":  "allow",
+                                                            "edit":  "allow",
+                                                            "bash":  {
+                                                                         "*":  "deny"
+                                                                     },
+                                                            "task":  {
+                                                                         "*":  "deny"
+                                                                     },
+                                                            "webfetch":  "allow",
+                                                            "websearch":  "allow",
+                                                            "prod-design-system-http_*":  "allow",
+                                                            "prod_design_system_http_*":  "allow",
+                                                            "local-design-system-http_*":  "allow",
+                                                            "local_design_system_http_*":  "allow",
+                                                            "excel_*":  "allow",
+                                                            "microsoft-learn_*":  "allow",
+                                                            "context7_*":  "allow",
+                                                            "pixso-remote-mcp_*":  "allow",
+                                                            "rag-knowledge_*":  "allow",
+                                                            "gitlab-mcp_*":  "allow",
+                                                            "atlassian-mcp_*":  "allow",
+                                                            "fetch_*":  "allow",
+                                                            "figma_*":  "allow",
+                                                            "storybook_*":  "allow",
+                                                            "postgres_*":  "allow",
+                                                            "slack_*":  "allow",
+                                                            "sentry_*":  "allow",
+                                                            "playwright-mcp_*":  "allow",
+                                                            "playwright_mcp_*":  "allow",
+                                                            "local-faiss-mcp_*":  "allow",
+                                                            "local_faiss_mcp_*":  "allow",
+                                                            "openapi-schema-explorer_*":  "allow",
+                                                            "openapi_schema_explorer_*":  "allow",
+                                                            "brave-search_*":  "allow",
+                                                            "ux-mcp-server_*":  "allow",
+                                                            "vuda_*":  "allow",
+                                                            "tactual_*":  "allow",
+                                                            "ui-ux-pro-mcp_*":  "allow"
+                                                        }
+                                     },
+                  "tester":  {
+                                 "description":  "╨д╨╕╨╜╨░╨╗╤М╨╜╤Л╨╣ QA: test plan, unit/component/e2e tests, coverage ╨╕ bugs report.",
+                                 "mode":  "subagent",
+                                 "permission":  {
+                                                    "read":  "allow",
+                                                    "glob":  "allow",
+                                                    "grep":  "allow",
+                                                    "list":  "allow",
+                                                    "edit":  "allow",
+                                                    "bash":  {
+                                                                 "*":  "allow",
+                                                                 "git status*":  "allow",
+                                                                 "npm run*":  "allow",
+                                                                 "npm install*":  "allow",
+                                                                 "npx tsc*":  "allow",
+                                                                 "npx vitest*":  "allow",
+                                                                 "git push*":  "deny",
+                                                                 "rm *":  "deny"
+                                                             },
+                                                    "task":  {
+                                                                 "*":  "deny"
+                                                             },
+                                                    "webfetch":  "allow",
+                                                    "websearch":  "allow",
+                                                    "chrome-devtools-mcp_*":  "allow",
+                                                    "chrome_devtools_mcp_*":  "allow",
+                                                    "microsoft-learn_*":  "allow",
+                                                    "context7_*":  "allow",
+                                                    "figma_*":  "allow",
+                                                    "storybook_*":  "allow",
+                                                    "sentry_*":  "allow",
+                                                    "playwright-mcp_*":  "allow",
+                                                    "playwright_mcp_*":  "allow",
+                                                    "ux-mcp-server_*":  "allow",
+                                                    "vuda_*":  "allow",
+                                                    "tactual_*":  "allow",
+                                                    "ui-ux-pro-mcp_*":  "allow",
+                                                    "local-faiss-mcp_*":  "allow",
+                                                    "local_faiss_mcp_*":  "allow",
+                                                    "openapi-schema-explorer_*":  "allow",
+                                                    "openapi_schema_explorer_*":  "allow",
+                                                    "brave-search_*":  "allow"
+                                                }
+                             }
+              },
+    "mcp":  {
+                "pixso-remote-mcp":  {
+                                         "type":  "remote",
+                                         "url":  "https://example.com/api/mcp/mcp",
+                                         "enabled":  true,
+                                         "headers":  {
+                                                         "Token":  "{env:PIXSO_TOKEN}"
+                                                     },
+                                         "description":  "Pixso Remote MCP тАФ ╨┤╨╕╨╖╨░╨╣╨╜-╤Б╨╕╤Б╤В╨╡╨╝╨░ Pixso (╤В╨╛╨║╨╡╨╜ ╨╕╨╖ ╨┐╨╡╤А╨╡╨╝╨╡╨╜╨╜╨╛╨╣ ╨╛╨║╤А╤Г╨╢╨╡╨╜╨╕╤П)"
+                                     },
+                "rag-knowledge":  {
+                                      "type":  "remote",
+                                      "url":  "http://127.0.0.1:8765/mcp",
+                                      "enabled":  true,
+                                      "description":  "Beeline AI RAG Knowledge Base тАФ ╨┐╨╛╨╕╤Б╨║ ╨┐╨╛ ╨▒╨░╨╖╨╡ ╨╖╨╜╨░╨╜╨╕╨╣ (permanent-api-crq411646), LLM glm-5.1. HTTP ╤Б╨╡╤А╨▓╨╡╤А ╨╜╨░ ╨┐╨╛╤А╤В╤Г 8765."
+                                  },
+                "prod-design-system-http":  {
+                                                "type":  "remote",
+                                                "url":  "https://example.com/sse",
+                                                "enabled":  true
+                                            },
+                "chrome-devtools-mcp":  {
+                                            "type":  "local",
+                                            "command":  [
+                                                            "npx",
+                                                            "-y",
+                                                            "chrome-devtools-mcp@latest"
+                                                        ],
+                                            "enabled":  true,
+                                            "description":  "Chrome DevTools MCP тАФ browser automation, screenshots, performance, network, debugging. Official Google package. Requires Chrome stable with --remote-debugging-port=9222."
+                                        },
+                "context7":  {
+                                 "type":  "remote",
+                                 "url":  "https://mcp.context7.com/mcp",
+                                 "enabled":  true,
+                                 "oauth":  false,
+                                 "headers":  {
+                                                 "CONTEXT7_API_KEY":  "{env:CONTEXT7_API_KEY}"
+                                             },
+                                 "description":  "Context7 MCP тАФ ╨┤╨╛╨║╤Г╨╝╨╡╨╜╤В╨░╤Ж╨╕╤П ╨╕ ╨║╨╛╨┤ ╨╕╨╖ Context7. API key ╨╕╨╖ env CONTEXT7_API_KEY. ╨С╨╡╨╖ ╨║╨╗╤О╤З╨░ ╤А╨░╨▒╨╛╤В╨░╨╡╤В ╤Б rate-limit, ╤Б ╨║╨╗╤О╤З╨╛╨╝ тАФ ╨▓╤Л╤И╨╡ ╨╗╨╕╨╝╨╕╤В╤Л."
+                             },
+                "fetch":  {
+                              "type":  "local",
+                              "command":  [
+                                              "npx",
+                                              "--yes",
+                                              "@modelcontextprotocol/server-fetch"
+                                          ],
+                              "enabled":  false,
+                              "description":  "Fetch MCP тАФ HTTP requests, web scraping. DISABLED: @modelcontextprotocol/server-fetch ╨╜╨╡ ╤Б╤Г╤Й╨╡╤Б╤В╨▓╤Г╨╡╤В ╨╜╨░ npm (404). ╨Р╨╗╤М╤В╨╡╤А╨╜╨░╤В╨╕╨▓╤Л: ╨╕╤Б╨┐╨╛╨╗╤М╨╖╨╛╨▓╨░╤В╤М built-in webfetch ╨╕╨╗╨╕ ╨╜╨░╨┐╨╕╤Б╨░╤В╤М ╨║╨░╤Б╤В╨╛╨╝╨╜╤Л╨╣ ╤Б╨║╤А╨╕╨┐╤В. ╨Э╨Х ╨╖╨░╨╝╨╡╨╜╤П╤В╤М ╨╜╨░ mcp-server-fetch (0.0.2) тАФ ╤Н╤В╨╛ ╨┐╨╛╨┤╨╛╨╖╤А╨╕╤В╨╡╨╗╤М╨╜╤Л╨╣ canary-╨┐╨░╨║╨╡╤В."
+                          },
+                "git":  {
+                            "type":  "local",
+                            "command":  [
+                                            "uvx",
+                                            "mcp-server-git",
+                                            "--repository",
+                                            "."
+                                        ],
+                            "enabled":  true,
+                            "description":  "Git MCP тАФ git history, blame, diff. ╨Ш╤Б╨┐╨╛╨╗╤М╨╖╤Г╨╡╤В uvx (uv 0.11.24+). uv ╤Г╤Б╤В╨░╨╜╨╛╨▓╨╗╨╡╨╜ ╨╕ ╨┐╨╛╨┤╤В╨▓╨╡╤А╨╢╨┤╤С╨╜."
+                        },
+                "memory":  {
+                               "type":  "local",
+                               "command":  [
+                                               "cmd",
+                                               "/c",
+                                               "node_modules\\.bin\\mcp-server-memory.cmd"
+                                           ],
+                               "environment":  { },
+                               "enabled":  true,
+                               "description":  "Memory MCP тАФ persistent key-value memory across sessions"
+                           },
+                "sequential-thinking":  {
+                                            "type":  "local",
+                                            "command":  [
+                                                            "node",
+                                                            "node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js"
+                                                        ],
+                                            "environment":  { },
+                                            "enabled":  true,
+                                            "description":  "Sequential Thinking MCP тАФ structured step-by-step reasoning. Official @modelcontextprotocol package v2025.12.18."
+                                        },
+                "filesystem":  {
+                                   "type":  "local",
+                                   "command":  [
+                                                   "npx",
+                                                   "-y",
+                                                   "mcp-server-filesystem",
+                                                   "."
+                                               ],
+                                   "environment":  { },
+                                   "enabled":  true,
+                                   "description":  "Filesystem MCP тАФ read/write files"
+                               },
+                "microsoft-learn":  {
+                                        "type":  "remote",
+                                        "url":  "https://learn.microsoft.com/api/mcp",
+                                        "enabled":  true,
+                                        "environment":  { },
+                                        "description":  "Microsoft Learn MCP тАФ ╨╛╤Д╨╕╤Ж╨╕╨░╨╗╤М╨╜╨░╤П ╨┤╨╛╨║╤Г╨╝╨╡╨╜╤В╨░╤Ж╨╕╤П. NOTE: McAfee ╨╝╨╛╨╢╨╡╤В ╨▒╨╗╨╛╨║╨╕╤А╨╛╨▓╨░╤В╤М тАФ ╨╡╤Б╨╗╨╕ 407, ╨╜╤Г╨╢╨╡╨╜ VPN"
+                                    },
+                "gitlab-mcp":  {
+                                   "type":  "remote",
+                                   "url":  "https://mcp.example.com/mcp",
+                                   "enabled":  true,
+                                   "description":  "GitLab MCP тАФ MR, issues, pipelines, ╨║╨╛╨┤-╤Б╨╡╤А╤З (╤В╨╛╨║╨╡╨╜ ╨╕╨╖ ╨┐╨╡╤А╨╡╨╝╨╡╨╜╨╜╨╛╨╣ ╨╛╨║╤А╤Г╨╢╨╡╨╜╨╕╤П GITLAB_TOKEN)",
+                                   "headers":  {
+                                                   "Authorization":  "Bearer {env:GITLAB_TOKEN}"
+                                               }
+                               },
+                "atlassian-mcp":  {
+                                      "type":  "remote",
+                                      "url":  "https://mcp.example.com/mcp",
+                                      "enabled":  true,
+                                      "description":  "Atlassian MCP тАФ Jira + Confluence (╤В╨╛╨║╨╡╨╜ ╨╕╨╖ ╨┐╨╡╤А╨╡╨╝╨╡╨╜╨╜╨╛╨╣ ╨╛╨║╤А╤Г╨╢╨╡╨╜╨╕╤П ATLASSIAN_TOKEN)",
+                                      "headers":  {
+                                                      "Authorization":  "Bearer {env:ATLASSIAN_TOKEN}"
+                                                  }
+                                  },
+                "figma":  {
+                              "type":  "local",
+                              "command":  [
+                                              "cmd",
+                                              "/c",
+                                              "node_modules\\.bin\\figma-developer-mcp.cmd",
+                                              "--figma-api-key={env:FIGMA_API_KEY}",
+                                              "--stdio"
+                                          ],
+                              "environment":  {
+                                                  "FRAMELINK_TELEMETRY":  "off"
+                                              },
+                              "enabled":  true,
+                              "description":  "Figma MCP тАФ ╤З╤В╨╡╨╜╨╕╨╡ Figma ╤Д╨░╨╣╨╗╨╛╨▓, ╤Б╨╗╨╛╤С╨▓, ╨║╨╛╨╝╨┐╨╛╨╜╨╡╨╜╤В╨╛╨▓, design tokens (╨║╨╗╤О╤З ╨╕╨╖ ╨┐╨╡╤А╨╡╨╝╨╡╨╜╨╜╨╛╨╣ ╨╛╨║╤А╤Г╨╢╨╡╨╜╨╕╤П FIGMA_API_KEY)"
+                          },
+                "storybook":  {
+                                  "type":  "local",
+                                  "command":  [
+                                                  "npx",
+                                                  "-y",
+                                                  "storybook-mcp@latest"
+                                              ],
+                                  "environment":  {
+                                                      "STORYBOOK_URL":  "http://localhost:6006/index.json"
+                                                  },
+                                  "enabled":  false,
+                                  "description":  "Storybook MCP тАФ ╨╜╤Г╨╢╨╡╨╜ ╨╖╨░╨┐╤Г╤Й╨╡╨╜╨╜╤Л╨╣ Storybook ╨╜╨░ localhost:6006"
+                              },
+                "postgres":  {
+                                 "type":  "local",
+                                 "command":  [
+                                                 "npx",
+                                                 "-y",
+                                                 "@modelcontextprotocol/server-postgres",
+                                                 "postgresql://{env:POSTGRES_USER}:{env:POSTGRES_PASS}@localhost:5432/mydb"
+                                             ],
+                                 "environment":  { },
+                                 "enabled":  true,
+                                 "description":  "PostgreSQL MCP тАФ read-only SQL queries, schema inspection (credentials ╨╕╨╖ POSTGRES_USER ╨╕ POSTGRES_PASS)"
+                             },
+                "slack":  {
+                              "type":  "local",
+                              "command":  [
+                                              "npx",
+                                              "-y",
+                                              "@modelcontextprotocol/server-slack"
+                                          ],
+                              "environment":  {
+                                                  "SLACK_BOT_TOKEN":  "{env:SLACK_BOT_TOKEN}",
+                                                  "SLACK_TEAM_ID":  "{env:SLACK_TEAM_ID}"
+                                              },
+                              "enabled":  false,
+                              "description":  "Slack MCP тАФ read/send messages, search channels. DISABLED: ╨┐╨░╨║╨╡╤В @modelcontextprotocol/server-slack ╤Г╤Б╤В╨░╤А╨╡╨╗ (deprecated). ╨в╨╛╨║╨╡╨╜ ╨╕╨╖ ╨┐╨╡╤А╨╡╨╝╨╡╨╜╨╜╨╛╨╣ ╨╛╨║╤А╤Г╨╢╨╡╨╜╨╕╤П SLACK_BOT_TOKEN."
+                          },
+                "sentry":  {
+                               "type":  "local",
+                               "command":  [
+                                               "npx",
+                                               "-y",
+                                               "@sentry/mcp-server"
+                                           ],
+                               "environment":  {
+                                                   "SENTRY_AUTH_TOKEN":  "{env:SENTRY_AUTH_TOKEN}"
+                                               },
+                               "enabled":  false,
+                               "description":  "Sentry MCP тАФ ╨Ю╨д╨Ш╨ж╨Ш╨Р╨Ы╨м╨Э╨л╨Щ @sentry/mcp-server (v0.36.0). Error tracking, issues, releases. ╨Ч╨Р╨Ь╨Х╨Э╨Р: ╨▒╤Л╨╗ @supernova123/sentry-mcp-server (third-party). ╨в╨╛╨║╨╡╨╜ ╨╕╨╖ env SENTRY_AUTH_TOKEN."
+                           },
+                "brave-search":  {
+                                     "type":  "local",
+                                     "command":  [
+                                                     "npx",
+                                                     "-y",
+                                                     "@brave/brave-search-mcp-server",
+                                                     "--transport",
+                                                     "stdio"
+                                                 ],
+                                     "environment":  {
+                                                         "BRAVE_API_KEY":  "{env:BRAVE_API_KEY}"
+                                                     },
+                                     "enabled":  true,
+                                     "description":  "╨Ю╤Д╨╕╤Ж╨╕╨░╨╗╤М╨╜╤Л╨╣ Brave Search MCP v2 тАФ 8 ╨╕╨╜╤Б╤В╤А╤Г╨╝╨╡╨╜╤В╨╛╨▓: web/local/video/image/news search, summarizer, LLM context. ╨Ч╨░╨╝╨╡╨╜╤П╨╡╤В ╤Г╤Б╤В╨░╤А╨╡╨▓╤И╨╕╨╣ fork. ╨С╨╡╤Б╨┐╨╗╨░╤В╨╜╨╛ 2000 ╨╖╨░╨┐╤А╨╛╤Б╨╛╨▓/╨╝╨╡╤Б. ╨Я╨╛╨╗╤Г╤З╨╕ ╨║╨╗╤О╤З: https://brave.com/search/api/"
+                                 },
+                "playwright-mcp":  {
+                                       "type":  "local",
+                                       "command":  [
+                                                       "npx",
+                                                       "-y",
+                                                       "@playwright/mcp"
+                                                   ],
+                                       "environment":  { },
+                                       "enabled":  true,
+                                       "description":  "Official Microsoft Playwright MCP тАФ 143 device presets, DOM interaction, screenshots, JS execution, test codegen. E2E ╤В╨╡╤Б╤В╨╕╤А╨╛╨▓╨░╨╜╨╕╨╡ 5 ╤Б╤В╤А╨░╨╜╨╕╤Ж CCAI. ╨Р╨▓╤В╨╛╨╝╨░╤В╨╕╤З╨╡╤Б╨║╨╕ ╤Г╤Б╤В╨░╨╜╨░╨▓╨╗╨╕╨▓╨░╨╡╤В ╨▒╤А╨░╤Г╨╖╨╡╤А╤Л."
+                                   },
+                "local-faiss-mcp":  {
+                                        "type":  "local",
+                                        "command":  [
+                                                        "uvx",
+                                                        "local-faiss-mcp",
+                                                        "--stdio"
+                                                    ],
+                                        "enabled":  true,
+                                        "description":  "Local FAISS vector store as MCP server тАФ semantic search, document ingestion. Python-╨┐╨░╨║╨╡╤В, ╨╕╤Б╨┐╨╛╨╗╤М╨╖╤Г╨╡╤В uvx (uv 0.11.24+)."
+                                    },
+                "openapi-schema-explorer":  {
+                                                "type":  "local",
+                                                "command":  [
+                                                                "npx",
+                                                                "-y",
+                                                                "mcp-openapi-schema-explorer@latest",
+                                                                "http://localhost:8000/openapi.json",
+                                                                "--output-format",
+                                                                "json"
+                                                            ],
+                                                "environment":  { },
+                                                "enabled":  true,
+                                                "description":  "MCP OpenAPI Schema Explorer тАФ ╨┐╨╛╨┤╨║╨╗╤О╤З╤С╨╜ ╨║ FastAPI backend (auto-generated spec). ╨Ф╨╗╤П ╤А╨░╨▒╨╛╤В╤Л ╨╜╤Г╨╢╨╡╨╜ ╨╖╨░╨┐╤Г╤Й╨╡╨╜╨╜╤Л╨╣ backend: cd backend \u0026\u0026 uvicorn app.main:app --port 8000. ╨Х╤Б╨╗╨╕ backend ╨╜╨╡ ╨╖╨░╨┐╤Г╤Й╨╡╨╜ тАФ MCP ╨▒╤Г╨┤╨╡╤В unavailable, ╨╜╨╛ OpenCode ╨╜╨╡ ╤Г╨┐╨░╨┤╤С╤В."
+                                            },
+                "ux-mcp-server":  {
+                                      "type":  "local",
+                                      "command":  [
+                                                      "cmd",
+                                                      "/c",
+                                                      "node_modules\\.bin\\ux-mcp-server.cmd"
+                                                  ],
+                                      "environment":  { },
+                                      "enabled":  true,
+                                      "description":  "UX MCP Server тАФ 28 UX resources (WCAG, Nielsen, UI patterns, a11y, dark patterns) + 23 analysis tools"
+                                  },
+                "vuda":  {
+                             "type":  "local",
+                             "command":  [
+                                             "cmd",
+                                             "/c",
+                                             "node_modules\\.bin\\vuda.cmd"
+                                         ],
+                             "environment":  { },
+                             "enabled":  true,
+                             "description":  "VUDA тАФ Visual UI Debug Agent: 30 Playwright tools for screenshots, visual diff, workflow testing, Core Web Vitals"
+                         },
+                "tactual":  {
+                                "type":  "local",
+                                "command":  [
+                                                "npx",
+                                                "--yes",
+                                                "tactual-mcp"
+                                            ],
+                                "enabled":  true,
+                                "description":  "Tactual тАФ Screen-reader navigation cost analyzer: 5-dim scoring, NVDA/JAWS/VoiceOver/TalkBack profiles. ╨Т╨║╨╗╤О╤З╤С╨╜: ╨╕╤Б╨┐╤А╨░╨▓╨╗╨╡╨╜╨░ ╨║╨╛╨╝╨░╨╜╨┤╨░ (npx --yes tactual-mcp) ╨┤╨╗╤П ╨╛╨▒╤Е╨╛╨┤╨░ ╨╗╨╛╨║╨░╨╗╤М╨╜╨╛╨╣ JSON Schema ╨╛╤И╨╕╨▒╨║╨╕."
+                            },
+                "ui-ux-pro-mcp":  {
+                                      "type":  "local",
+                                      "command":  [
+                                                      "npx",
+                                                      "-y",
+                                                      "ui-ux-pro-mcp",
+                                                      "--stdio"
+                                                  ],
+                                      "environment":  { },
+                                      "enabled":  true,
+                                      "description":  "UI/UX Pro MCP тАФ 1920+ curated documents: styles, palettes, typography, icons, charts, UX guidelines, 12 frameworks"
+                                  }
+            },
+    "permission":  {
+                       "read":  "allow",
+                       "glob":  "allow",
+                       "grep":  "allow",
+                       "list":  "allow",
+                       "edit":  "allow",
+                       "bash":  {
+                                    "*":  "allow",
+                                    "git push*":  "deny"
+                                },
+                       "task":  {
+                                    "*":  "allow"
+                                },
+                       "prod-design-system-http_*":  "allow",
+                       "prod_design_system_http_*":  "allow",
+                       "local-design-system-http_*":  "allow",
+                       "local_design_system_http_*":  "allow",
+                       "chrome-devtools-mcp_*":  "allow",
+                       "chrome_devtools_mcp_*":  "allow",
+                       "context7_*":  "allow",
+                       "fetch_*":  "allow",
+                       "git_*":  "allow",
+                       "memory_*":  "allow",
+                       "sequential-thinking_*":  "allow",
+                       "filesystem_*":  "allow",
+                       "microsoft-learn_*":  "allow",
+                       "gitlab-mcp_*":  "allow",
+                       "atlassian-mcp_*":  "allow",
+                       "figma_*":  "allow",
+                       "storybook_*":  "allow",
+                       "postgres_*":  "allow",
+                       "slack_*":  "allow",
+                       "sentry_*":  "allow",
+                       "playwright-mcp_*":  "allow",
+                       "playwright_mcp_*":  "allow",
+                       "local-faiss-mcp_*":  "allow",
+                       "local_faiss_mcp_*":  "allow",
+                       "openapi-schema-explorer_*":  "allow",
+                       "openapi_schema_explorer_*":  "allow",
+                       "brave-search_*":  "allow",
+                       "ux-mcp-server_*":  "allow",
+                       "vuda_*":  "allow",
+                       "tactual_*":  "allow",
+                       "ui-ux-pro-mcp_*":  "allow"
+                   },
+    "model":  "qwen-medium-dense"
+}

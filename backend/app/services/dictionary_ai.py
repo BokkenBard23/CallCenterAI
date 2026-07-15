@@ -133,7 +133,7 @@ async def _call_llm_with_fallback(
 
     Returns the raw response string, or ``None`` if all providers fail.
     """
-    primary = provider_id or "beeline"
+    primary = provider_id or "coding"
     order = _get_fallback_order(primary)
 
     last_error: Optional[Exception] = None
@@ -187,7 +187,8 @@ async def analyze_dictionary(
 
     Args:
         node: Dictionary node to analyse.
-        provider_id: Primary LLM provider id (default: 'beeline').
+        provider_id: Primary LLM provider id (default: 'coding' — coding-medium
+            model optimised for structured output, Task 4 2026-07-15).
 
     Returns:
         :class:`DictionaryAnalysisResult` with summary, examples,
@@ -253,7 +254,8 @@ async def suggest_phrases(
 
     Args:
         node: Dictionary node to suggest phrases for.
-        provider_id: Primary LLM provider id (default: 'beeline').
+        provider_id: Primary LLM provider id (default: 'coding' — coding-medium
+            model optimised for structured output, Task 4 2026-07-15).
         count: Desired number of suggestions.
 
     Returns:

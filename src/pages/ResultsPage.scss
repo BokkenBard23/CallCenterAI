@@ -120,8 +120,21 @@
   box-sizing: border-box;
 }
 
-/* LLM-unavailable consolidated card: ensure internal horizontal rows span
-   the full card width so the right side is not visually empty. */
+/* LLM-unavailable consolidated card: stretch to full container width.
+   M2 FIX (open-tasks-cleanup): the generic `.results-main .dsb_card`
+   rule above already stretches all Cards, but the vision audit flagged
+   "пустая правая половина" on this specific card. Adding an explicit
+   width:100% rule here for defensiveness and documentation — the card
+   MUST fill the entire content area width in the LLM-unavailable state
+   so the right side is not visually empty. */
+.summary-unavailable-card {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+/* Ensure internal horizontal rows span the full card width so the right
+   side is not visually empty. */
 .summary-unavailable-card .dsb_stack {
   width: 100%;
 }
