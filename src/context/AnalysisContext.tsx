@@ -203,6 +203,7 @@ function analysisReducer(
         analysisError: null,
         searchResult: null,
         llmResult: null,
+        llmLoading: false,
         batchId: null,
         batchStatus: null,
       };

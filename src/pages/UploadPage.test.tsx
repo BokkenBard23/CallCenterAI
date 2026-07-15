@@ -7,10 +7,11 @@
  * provider loading, RTF upload flow, dictionary upload, error states.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { AnalysisProvider } from '../context/AnalysisContext';
+import { AnalysisProvider, useAnalysisContext } from '../context/AnalysisContext';
+import type { AnalysisAction } from '../context/AnalysisContext';
 import { SnackbarProvider } from '../context/SnackbarContext';
 import UploadPage from './UploadPage';
 
@@ -93,6 +94,12 @@ function renderUploadPage() {
 describe('UploadPage', () => {
   beforeEach(() => {
     mockNavigate.mockReset();
+    mockCheckHealth.mockReset();
+    mockGetProviders.mockReset();
+    mockUploadRtf.mockReset();
+    mockUploadDictionary.mockReset();
+    mockAnalyze.mockReset();
+    mockSubmitBatch.mockReset();
     mockCheckHealth.mockResolvedValue({ status: 'ok', version: '1.0.0' });
     mockGetProviders.mockResolvedValue({
       providers: [
@@ -466,5 +473,365 @@ describe('UploadPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/Не удалось загрузить список провайдеров/)).toBeTruthy();
     });
+  });
+
+  // ─── Non-blocking Phase 2 (LLM analysis) ──────────────
+  //
+  // Tests that handleAnalyze fires Phase 2 (LLM) as fire-and-forget:
+  //   - Phase 1 (search) is awaited → navigate('/results') called
+  //   - Phase 2 runs in background → SET_LLM_RESULT + snackbar when done
+  //   - setAnalyzing(false) after Phase 1 (not Phase 2)
+
+  /**
+   * Child component that pre-dispatches AnalysisContext state on mount,
+   * simulating a user who has already uploaded RTF + dictionary + selected provider.
+   */
+  function StateInitializer({
+    onReady,
+  }: {
+    onReady: (dispatch: React.Dispatch<AnalysisAction>) => void;
+  }) {
+    const { dispatch } = useAnalysisContext();
+    useEffect(() => {
+      onReady(dispatch);
+    }, [dispatch, onReady]);
+    return null;
+  }
+
+  /**
+   * Render UploadPage with all state pre-set so the "Анализировать" button
+   * is enabled immediately (bypasses the Stepper upload UI flow).
+   */
+  function renderReadyToAnalyze(
+    onReady: (dispatch: React.Dispatch<AnalysisAction>) => void,
+  ) {
+    return render(
+      <MemoryRouter>
+        <SnackbarProvider>
+          <AnalysisProvider>
+            <StateInitializer onReady={onReady} />
+            <UploadPage />
+          </AnalysisProvider>
+        </SnackbarProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  /** Mock search result returned by Phase 1 */
+  const MOCK_SEARCH_RESULT = {
+    total_matches: 5,
+    matches_by_level: { high: 2, medium: 3 },
+    segments: [],
+    matches: [],
+  };
+
+  /** Mock LLM result returned by Phase 2 */
+  const MOCK_LLM_RESULT = {
+    summary: 'Test summary',
+    restructured_dialogue: '',
+    topic: 'Test topic',
+    result: 'positive',
+    key_points: [],
+    client_sentiment: 'neutral',
+    resolution: 'resolved',
+    provider: 'ollama',
+    model: 'llama3',
+  };
+
+  it('Phase 1 is awaited: navigates to /results before Phase 2 resolves', async () => {
+    // Phase 2 promise that never resolves during this test
+    const phase2Promise = new Promise(() => {});
+    mockAnalyze.mockImplementation((params: { include_summary?: boolean }) => {
+      if (params.include_summary) {
+        // Phase 2 — pending forever
+        return phase2Promise;
+      }
+      // Phase 1 — resolves immediately
+      return Promise.resolve({
+        analysis_id: 'analysis-1',
+        session_id: 'test-session',
+        status: 'completed',
+        search_result: MOCK_SEARCH_RESULT,
+        llm_result: null,
+        error: null,
+        warning: null,
+      });
+    });
+
+    const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
+      dispatch({ type: 'SET_SESSION_ID', payload: 'test-session' });
+      dispatch({ type: 'SET_RTF_FILE', payload: new File(['test'], 'dialog.rtf') });
+      dispatch({ type: 'SET_RTF_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_DIALOGUE',
+        payload: [{ turn_index: 0, speaker: 'Клиент', text: 'Привет', timestamp: null }],
+      });
+      dispatch({
+        type: 'ADD_DICTIONARY',
+        payload: {
+          file: new File(['<xml/>'], 'dict.xml'),
+          response: {
+            session_id: 'test-session',
+            dictionary: null,
+            validation: { valid: true, warnings: [], errors: [] },
+            error: null,
+          },
+        },
+      });
+      dispatch({ type: 'SET_DICTIONARY_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_PROVIDERS',
+        payload: [
+          { id: 'ollama', name: 'Ollama', models: ['llama3'], configured: true, available: true },
+        ],
+      });
+      dispatch({ type: 'SET_PROVIDER_STATUS', payload: 'loaded' });
+      dispatch({ type: 'SET_SELECTED_PROVIDER', payload: 'ollama' });
+    });
+
+    renderReadyToAnalyze(onReady);
+
+    // Wait for the analyze button to appear and be enabled
+    const analyzeBtn = await screen.findByText('Анализировать');
+    await waitFor(() => {
+      expect(analyzeBtn).not.toBeDisabled();
+    });
+
+    fireEvent.click(analyzeBtn);
+
+    // Phase 1 resolves → navigate('/results') called WITHOUT waiting for Phase 2
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/results');
+    });
+
+    // Phase 2 was called (fire-and-forget) but hasn't resolved yet
+    await waitFor(() => {
+      expect(mockAnalyze).toHaveBeenCalledTimes(2);
+    });
+
+    // The first call is Phase 1 (include_summary: false)
+    expect(mockAnalyze.mock.calls[0][0]).toMatchObject({ include_summary: false });
+    // The second call is Phase 2 (include_summary: true)
+    expect(mockAnalyze.mock.calls[1][0]).toMatchObject({ include_summary: true });
+  });
+
+  it('Phase 2 fire-and-forget: SET_LLM_RESULT + snackbar when LLM completes', async () => {
+    let resolvePhase2!: (value: unknown) => void;
+
+    mockAnalyze.mockImplementation((params: { include_summary?: boolean }) => {
+      if (params.include_summary) {
+        // Phase 2 — controlled resolution
+        return new Promise((resolve) => {
+          resolvePhase2 = resolve;
+        });
+      }
+      // Phase 1
+      return Promise.resolve({
+        analysis_id: 'analysis-1',
+        session_id: 'test-session',
+        status: 'completed',
+        search_result: MOCK_SEARCH_RESULT,
+        llm_result: null,
+        error: null,
+        warning: null,
+      });
+    });
+
+    const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
+      dispatch({ type: 'SET_SESSION_ID', payload: 'test-session' });
+      dispatch({ type: 'SET_RTF_FILE', payload: new File(['test'], 'dialog.rtf') });
+      dispatch({ type: 'SET_RTF_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_DIALOGUE',
+        payload: [{ turn_index: 0, speaker: 'Клиент', text: 'Привет', timestamp: null }],
+      });
+      dispatch({
+        type: 'ADD_DICTIONARY',
+        payload: {
+          file: new File(['<xml/>'], 'dict.xml'),
+          response: {
+            session_id: 'test-session',
+            dictionary: null,
+            validation: { valid: true, warnings: [], errors: [] },
+            error: null,
+          },
+        },
+      });
+      dispatch({ type: 'SET_DICTIONARY_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_PROVIDERS',
+        payload: [
+          { id: 'ollama', name: 'Ollama', models: ['llama3'], configured: true, available: true },
+        ],
+      });
+      dispatch({ type: 'SET_PROVIDER_STATUS', payload: 'loaded' });
+      dispatch({ type: 'SET_SELECTED_PROVIDER', payload: 'ollama' });
+    });
+
+    renderReadyToAnalyze(onReady);
+
+    const analyzeBtn = await screen.findByText('Анализировать');
+    await waitFor(() => {
+      expect(analyzeBtn).not.toBeDisabled();
+    });
+
+    fireEvent.click(analyzeBtn);
+
+    // Wait for Phase 1 to complete and Phase 2 to start
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/results');
+    });
+    await waitFor(() => {
+      expect(mockAnalyze).toHaveBeenCalledTimes(2);
+    });
+
+    // Before Phase 2 resolves: button is re-enabled (setAnalyzing(false) after Phase 1)
+    await waitFor(() => {
+      expect(screen.getByText('Анализировать')).toBeTruthy();
+    });
+
+    // Now resolve Phase 2 (simulating LLM completion)
+    resolvePhase2({
+      analysis_id: 'analysis-1',
+      session_id: 'test-session',
+      status: 'completed',
+      search_result: null,
+      llm_result: MOCK_LLM_RESULT,
+      error: null,
+      warning: null,
+    });
+
+    // Wait for the "analysis ready" snackbar
+    await waitFor(() => {
+      expect(screen.getByText(/Анализ готов/)).toBeTruthy();
+    });
+  });
+
+  it('Phase 2 failure: snackbar error (non-blocking, search results still available)', async () => {
+    let rejectPhase2!: (reason: unknown) => void;
+
+    mockAnalyze.mockImplementation((params: { include_summary?: boolean }) => {
+      if (params.include_summary) {
+        return new Promise((_resolve, reject) => {
+          rejectPhase2 = reject;
+        });
+      }
+      return Promise.resolve({
+        analysis_id: 'analysis-1',
+        session_id: 'test-session',
+        status: 'completed',
+        search_result: MOCK_SEARCH_RESULT,
+        llm_result: null,
+        error: null,
+        warning: null,
+      });
+    });
+
+    const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
+      dispatch({ type: 'SET_SESSION_ID', payload: 'test-session' });
+      dispatch({ type: 'SET_RTF_FILE', payload: new File(['test'], 'dialog.rtf') });
+      dispatch({ type: 'SET_RTF_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_DIALOGUE',
+        payload: [{ turn_index: 0, speaker: 'Клиент', text: 'Привет', timestamp: null }],
+      });
+      dispatch({
+        type: 'ADD_DICTIONARY',
+        payload: {
+          file: new File(['<xml/>'], 'dict.xml'),
+          response: {
+            session_id: 'test-session',
+            dictionary: null,
+            validation: { valid: true, warnings: [], errors: [] },
+            error: null,
+          },
+        },
+      });
+      dispatch({ type: 'SET_DICTIONARY_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_PROVIDERS',
+        payload: [
+          { id: 'ollama', name: 'Ollama', models: ['llama3'], configured: true, available: true },
+        ],
+      });
+      dispatch({ type: 'SET_PROVIDER_STATUS', payload: 'loaded' });
+      dispatch({ type: 'SET_SELECTED_PROVIDER', payload: 'ollama' });
+    });
+
+    renderReadyToAnalyze(onReady);
+
+    const analyzeBtn = await screen.findByText('Анализировать');
+    await waitFor(() => {
+      expect(analyzeBtn).not.toBeDisabled();
+    });
+
+    fireEvent.click(analyzeBtn);
+
+    // Phase 1 completes
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/results');
+    });
+
+    // Reject Phase 2 (LLM fails)
+    rejectPhase2(new Error('LLM timeout'));
+
+    // Error snackbar should appear
+    await waitFor(() => {
+      expect(screen.getByText(/LLM-анализ не выполнен/)).toBeTruthy();
+    });
+  });
+
+  it('Phase 1 failure: no Phase 2 call, error snackbar shown', async () => {
+    mockAnalyze.mockRejectedValue(new Error('Search failed'));
+
+    const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
+      dispatch({ type: 'SET_SESSION_ID', payload: 'test-session' });
+      dispatch({ type: 'SET_RTF_FILE', payload: new File(['test'], 'dialog.rtf') });
+      dispatch({ type: 'SET_RTF_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_DIALOGUE',
+        payload: [{ turn_index: 0, speaker: 'Клиент', text: 'Привет', timestamp: null }],
+      });
+      dispatch({
+        type: 'ADD_DICTIONARY',
+        payload: {
+          file: new File(['<xml/>'], 'dict.xml'),
+          response: {
+            session_id: 'test-session',
+            dictionary: null,
+            validation: { valid: true, warnings: [], errors: [] },
+            error: null,
+          },
+        },
+      });
+      dispatch({ type: 'SET_DICTIONARY_UPLOAD_STATUS', payload: 'success' });
+      dispatch({
+        type: 'SET_PROVIDERS',
+        payload: [
+          { id: 'ollama', name: 'Ollama', models: ['llama3'], configured: true, available: true },
+        ],
+      });
+      dispatch({ type: 'SET_PROVIDER_STATUS', payload: 'loaded' });
+      dispatch({ type: 'SET_SELECTED_PROVIDER', payload: 'ollama' });
+    });
+
+    renderReadyToAnalyze(onReady);
+
+    const analyzeBtn = await screen.findByText('Анализировать');
+    await waitFor(() => {
+      expect(analyzeBtn).not.toBeDisabled();
+    });
+
+    fireEvent.click(analyzeBtn);
+
+    // Phase 1 fails → error snackbar
+    await waitFor(() => {
+      expect(screen.getByText('Search failed')).toBeTruthy();
+    });
+
+    // Phase 2 should NOT have been called
+    expect(mockAnalyze).toHaveBeenCalledTimes(1);
+    // Navigate should NOT have been called
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

@@ -37,6 +37,7 @@ import { DropZone } from '../components/DropZone';
 import * as api from '../api/client';
 import * as historyStorage from '../storage/history';
 import type {
+  AnalysisResponse,
   HistoryEntry,
   ProviderInfo,
   UploadDictionaryResponse,
@@ -252,82 +253,117 @@ export default function UploadPage() {
   }, [dispatch]);
 
   // ─── Start analysis ───────────────────────────────────
+  //
+  // Two-phase strategy with non-blocking Phase 2:
+  //   Phase 1 (search, ~1s)  → awaited. Sets search result, navigates to /results.
+  //   Phase 2 (LLM summary)  → fire-and-forget. Runs in background via .then()/.catch().
+  //                             User can interact with dialogue/dictionary immediately.
+  //                             When done → snackbar notification + SET_LLM_RESULT.
+  //
+  // dispatch (from useReducer) and showSnackbar (from useCallback in SnackbarProvider)
+  // are stable references, so the fire-and-forget callbacks work even if UploadPage
+  // unmounts after navigate('/results') — the global AnalysisContext persists.
   const handleAnalyze = useCallback(async () => {
     if (!state.sessionId || !state.selectedProvider) return;
+
+    // Capture values for the fire-and-forget Phase 2 closure
+    const sessionId = state.sessionId;
+    const selectedProvider = state.selectedProvider;
+    const selectedModel = state.selectedModel;
 
     setAnalyzing(true);
     dispatch({ type: 'SET_ANALYSIS_STATUS', payload: 'analyzing' });
     dispatch({ type: 'SET_ANALYSIS_ERROR', payload: null });
     dispatch({ type: 'SET_LLM_LOADING', payload: false });
 
+    // ─── Phase 1: Dictionary search (awaited — fast, needed for results) ───
+    let phase1Result: AnalysisResponse;
     try {
-      const searchResult = await api.analyze({
-        session_id: state.sessionId,
-        llm_provider: state.selectedProvider,
-        llm_model: state.selectedModel ?? undefined,
+      phase1Result = await api.analyze({
+        session_id: sessionId,
+        llm_provider: selectedProvider,
+        llm_model: selectedModel ?? undefined,
         include_summary: false,
         include_restructured: false,
       });
-
-      dispatch({ type: 'SET_ANALYSIS_ID', payload: searchResult.analysis_id });
-      dispatch({
-        type: 'SET_SEARCH_RESULT',
-        payload: searchResult.search_result,
-      });
-      dispatch({ type: 'SET_ANALYSIS_STATUS', payload: 'completed' });
-
-      showSnackbar('Анализ запущен. Ожидайте результатов.', {
-        variant: 'elastic',
-        delay: 4000,
-        action: { label: 'Посмотреть', onClick: () => navigate('/results') },
-      });
-
-      navigate('/results');
-
-      // Phase 2: LLM analysis in background
-      if (searchResult.search_result) {
-        dispatch({ type: 'SET_LLM_LOADING', payload: true });
-        try {
-          const llmResult = await api.analyze({
-            session_id: state.sessionId,
-            llm_provider: state.selectedProvider,
-            llm_model: state.selectedModel ?? undefined,
-            include_summary: true,
-            include_restructured: true,
-          });
-          dispatch({ type: 'SET_LLM_RESULT', payload: llmResult.llm_result });
-        } catch (llmErr) {
-          console.warn('LLM analysis failed:', llmErr);
-          dispatch({ type: 'SET_LLM_RESULT', payload: null });
-        } finally {
-          dispatch({ type: 'SET_LLM_LOADING', payload: false });
-        }
-      }
-
-      // Save to history
-      const entry: HistoryEntry = {
-        id: crypto.randomUUID(),
-        analysisId: searchResult.analysis_id,
-        sessionId: state.sessionId!,
-        date: new Date().toISOString(),
-        fileName: rtfFileName ?? state.rtfFile?.name ?? 'dialog.rtf',
-        dictionaryNames: state.dictionaries
-          .map((d) => d.response.dictionary?.name)
-          .filter(Boolean) as string[],
-        totalMatches: searchResult.search_result?.total_matches ?? 0,
-        matchesByLevel: searchResult.search_result?.matches_by_level ?? {},
-        status: 'completed' as const,
-        searchResult: searchResult.search_result ?? undefined,
-        llmResult: undefined,
-      };
-      historyStorage.add(entry);
     } catch (err) {
       dispatch({ type: 'SET_ANALYSIS_STATUS', payload: 'error' });
       const msg = err instanceof Error ? err.message : 'Ошибка при выполнении анализа';
       dispatch({ type: 'SET_ANALYSIS_ERROR', payload: msg });
       showSnackbar(msg, { variant: 'fixed', delay: 6000 });
-    } finally {
       setAnalyzing(false);
+      return;
+    }
+
+    const searchResult = phase1Result.search_result;
+
+    dispatch({ type: 'SET_ANALYSIS_ID', payload: phase1Result.analysis_id });
+    dispatch({ type: 'SET_SEARCH_RESULT', payload: searchResult });
+    dispatch({ type: 'SET_ANALYSIS_STATUS', payload: 'completed' });
+
+    showSnackbar('Анализ запущен. Ожидайте результатов.', {
+      variant: 'elastic',
+      delay: 4000,
+      action: { label: 'Посмотреть', onClick: () => navigate('/results') },
+    });
+
+    navigate('/results');
+
+    // Save history entry immediately — Phase 1 is done, LLM result pending.
+    // historyStorage has no update() method, so llmResult stays undefined here.
+    // This is acceptable: the entry captures the search result; LLM summary is
+    // available live in the Results view via AnalysisContext.
+    const entry: HistoryEntry = {
+      id: crypto.randomUUID(),
+      analysisId: phase1Result.analysis_id,
+      sessionId,
+      date: new Date().toISOString(),
+      fileName: rtfFileName ?? state.rtfFile?.name ?? 'dialog.rtf',
+      dictionaryNames: state.dictionaries
+        .map((d) => d.response.dictionary?.name)
+        .filter(Boolean) as string[],
+      totalMatches: searchResult?.total_matches ?? 0,
+      matchesByLevel: searchResult?.matches_by_level ?? {},
+      status: 'completed' as const,
+      searchResult: searchResult ?? undefined,
+      llmResult: undefined,
+    };
+    historyStorage.add(entry);
+
+    // Phase 1 is done — button can be re-used
+    setAnalyzing(false);
+
+    // ─── Phase 2: LLM analysis — fire-and-forget (NO await) ───
+    // Runs in background. dispatch and showSnackbar are stable context references,
+    // so callbacks fire correctly even after UploadPage unmounts.
+    if (searchResult) {
+      dispatch({ type: 'SET_LLM_LOADING', payload: true });
+
+      api.analyze({
+        session_id: sessionId,
+        llm_provider: selectedProvider,
+        llm_model: selectedModel ?? undefined,
+        include_summary: true,
+        include_restructured: true,
+      })
+        .then((llmResult) => {
+          dispatch({ type: 'SET_LLM_RESULT', payload: llmResult.llm_result });
+          dispatch({ type: 'SET_LLM_LOADING', payload: false });
+          showSnackbar('Анализ готов. Сводка доступна во вкладке «Сводка»', {
+            variant: 'elastic',
+            delay: 6000,
+          });
+        })
+        .catch((llmErr: unknown) => {
+          console.warn('LLM analysis failed:', llmErr);
+          dispatch({ type: 'SET_LLM_RESULT', payload: null });
+          dispatch({ type: 'SET_LLM_LOADING', payload: false });
+          const errMsg = llmErr instanceof Error ? llmErr.message : 'Неизвестная ошибка';
+          showSnackbar('LLM-анализ не выполнен: ' + errMsg, {
+            variant: 'fixed',
+            delay: 6000,
+          });
+        });
     }
   }, [
     state.sessionId, state.selectedProvider, state.selectedModel, rtfFileName,
