@@ -1651,6 +1651,10 @@ async def _run_restructure_call(
             # LLMResultHandler extracts all fields; we only need
             # restructured_dialogue. This also tolerates responses that
             # include all 7 fields (backward compat with mock tests).
+            # NOTE: restructure prompt only asks for restructured_dialogue,
+            # so missing client_sentiment/resolution/summary/etc warnings
+            # from LLMResultHandler are EXPECTED and harmless — we only
+            # extract restructured_dialogue from the validated result.
             handler = LLMResultHandler()
             validated = handler.validate_and_parse(raw_response)
 
