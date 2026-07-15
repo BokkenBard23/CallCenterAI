@@ -640,6 +640,66 @@ def _get_glm_semaphore() -> asyncio.Semaphore:
     return _glm_semaphore
 
 
+# ═══════════════════════════════════════════════════════════
+# Anti-loop detection — protects against model repetition loops
+# ═══════════════════════════════════════════════════════════
+
+# Minimum content length to bother checking (short responses can't loop meaningfully)
+_MIN_REPETITION_CHECK_LEN = 200
+
+# How many times a phrase must repeat to be considered a loop
+_REPETITION_THRESHOLD = 5
+
+# Max phrase length to check (in characters) — longer phrases rarely repeat accidentally
+_REPETITION_PHRASE_MAX_LEN = 200
+
+
+def _detect_repetition(content: str) -> bool:
+    """Detect if content is stuck in a repetition loop.
+
+    Checks if any phrase (10-200 chars) appears 5+ times consecutively.
+    This catches the most common LLM loop pattern: repeating the same
+    sentence or paragraph endlessly.
+
+    Args:
+        content: LLM response text.
+
+    Returns:
+        True if repetition loop detected, False otherwise.
+    """
+    if len(content) < _MIN_REPETITION_CHECK_LEN:
+        return False
+
+    # Split into lines and check for repeated lines
+    lines = content.split("\n")
+    if len(lines) >= _REPETITION_THRESHOLD:
+        # Check for 5+ consecutive identical lines
+        consecutive = 1
+        for i in range(1, len(lines)):
+            if lines[i].strip() and lines[i].strip() == lines[i - 1].strip():
+                consecutive += 1
+                if consecutive >= _REPETITION_THRESHOLD:
+                    return True
+            else:
+                consecutive = 1
+
+    # Check for repeated phrases (sliding window)
+    # Sample every 50 chars to keep it fast (O(n) instead of O(n²))
+    sample_step = 50
+    for start in range(0, min(len(content), 5000), sample_step):
+        phrase_len = min(50, len(content) - start)
+        if phrase_len < 10:
+            break
+        phrase = content[start:start + phrase_len]
+        if not phrase.strip():
+            continue
+        count = content.count(phrase)
+        if count >= _REPETITION_THRESHOLD:
+            return True
+
+    return False
+
+
 class BeelineAIProvider(LLMProvider):
     """Base for Beeline AI OpenAI-compatible providers (GLM + Qwen families).
 
@@ -681,6 +741,12 @@ class BeelineAIProvider(LLMProvider):
         payload = {
             "model": model_name,
             "stream": False,
+            "max_tokens": 32768,  # Reasoning models (qwen-medium-dense, coding-medium)
+                                  # consume 2000-4000 tokens for internal reasoning before
+                                  # generating the answer. 4096 (API default) is NOT enough
+                                  # — model returns empty content with finish_reason="length".
+                                  # 32768 gives ample room; model stops naturally at 800-6000
+                                  # tokens for real tasks. Benchmark: 2026-07-15.
             "messages": [
                 {"role": "system", "content": effective_system},
                 {"role": "user", "content": prompt},
@@ -706,10 +772,40 @@ class BeelineAIProvider(LLMProvider):
                     response.raise_for_status()
                     data = response.json()
                     # OpenAI-compatible format:
-                    # {"choices": [{"message": {"content": "..."}}]}
+                    # {"choices": [{"message": {"content": "..."}, "finish_reason": "stop|length"}]}
                     choices = data.get("choices", [])
                     if choices:
-                        return choices[0].get("message", {}).get("content", "")
+                        content = choices[0].get("message", {}).get("content", "")
+                        finish_reason = choices[0].get("finish_reason", "")
+
+                        # ── Anti-loop protection ──
+                        # If model hit max_tokens limit, it may be stuck in a
+                        # repetition loop. Detect and reject:
+                        if finish_reason == "length":
+                            if not content.strip():
+                                # Empty output + length limit = reasoning consumed all tokens
+                                logger.warning(
+                                    "Beeline AI: model %s returned empty content with "
+                                    "finish_reason=length (reasoning exhausted max_tokens=%d) — "
+                                    "rejecting to trigger fallback",
+                                    model_name, payload.get("max_tokens", "?"),
+                                )
+                                return ""
+                            # Content exists but model was cut off — check for repetition
+                            if _detect_repetition(content):
+                                logger.warning(
+                                    "Beeline AI: model %s returned repetitive content with "
+                                    "finish_reason=length (loop detected) — rejecting",
+                                    model_name,
+                                )
+                                return ""
+                            # Content looks fine despite length cutoff — accept
+                            logger.info(
+                                "Beeline AI: model %s hit max_tokens but content looks valid (%d chars)",
+                                model_name, len(content),
+                            )
+
+                        return content
                     return ""
             except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 if attempt < _MAX_RETRIES:
@@ -1363,9 +1459,15 @@ async def analyze_dialogue(
         returns a degraded result with empty summary and provider="none".
     """
     # Run analysis (6 fields) and restructure (1 field) in parallel.
+    # Analysis uses qwen36 (reasoning model — better for analytical tasks).
+    # Restructure uses qwen36_fast (no reasoning — 4x faster for mechanical
+    # dialogue rewrite, doesn't waste tokens on reasoning). Benchmark 2026-07-15:
+    #   qwen-medium-dense restructure: 22s, 4096 tokens (all reasoning, empty output at max=4096)
+    #   qwen-medium-dense-fast restructure: 5.4s, 789 tokens (direct output, no reasoning)
+    restructure_provider = "qwen36_fast" if provider_id == "qwen36" else provider_id
     analysis_result, restructure_result = await asyncio.gather(
         _run_dialogue_analysis_call(dialogue_text, provider_id, model),
-        _run_restructure_call(dialogue_text, provider_id, model),
+        _run_restructure_call(dialogue_text, restructure_provider, model),
     )
 
     # Merge results. Prefer analysis provider/model for the merged LLMResult.
