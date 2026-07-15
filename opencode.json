@@ -216,7 +216,7 @@
       }
     },
     "ui-tester": {
-      "description": "Визуальная и a11y-проверка UI через browser/devtools на 375 / 768 / 1440.",
+      "description": "Визуальная и a11y-проверка UI через browser/devtools на desktop (1920 / FullHD+). Инструмент desktop-only, mobile/tablet не тестируется.",
       "mode": "subagent",
       "permission": {
         "read": "allow",
