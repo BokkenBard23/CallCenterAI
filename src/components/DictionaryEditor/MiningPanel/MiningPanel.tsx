@@ -57,7 +57,6 @@ function MiningPanelBase({
 }: MiningPanelProps) {
   const mining = useMiningState(sessionId);
 
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [directoryLabel, setDirectoryLabel] = useState<string | null>(null);
   const [fileCount, setFileCount] = useState(0);
   const [tab, setTab] = useState<number>(0);
@@ -72,14 +71,12 @@ function MiningPanelBase({
   // directory via env var MINING_CORPUS_ROOT.
   const directoryPath = directoryLabel ?? '';
 
-  const handleConfirm = useCallback(
-    (_files: PickedFile[], label: string) => {
-      setDirectoryLabel(label);
-      setFileCount(_files.length);
-      setPickerOpen(false);
-    },
-    [],
-  );
+  // MINING-LAYOUT-FIX: DirectoryPicker no longer manages an open/close dialog
+  // state — selection auto-confirms inline (no nested modal inside Sidesheet).
+  const handlePick = useCallback((_files: PickedFile[], label: string) => {
+    setDirectoryLabel(label);
+    setFileCount(_files.length);
+  }, []);
 
   const handleIndex = useCallback(() => {
     if (!dictionaryId) return;
@@ -118,10 +115,12 @@ function MiningPanelBase({
     <Stack
       direction="vertical"
       gap="x4"
-      style={{ padding: 'var(--size-spacing-x4)' }}
       className="mining-panel"
     >
-      {/* Picker row (medium density) */}
+      {/* Picker row (medium density).
+          MINING-LAYOUT-FIX: DirectoryPicker is now inline (no nested Dialog),
+          so it sits cleanly in the row alongside the "Обработать" button.
+          The row wraps on narrow widths via CSS `flex-wrap`. */}
       <Stack
         direction="horizontal"
         gap="x3"
@@ -132,12 +131,10 @@ function MiningPanelBase({
         <DirectoryPicker
           directoryLabel={directoryLabel}
           fileCount={fileCount}
-          open={pickerOpen}
-          onOpen={() => setPickerOpen(true)}
-          onClose={() => setPickerOpen(false)}
-          onConfirm={handleConfirm}
+          onPick={handlePick}
+          disabled={indexing}
+          loading={indexing}
         />
-        <Divider type="vertical" isDecorative />
         <ButtonPrimaryInline
           loading={indexing}
           disabled={!directoryLabel || !dictionaryId || indexing}

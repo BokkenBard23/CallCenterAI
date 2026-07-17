@@ -412,12 +412,20 @@ class FridaEmbeddingService:
 
         return await self._call_embeddings_api(sanitized_texts)
 
+    # Alias for dict_mining.py compatibility (embed_texts → embed_batch)
+    embed_texts = embed_batch
+
     async def is_available(self) -> bool:
-        """Check if FRIDA API is reachable.
+        """Check if FRIDA API is reachable AND the ``frida`` model is available.
 
         Returns:
-            True if FRIDA API is available, False otherwise
-            (including when circuit breaker is open).
+            True if the FRIDA model is listed in ``GET /models`` with
+            ``embeddings: true``, False otherwise (including when circuit
+            breaker is open or the API key's tenant lacks FRIDA access).
+
+        Bug fix: previously this method only checked HTTP 200 on
+        ``GET /models``, which returned True even when the ``frida``
+        model was absent from the response (e.g. wrong tenant/policy).
         """
         if self._circuit_open:
             # Check if circuit breaker should auto-reset
@@ -428,7 +436,16 @@ class FridaEmbeddingService:
 
         try:
             response = await self.http_client.get("/models")
-            return response.status_code == 200
+            if response.status_code != 200:
+                return False
+            data = response.json()
+            models = data.get("data", [])
+            for m in models:
+                if m.get("id") == self.model:
+                    caps = m.get("capabilities", {})
+                    return caps.get("embeddings", False)
+            # frida not in list — key's tenant/policy lacks embeddings access
+            return False
         except Exception:
             return False
 

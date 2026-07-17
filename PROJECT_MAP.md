@@ -129,6 +129,20 @@ cycles: [] (циклических зависимостей не обнаруж�
 
 - src/App.tsx — BrowserRouter + Routes, lazy-импорт pages, ThemeToggler, ErrorBoundary, AnalysisProvider, SnackbarProvider
 
+Routes (source of truth — `src/App.tsx` lines 126-132):
+
+| Path | Page | Notes |
+|------|------|-------|
+| `/` | UploadPage | Stepper wizard (auto-advance on upload success) |
+| `/results` | ResultsPage | sessionId from AnalysisContext (NOT from URL) |
+| `/batch-results/:batchId` | BatchResultsPage | batchId from useParams, polling 2s |
+| `/history` | HistoryPage | LocalStorage-backed |
+| `/speechlab` | SpeechLabPage | 3-panel resizable layout |
+| `/speechlab/:sessionId` | SpeechLabPage | preloaded session |
+| `/dictionary/:sessionId` | DictionaryEditorPage | CRUD + AI + Mining + XML export |
+
+> **⚠️ Doc sync note:** Internal `navigate()` calls in UploadPage, HistoryPage, BatchResultsPage are consistent with these paths. `submitBatch` exists in `api/client.ts` but is **not wired to UI** on UploadPage (feature gap — see TODO_AND_ROADMAP.md §Batch Upload UI).
+
 ### layers.pages
 
 - src/pages/UploadPage.tsx

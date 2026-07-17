@@ -40,10 +40,17 @@
 }
 
 /* ── Main content area ── */
+/* C3 FIX (PHASE L audit): previously `overflow: auto` created a scroll
+   context with no height constraint — when QualityScorePanel expanded,
+   the dark-themed content visually "split in half": upper part rendered
+   inside `.results-main`, lower dialogue segments overflowed into the
+   parent Box which painted the body's white bg. Removing the overflow
+   context lets the content flow naturally into `.app-main` (which has
+   `overflow-y: auto` and provides the canonical page-level scroll). */
 .results-main {
   flex: 1 1 0;
   min-width: 0;
-  overflow: auto;
+  overflow: visible;
   width: 100%;
   box-sizing: border-box;
 }

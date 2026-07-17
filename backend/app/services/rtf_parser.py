@@ -194,7 +194,17 @@ async def _parse_rtf_file(file_path: Path, filename: str) -> ParsedDialog:
         try:
             from striprtf.striprtf import rtf_to_text
 
-            rtf_text = file_path.read_text(encoding="utf-8", errors="replace")
+            # RTF files use Windows-1251 (\ansicpg1251). Reading as utf-8
+            # corrupts Cyrillic text and \\'XX hex escapes. Prefer the
+            # smartlogger CP1251-aware decoder (handles \\'XX escapes);
+            # fall back to a plain cp1251 decode if smartlogger is unavailable.
+            try:
+                from smartlogger.rtf_parser import rtf_bytes_to_unicode
+
+                rtf_text = rtf_bytes_to_unicode(file_path)
+            except Exception:
+                raw_bytes = file_path.read_bytes()
+                rtf_text = raw_bytes.decode("cp1251", errors="replace")
             raw_text_length = len(rtf_text)
             plain_text = rtf_to_text(rtf_text)
             raw_text_length = len(plain_text)

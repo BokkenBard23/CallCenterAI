@@ -206,6 +206,7 @@ app.add_middleware(StructuredLoggingMiddleware)
 setup_structured_logging()
 
 # ── Routers ──────────────────────────────────────────────────
+app.include_router(upload.sessions_router, prefix="/api/sessions", tags=["upload"])
 app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(batch.router, prefix="/api/analysis", tags=["batch"])

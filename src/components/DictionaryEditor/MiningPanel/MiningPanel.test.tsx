@@ -7,6 +7,11 @@
  * renders in isolation (no API calls, no polling). The mock return value
  * is configured per-test via mockUseMiningState.mockReturnValue(...).
  *
+ * MINING-LAYOUT-FIX: tests 9–12 were updated to match the new inline
+ * DirectoryPicker flow (no nested DS Dialog — see DirectoryPicker.tsx).
+ * The picker now auto-confirms on file selection via a hidden input;
+ * there is no "Подтвердить" button or modal dialog anymore.
+ *
  * Coverage (12 tests):
  *   1.  Renders 3 tab labels + picker row + process button
  *   2.  "Обработать" disabled when no directory selected
@@ -16,8 +21,8 @@
  *   6.  Cancelled info InlineAlert when index job cancelled
  *   7.  MiningProgress renders when index job exists (running)
  *   8.  Tab switching updates active tab indicator
- *   9.  DirectoryPicker dialog opens on button click
- *   10. "Подтвердить" disabled when no files selected in dialog
+ *   9.  DirectoryPicker renders a hidden webkitdirectory input
+ *   10. No directory label shown until a directory is picked
  *   11. Directory selection flow enables "Обработать" button
  *   12. indexCorpus called when "Обработать" clicked after selection
  */
@@ -257,46 +262,43 @@ describe('MiningPanel', () => {
     expect(indicator.getAttribute('data-tab')).toBe('fn');
   });
 
-  // ── 9. DirectoryPicker dialog opens on button click ──
+  // ── 9. DirectoryPicker renders a hidden webkitdirectory input ──
+  // MINING-LAYOUT-FIX: previously this test verified that the DS Dialog
+  // opened on button click. The Dialog was removed (nested-modal overlay
+  // conflict with the Sidesheet). The picker now uses a hidden input that
+  // is triggered directly from the button via a ref.
 
-  it('opens DirectoryPicker dialog on button click', async () => {
+  it('renders a hidden webkitdirectory input for directory selection', () => {
     renderPanel();
 
-    fireEvent.click(screen.getByText('Указать директорию с RTF'));
-
-    await waitFor(() => {
-      expect(screen.getByText('Выбор директории с RTF')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Выбрать папку')).toBeInTheDocument();
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    // webkitdirectory attribute is set (non-standard; React spreads it).
+    expect(input.getAttribute('webkitdirectory')).not.toBeNull();
+    // Input is visually hidden but present in the DOM.
+    expect(input.className).toContain('directory-picker__input');
   });
 
-  // ── 10. "Подтвердить" disabled when no files selected ──
+  // ── 10. No directory label shown until a directory is picked ──
 
-  it('disables "Подтвердить" button when no files selected in dialog', async () => {
-    renderPanel();
+  it('does not show a directory label until a directory is picked', () => {
+    renderPanel({ dictionaryId: 'dict-1' });
 
-    fireEvent.click(screen.getByText('Указать директорию с RTF'));
+    // No label rendered initially.
+    expect(screen.queryByText(/файлов/)).not.toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText('Подтвердить')).toBeInTheDocument();
-    });
-
-    const confirmBtn = screen.getByText('Подтвердить').closest('button')!;
-    expect(confirmBtn).toBeDisabled();
+    // "Обработать" is disabled because no directory has been picked.
+    const processBtn = screen.getByText('Обработать').closest('button')!;
+    expect(processBtn).toBeDisabled();
   });
 
   // ── 11. Directory selection flow enables "Обработать" button ──
+  // MINING-LAYOUT-FIX: no "Подтвердить" step anymore — picking files
+  // auto-confirms via the inline hidden input.
 
   it('enables "Обработать" after directory selection', async () => {
     renderPanel({ dictionaryId: 'dict-1' });
 
-    // Open dialog
-    fireEvent.click(screen.getByText('Указать директорию с RTF'));
-    await waitFor(() => {
-      expect(screen.getByText('Подтвердить')).toBeInTheDocument();
-    });
-
-    // Simulate file selection on hidden input
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     expect(input).toBeTruthy();
 
@@ -304,10 +306,7 @@ describe('MiningPanel', () => {
     const file2 = createMockFile('dialog2.rtf', 'corpus/dialog2.rtf');
     setInputFiles(input, [file1, file2]);
 
-    // Confirm selection
-    fireEvent.click(screen.getByText('Подтвердить').closest('button')!);
-
-    // Verify directory label shown and button enabled
+    // Verify directory label shown (auto-confirm, no confirm button needed).
     await waitFor(() => {
       expect(screen.getByText(/corpus/)).toBeInTheDocument();
     });
@@ -321,17 +320,9 @@ describe('MiningPanel', () => {
   it('calls indexCorpus when "Обработать" clicked after directory selection', async () => {
     renderPanel({ dictionaryId: 'dict-1' });
 
-    // Open dialog and select directory
-    fireEvent.click(screen.getByText('Указать директорию с RTF'));
-    await waitFor(() => {
-      expect(screen.getByText('Подтвердить')).toBeInTheDocument();
-    });
-
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     const file1 = createMockFile('dialog1.rtf', 'corpus/dialog1.rtf');
     setInputFiles(input, [file1]);
-
-    fireEvent.click(screen.getByText('Подтвердить').closest('button')!);
 
     await waitFor(() => {
       expect(screen.getByText(/corpus/)).toBeInTheDocument();

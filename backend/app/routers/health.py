@@ -78,6 +78,31 @@ def _check_vector_store(request: Request) -> str:
         return f"error: {exc}"
 
 
+# Mining tables whose absence degrades offline-corpus-mining functionality.
+# If any are missing, mining jobs cannot run — but the core search/upload
+# pipeline is unaffected, so this degrades (not breaks) overall health.
+_MINING_TABLES = ["mining_jobs", "mining_corpus", "mining_checkpoints"]
+
+
+def _check_mining_db(request: Request) -> str:
+    """Check that mining DB tables exist.
+
+    Returns ``"ok"`` when all required mining tables are present, or
+    ``"missing"`` when any are absent (e.g. after DB recreation). Errors
+    during the check itself are reported as ``"error: <detail>"``.
+    """
+    try:
+        mining_store = getattr(request.app.state, "mining_store", None)
+        if mining_store is None:
+            return "missing"
+        existence = mining_store.verify_tables_exist(_MINING_TABLES)
+        if all(existence.values()):
+            return "ok"
+        return "missing"
+    except Exception as exc:
+        return f"error: {exc}"
+
+
 def _count_active_sessions() -> int:
     """Count non-expired sessions."""
     try:
@@ -129,15 +154,23 @@ async def health_check(request: Request) -> HealthCheckResult:
     frida_check, frida_available = await _check_frida(request)
     checks["frida"] = frida_check
     checks["vector_store"] = _check_vector_store(request)
+    checks["mining_db"] = _check_mining_db(request)
 
     # ── Compute aggregate status ─────────────────────────────────
-    all_ok = all(v == "ok" for v in checks.values())
-    any_error = any(v.startswith("error") for v in checks.values())
+    # Core services: session_store, frida, vector_store.
+    # mining_db is a secondary/offline subsystem: a "missing" mining_db
+    # degrades health (mining unavailable) but does NOT make the app
+    # unhealthy, since core search/upload still work.
+    core_checks = ["session_store", "frida", "vector_store"]
+    core_ok = all(checks.get(c) == "ok" for c in core_checks)
+    mining_ok = checks.get("mining_db") == "ok"
+    any_core_error = any(
+        checks.get(c, "").startswith("error") for c in core_checks
+    )
 
-    if all_ok:
+    if core_ok and mining_ok:
         status = "healthy"
-    elif any_error:
-        # If FRIDA is down but everything else is OK → degraded
+    elif any_core_error:
         # If session store is down → unhealthy (core functionality broken)
         session_ok = checks.get("session_store") == "ok"
         if session_ok:
@@ -145,6 +178,7 @@ async def health_check(request: Request) -> HealthCheckResult:
         else:
             status = "unhealthy"
     else:
+        # Core OK but mining missing/error → degraded (not healthy, not unhealthy)
         status = "degraded"
 
     # ── PII Masking status ──────────────────────────────────────────

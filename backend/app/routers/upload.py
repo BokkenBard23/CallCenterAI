@@ -32,6 +32,11 @@ from app.utils.session import session_store
 logger = logging.getLogger(__name__)
 
 
+# Separate router for session-listing — mounted at /api/sessions (NOT under
+# /api/upload) so the discovery endpoint matches the canonical REST path.
+sessions_router = APIRouter()
+
+
 def _sanitize_filename(filename: str) -> str:
     """Sanitize uploaded filename to prevent path traversal attacks.
     
@@ -62,9 +67,56 @@ def _sanitize_filename(filename: str) -> str:
     # Validate filename doesn't contain suspicious characters
     # Allow: alphanumeric, dots, hyphens, underscores, spaces, Cyrillic
     if not re.match(r'^[\w\s.\-а-яА-ЯёЁ]+$', name):
-        raise ValueError(f"Invalid filename: contains disallowed characters")
+        raise ValueError("Invalid filename: contains disallowed characters")
     
     return name
+
+
+# ═══════════════════════════════════════════════════════════
+# GET /sessions — list sessions (read-only discovery)
+# ═══════════════════════════════════════════════════════════
+
+
+@sessions_router.get("", summary="List all sessions")
+async def list_sessions() -> dict:
+    """Return a lightweight list of all stored sessions.
+
+    Read-only: does NOT refresh ``last_accessed`` and does NOT interfere
+    with TTL-based cleanup. Used by automation/clients to discover
+    existing ``session_id`` values without parsing upload responses.
+
+    Response::
+        {
+          "sessions": [
+            {"session_id": "...", "created_at": "...", "turn_count": 32,
+             "has_dictionary": true, "dictionary_count": 2}
+          ],
+          "total": 2
+        }
+    """
+    # Prefer the efficient read-only summary (SQLite backend); fall back to
+    # list_sessions() + get() for backends that don't expose the summary API.
+    summary_fn = getattr(session_store, "list_sessions_summary", None)
+    if summary_fn is not None:
+        sessions = summary_fn()
+    else:
+        sessions = []
+        for sid in session_store.list_sessions():
+            session = session_store.get(sid)
+            if session is None:
+                continue
+            turn_count = session.dialog.total_turns if session.dialog else 0
+            dictionary_count = len(session.dictionaries)
+            sessions.append(
+                {
+                    "session_id": session.id,
+                    "created_at": session.created_at.isoformat(),
+                    "turn_count": turn_count,
+                    "has_dictionary": dictionary_count > 0,
+                    "dictionary_count": dictionary_count,
+                }
+            )
+    return {"sessions": sessions, "total": len(sessions)}
 
 
 router = APIRouter()

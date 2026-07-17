@@ -328,6 +328,31 @@ def _persist(session) -> None:
     session_store.update(session)
 
 
+def _prune_tree(node: DictionaryNode, depth: int) -> DictionaryNode:
+    """Return a copy of ``node`` with its subtree pruned to ``depth`` levels.
+
+    ``depth=1`` keeps the root node but drops all children. ``depth=2`` keeps
+    root + one level of children (each child's own children cleared), etc.
+
+    Uses ``model_copy`` so every field (conditions, token_section, attributes,
+    saved_state, phrase_groups, attribute_tree, …) is preserved by reference;
+    only ``children`` is replaced and ``has_children``/``children_count`` are
+    recomputed to stay consistent with the pruned subtree.
+    """
+    if depth < 1:
+        depth = 1
+    pruned_children: List[DictionaryNode] = []
+    if depth > 1:
+        pruned_children = [_prune_tree(child, depth - 1) for child in node.children]
+    return node.model_copy(
+        update={
+            "children": pruned_children,
+            "has_children": len(pruned_children) > 0,
+            "children_count": len(pruned_children),
+        }
+    )
+
+
 # ═══════════════════════════════════════════════════════════
 # GET /{session_id}/tokens — unchanged legacy endpoint
 # ═══════════════════════════════════════════════════════════
@@ -340,17 +365,59 @@ def _persist(session) -> None:
 )
 async def get_session_dictionaries(
     session_id: str,
+    depth: Optional[int] = Query(
+        None,
+        ge=1,
+        description="If set, prune each tree to this depth (1 = root + first level). "
+        "Omit for the full tree (backward compatible).",
+    ),
+    node_id: Optional[str] = Query(
+        None,
+        description="If set, return only the subtree under the node with this "
+        "name (searched across all root dictionaries). Omit for the full tree.",
+    ),
 ) -> List[DictionaryNode]:
-    """Return all root dictionaries (with full subtrees) stored in a session.
+    """Return all root dictionaries (with full or pruned subtrees) in a session.
 
     Used by the FE dictionary editor to render the navigation tree on mount.
     Additive endpoint — does not alter any of the 14 frozen editing endpoints.
 
+    Optional pruning (backward compatible):
+      - ``?depth=N`` — keep root + N levels of children.
+      - ``?node_id=<name>`` — return only the subtree under ``node_id``.
+      - No params — full tree (current behaviour).
+
+    When both ``depth`` and ``node_id`` are given, the subtree under
+    ``node_id`` is pruned to ``depth`` levels.
+
     Raises:
-        404: Session not found.
+        404: Session not found, or ``node_id`` not found in any tree.
     """
     session = _resolve_session(session_id)
-    return list(session.dictionaries.values())
+    roots = list(session.dictionaries.values())
+
+    # ── node_id: restrict to a single subtree ────────────────────
+    if node_id is not None:
+        target: Optional[DictionaryNode] = None
+        for root in roots:
+            found = _find_node_recursive(root, node_id)
+            if found is not None:
+                target = found
+                break
+        if target is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Node '{node_id}' not found in any dictionary of "
+                f"session '{session_id}'.",
+            )
+        result = target if depth is None else _prune_tree(target, depth)
+        return [result]
+
+    # ── depth: prune every root tree ────────────────────────────
+    if depth is not None:
+        return [_prune_tree(root, depth) for root in roots]
+
+    return roots
 
 
 @router.get(

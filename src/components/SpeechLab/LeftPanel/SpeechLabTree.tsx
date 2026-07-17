@@ -5,7 +5,9 @@
  *
  * Features:
  *   - DS Tree with data prop (TreeData[] from treeDataMapper)
- *   - single-select mode (multiselect=false)
+ *   - multiselect=true + selectOnRowClick=true (single-select semantics
+ *     enforced in onChange by picking the last selected id) — see C1 FIX
+ *     below: DS Tree requires multiselect=true for selectOnRowClick to work.
  *   - size=small (36px indent step, fits 320px panel)
  *   - expandOnArrow for keyboard a11y
  *   - amount=true shows child count
@@ -73,11 +75,22 @@ export default function SpeechLabTree({
     return map;
   }, [nodes]);
 
-  // DS Tree onChange fires with selected id array (single-select = 1 element)
+  // C1 FIX (PHASE M audit): DS Tree `selectOnRowClick` works ONLY when
+  // `multiselect=true` (per Tree.types.d.ts:13-17). Previously
+  // `multiselect=false` + no `selectOnRowClick` → row clicks never fired
+  // onChange → QueryTab always showed "Выберите словарь в дереве".
+  //
+  // Fix: enable multiselect + selectOnRowClick=true (so a row click selects
+  // the node) and implement single-select semantics in onChange by always
+  // picking the LAST selected id (the one the user just clicked). Earlier
+  // selections are silently ignored — we never call onSelectNode for them.
+  // This preserves the intended single-select UX while satisfying the DS
+  // API contract.
   const handleChange = useCallback(
     (selected: string[]) => {
       if (selected.length === 0) return;
-      const id = selected[0];
+      // Use the last id — corresponds to the most recent user click.
+      const id = selected[selected.length - 1];
       const node = nodeMap.get(id);
       if (node) {
         onSelectNode(node);
@@ -111,7 +124,8 @@ export default function SpeechLabTree({
     <div className="speechlab-tree" aria-label="Дерево словаря">
       <Tree
         data={treeData}
-        multiselect={false}
+        multiselect={true}
+        selectOnRowClick={true}
         size="small"
         amount={true}
         expandOnArrow={true}

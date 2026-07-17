@@ -177,6 +177,52 @@ class SqliteSessionStore(SessionStoreBase):
             rows = conn.execute("SELECT id FROM sessions").fetchall()
             return [row[0] for row in rows]
 
+    def list_sessions_summary(self) -> List[Dict[str, Any]]:
+        """Return lightweight summaries for all sessions (read-only).
+
+        Unlike :meth:`get`, this does NOT update ``last_accessed`` and does
+        not trigger TTL refresh — safe for listing/discovery endpoints.
+
+        Each entry: ``{session_id, created_at, turn_count, has_dictionary,
+        dictionary_count}``.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            rows = conn.execute(
+                "SELECT id, created_at, data FROM sessions"
+            ).fetchall()
+        summaries: List[Dict[str, Any]] = []
+        for sid, created_at, data_str in rows:
+            turn_count = 0
+            has_dictionary = False
+            dictionary_count = 0
+            try:
+                blob = json.loads(data_str)
+                dialog = blob.get("dialog")
+                if dialog is not None:
+                    turns = dialog.get("turns")
+                    if isinstance(turns, list):
+                        turn_count = len(turns)
+                dicts = blob.get("dictionaries")
+                if isinstance(dicts, dict):
+                    dictionary_count = len(dicts)
+                    has_dictionary = dictionary_count > 0
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "list_sessions_summary: failed to parse session '%s': %s",
+                    sid, exc,
+                )
+            summaries.append(
+                {
+                    "session_id": sid,
+                    "created_at": created_at,
+                    "turn_count": turn_count,
+                    "has_dictionary": has_dictionary,
+                    "dictionary_count": dictionary_count,
+                }
+            )
+        return summaries
+
     def add_dictionary(self, session_id: str, dictionary: DictionaryNode) -> Optional[Session]:
         """Add a dictionary to a session. Returns updated session or None."""
         session = self.get(session_id)
@@ -897,6 +943,25 @@ class MiningStore:
         return int(row[0])
 
     # ── JSON helpers ──────────────────────────────────────────
+
+    def verify_tables_exist(self, table_names: List[str]) -> Dict[str, bool]:
+        """Check existence of named tables in the mining DB (read-only).
+
+        Returns a mapping ``{table_name: exists_bool}``. Used by the health
+        check to detect a missing mining schema (e.g. after DB recreation).
+        """
+        if not table_names:
+            return {}
+        placeholders = ", ".join("?" for _ in table_names)
+        with self._lock:
+            conn = self._get_connection()
+            rows = conn.execute(
+                f"SELECT name FROM sqlite_master WHERE type='table' "
+                f"AND name IN ({placeholders})",
+                table_names,
+            ).fetchall()
+        existing = {r[0] for r in rows}
+        return {name: (name in existing) for name in table_names}
 
     @staticmethod
     def dump_json(value: Any) -> str:

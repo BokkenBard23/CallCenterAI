@@ -36,6 +36,7 @@ import { useSnackbar } from '../../context/SnackbarContext';
 import * as api from '../../api/client';
 import * as historyStorage from '../../storage/history';
 import { BlurFade } from '../../components/ui/blur-fade';
+import { PageBreadcrumbs } from '../../components/PageBreadcrumbs';
 import type { HistoryEntry } from '../../types/api';
 
 const ITEMS_PER_PAGE = 10;
@@ -199,6 +200,7 @@ export default function HistoryPage() {
   if (loadingError) {
     return (
       <Stack direction="vertical" spacing="x6">
+        <PageBreadcrumbs currentPage="История" />
         <Stack direction="horizontal" spacing="x3" align="center">
           <IconButton
             iconName={Icons.ArrowLeft}
@@ -220,6 +222,7 @@ export default function HistoryPage() {
   if (entries.length === 0) {
     return (
       <Stack direction="vertical" spacing="x6" align="center">
+        <PageBreadcrumbs currentPage="История" />
         <Stack direction="horizontal" spacing="x3" align="center">
           <IconButton
             iconName={Icons.ArrowLeft}
@@ -247,6 +250,7 @@ export default function HistoryPage() {
   // ─── Render: Main content ────────────────────────────────
   return (
     <Stack direction="vertical" spacing="x6" aria-label="История анализов">
+      <PageBreadcrumbs currentPage="История" />
       {/* ── Header ── */}
       <Stack direction="horizontal" spacing="x3" align="center" justify="space-between">
         <Stack direction="horizontal" spacing="x3" align="center">

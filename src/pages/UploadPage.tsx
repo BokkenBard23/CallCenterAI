@@ -10,7 +10,7 @@
  *   Step 3 (analyze): Configure LLM provider and run analysis
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Banner,
@@ -20,6 +20,8 @@ import {
   Dialog,
   DialogContent,
   Divider,
+  Grid,
+  GridItem,
   Icon,
   IconButton,
   InlineAlert,
@@ -34,6 +36,7 @@ import { Icons } from '@beeline/design-tokens/js/iconfont';
 import { useAnalysisContext } from '../context/AnalysisContext';
 import { useSnackbar } from '../context/SnackbarContext';
 import { DropZone } from '../components/DropZone';
+import RouterLink from '../components/RouterLink';
 import * as api from '../api/client';
 import * as historyStorage from '../storage/history';
 import type {
@@ -68,6 +71,72 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+/** Format ISO date string to locale-readable form for recent section. */
+function formatRecentDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+/** Dashboard feature card descriptor — 4 cards above the Stepper. */
+interface DashboardCardDescriptor {
+  id: 'upload' | 'speechlab' | 'dictionary' | 'history';
+  title: string;
+  description: string;
+  iconName: Icons;
+  ctaLabel: string;
+  /** 'scroll' = scroll to Stepper below; 'navigate' = SPA navigate to route. */
+  ctaAction:
+    | { kind: 'scroll'; targetId: string }
+    | { kind: 'navigate'; to: string };
+}
+
+const DASHBOARD_CARDS: readonly DashboardCardDescriptor[] = [
+  {
+    id: 'upload',
+    title: 'Загрузка и анализ',
+    description: 'Загрузите RTF-диалог и XML-словари, запустите анализ совпадений.',
+    iconName: Icons.Upload,
+    ctaLabel: 'Начать',
+    ctaAction: { kind: 'scroll', targetId: 'quick-upload' },
+  },
+  {
+    id: 'speechlab',
+    title: 'SpeechLab',
+    description: '3-панельная лаборатория: дерево словаря, токены, поиск по диалогам.',
+    iconName: Icons.Mic,
+    ctaLabel: 'Открыть',
+    ctaAction: { kind: 'navigate', to: '/speechlab' },
+  },
+  {
+    id: 'dictionary',
+    title: 'Редактор словарей',
+    description: 'Иерархическое дерево, AI-подсказки, поиск дубликатов и валидация.',
+    iconName: Icons.Book,
+    ctaLabel: 'Открыть',
+    ctaAction: { kind: 'navigate', to: '/dictionary' },
+  },
+  {
+    id: 'history',
+    title: 'История анализов',
+    description: 'Последние запуски анализа, поиск по имени файла или словарю.',
+    iconName: Icons.Clock,
+    ctaLabel: 'Открыть',
+    ctaAction: { kind: 'navigate', to: '/history' },
+  },
+] as const;
+
+/** Max number of recent analyses shown in the dashboard Recent section. */
+const MAX_RECENT_ENTRIES = 5;
+
 // ═══════════════════════════════════════════════════════════
 // Component
 // ═══════════════════════════════════════════════════════════
@@ -85,6 +154,21 @@ export default function UploadPage() {
   const [providerOptions, setProviderOptions] = useState<SelectOption[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  /** Recent analyses — initialised from localStorage lazily on first
+   *  render (mount). Refreshed via setRecentEntries() after each
+   *  successful analysis. Shows last N entries in the dashboard hub. */
+  const [recentEntries, setRecentEntries] = useState<HistoryEntry[]>(() => {
+    try {
+      return historyStorage.getAll().slice(0, MAX_RECENT_ENTRIES);
+    } catch {
+      return [];
+    }
+  });
+
+  /** Ref to the Stepper Card wrapper — used by the Upload dashboard card
+   *  "Начать" CTA to scroll-into-view the quick upload section. */
+  const quickUploadRef = useRef<HTMLDivElement | null>(null);
 
   // ─── Stepper state ─────────────────────────────────────
   const [activeStep, setActiveStep] = useState<StepId>('rtf');
@@ -329,6 +413,13 @@ export default function UploadPage() {
       llmResult: undefined,
     };
     historyStorage.add(entry);
+    // Refresh dashboard Recent section so the new analysis appears
+    // immediately after navigation back to /.
+    try {
+      setRecentEntries(historyStorage.getAll().slice(0, MAX_RECENT_ENTRIES));
+    } catch {
+      // ignore — recent section is non-critical
+    }
 
     // Phase 1 is done — button can be re-used
     setAnalyzing(false);
@@ -415,6 +506,30 @@ export default function UploadPage() {
     [state.rtfUploadStatus, state.dictionaries.length],
   );
 
+  /** Scroll the Stepper Card into view — used by the "Upload" dashboard
+   *  card CTA. Pure DOM API; no layout reflow concerns since the target
+   *  is already rendered in the same page. */
+  const handleScrollToQuickUpload = useCallback(() => {
+    quickUploadRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+    // Move keyboard focus to the Stepper for accessibility.
+    quickUploadRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  /** Click handler for dashboard cards — dispatches by CTA action kind. */
+  const handleCardCta = useCallback(
+    (card: DashboardCardDescriptor) => {
+      if (card.ctaAction.kind === 'scroll') {
+        handleScrollToQuickUpload();
+      } else {
+        navigate(card.ctaAction.to);
+      }
+    },
+    [handleScrollToQuickUpload, navigate],
+  );
+
   // ─── Derived state ───────────────────────────────────
   const canAnalyze =
     state.sessionId !== null &&
@@ -438,17 +553,84 @@ export default function UploadPage() {
         />
       )}
 
-      {/* Page title — H1 for accessibility */}
-      <Typography variant="h1" style={{ margin: 0 }}>Загрузка данных для анализа</Typography>
+      {/* ─── Dashboard: Welcome ─── */}
+      <Stack direction="vertical" spacing="x2">
+        <Typography variant="h1" style={{ margin: 0 }}>
+          Анализ диалогов
+        </Typography>
+        <Typography variant="body1" inactive>
+          Загружайте RTF-диалоги, сопоставляйте их со словарями фраз, исследуйте
+          результаты и переиспользуйте словари между сессиями. Все разделы
+          доступны из панели навигации сверху или из карточек ниже.
+        </Typography>
+      </Stack>
 
-      {/* Stepper */}
-      <Stepper
-        steps={UPLOAD_STEPS}
-        activeStepId={activeStep}
-        onStepChange={handleStepChange}
-        direction="horizontal"
-        mobile={isMobile}
-      />
+      {/* ─── Dashboard: Feature cards grid (4 cards) ─── */}
+      <Grid columns={4} gap="x4" align="stretch">
+        {DASHBOARD_CARDS.map((card) => (
+          <GridItem key={card.id} colSpan={1}>
+            <Card>
+              <Stack direction="vertical" spacing="x3" align="start">
+                <Stack direction="horizontal" spacing="x2" align="center">
+                  <Icon iconName={card.iconName} size="medium" />
+                  <Typography variant="h6">{card.title}</Typography>
+                </Stack>
+                <Typography variant="body2" inactive>
+                  {card.description}
+                </Typography>
+                {card.ctaAction.kind === 'navigate' ? (
+                  <RouterLink to={card.ctaAction.to}>
+                    {card.ctaLabel}
+                  </RouterLink>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={() => handleCardCta(card)}
+                  >
+                    {card.ctaLabel}
+                  </Button>
+                )}
+              </Stack>
+            </Card>
+          </GridItem>
+        ))}
+      </Grid>
+
+      {/* ─── Dashboard: Quick Upload (existing Stepper, wrapped in Card) ─── */}
+      <Card>
+        <Stack direction="vertical" spacing="x4">
+          {/* Anchor for the "Начать" CTA scroll target. tabIndex={-1} so
+              focus moves programmatically without entering the tab order. */}
+          <Stack
+            direction="horizontal"
+            spacing="x2"
+            align="center"
+            justify="space-between"
+          >
+            <Stack direction="horizontal" spacing="x2" align="center">
+              <Icon iconName={Icons.Upload} />
+              <Typography variant="h5">Быстрая загрузка</Typography>
+            </Stack>
+          </Stack>
+
+          {/* Stepper wizard — pre-existing logic preserved as-is */}
+          <div
+            id="quick-upload"
+            ref={quickUploadRef}
+            tabIndex={-1}
+            role="group"
+            aria-label="Мастер быстрой загрузки"
+            style={{ outline: 'none' }}
+          >
+            <Stack direction="vertical" spacing="x4">
+              <Stepper
+                steps={UPLOAD_STEPS}
+                activeStepId={activeStep}
+                onStepChange={handleStepChange}
+                direction="horizontal"
+                mobile={isMobile}
+              />
 
       {/* ── Step Content ── */}
       <Card>
@@ -673,6 +855,76 @@ export default function UploadPage() {
           )}
         </Stack>
       </Card>
+
+            {/* close the new inner Stack around Stepper + Card */}
+            </Stack>
+          {/* close #quick-upload div */}
+          </div>
+        {/* close outer Card body Stack */}
+        </Stack>
+      {/* close outer "Быстрая загрузка" Card */}
+      </Card>
+
+      {/* ─── Dashboard: Recent analyses ─── */}
+      <Stack direction="vertical" spacing="x3">
+        <Typography variant="h5">Последние анализы</Typography>
+        {recentEntries.length === 0 ? (
+          <Card>
+            <Stack direction="vertical" spacing="x3" align="center">
+              <Icon iconName={Icons.Clock} size="large" />
+              <Typography variant="body2" inactive>
+                Нет сохранённых анализов. Запустите первый анализ, чтобы он
+                появился в истории.
+              </Typography>
+              <Button
+                variant="secondary"
+                size="small"
+                onClick={handleScrollToQuickUpload}
+              >
+                Начать анализ
+              </Button>
+            </Stack>
+          </Card>
+        ) : (
+          <Stack direction="vertical" spacing="x2">
+            {recentEntries.map((entry) => (
+              <Card key={entry.id}>
+                <Stack
+                  direction="horizontal"
+                  spacing="x3"
+                  align="center"
+                  justify="space-between"
+                >
+                  <Stack direction="vertical" spacing="x1" align="start">
+                    <Stack direction="horizontal" spacing="x2" align="center">
+                      <Icon iconName={Icons.Attachment} size="small" />
+                      <Typography variant="body2">
+                        {entry.fileName}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="horizontal" spacing="x2" align="center">
+                      <Typography variant="caption" inactive>
+                        {formatRecentDate(entry.date)}
+                      </Typography>
+                      <Typography variant="caption" inactive>
+                        · {entry.totalMatches} совпадений
+                      </Typography>
+                      {entry.dictionaryNames.length > 0 && (
+                        <Typography variant="caption" inactive>
+                          · {entry.dictionaryNames.join(', ')}
+                        </Typography>
+                      )}
+                    </Stack>
+                  </Stack>
+                  <RouterLink to="/history">Открыть</RouterLink>
+                </Stack>
+              </Card>
+            ))}
+            {/* Link to full history page */}
+            <RouterLink to="/history">Вся история →</RouterLink>
+          </Stack>
+        )}
+      </Stack>
 
       {/* ── Action buttons ── */}
       <Divider />

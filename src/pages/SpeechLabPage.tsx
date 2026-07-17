@@ -23,6 +23,7 @@ import { useSpeechLabState } from '../hooks/useSpeechLabState';
 import SpeechLabLayout from '../components/SpeechLab/SpeechLabLayout/SpeechLabLayout';
 import SpeechLabTopBar from '../components/SpeechLab/SpeechLabTopBar';
 import SpeechLabRtfDialog from '../components/SpeechLab/SpeechLabRtfDialog';
+import { PageBreadcrumbs } from '../components/PageBreadcrumbs';
 
 export default function SpeechLabPage() {
   return (
@@ -40,6 +41,9 @@ function SpeechLabPageContent() {
     <Box style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }} aria-label="SpeechLab — анализ диалогов">
       {/* P1-1: H1 for accessibility (visually hidden) */}
       <h1 className="sr-only">SpeechLab</h1>
+
+      {/* Breadcrumbs — wayfinding trail */}
+      <PageBreadcrumbs currentPage="SpeechLab" />
 
       {/* Top bar: RTF session status or prompt */}
       <SpeechLabTopBar

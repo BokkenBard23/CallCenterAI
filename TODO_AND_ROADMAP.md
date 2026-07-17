@@ -172,6 +172,7 @@ Track B fully complete. Phase F optional feature development. NOT STARTED.
 | D.5 | 5.4 Five analysis strategies | Низкий приоритет |
 | D.6 | Large file refactoring (8 файлов >500 строк) | Defer до зелёного билда + CI |
 | D.7 | State management refactor (useReducer → Zustand) | Крупная переработка |
+| D.8 | **Batch Upload UI** — `submitBatch` есть в `api/client.ts` (backend `POST /api/upload/rtf/batch` + `POST /api/analysis/batch` готовы), но UploadPage не имеет UI для multi-file batch upload. Нужно: DropZone с `multiple` + batch action button → `navigate('/batch-results/' + batchId)`. | Backend готов, FE UI отсутствует |
 
 ---
 

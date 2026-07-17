@@ -46,7 +46,10 @@
   --highlight-level-6-border: #d97b00;
 
   --highlight-speaker-client-bg: #e3f2fd;
-  --highlight-speaker-operator-bg: #f3e5f5;
+  /* C2 FIX (PHASE L audit): previously #f3e5f5 (purple/violet) — violated
+     brand invariant "operator = green/success". Now light green tint
+     aligned with --dict-channel-operator (#43a047). */
+  --highlight-speaker-operator-bg: rgba(67, 160, 71, 0.10);
   --highlight-segment-border: #e0e0e0;
   --highlight-ellipsis-color: #9e9e9e;
 
@@ -101,7 +104,11 @@
   --highlight-level-6-border: #ffa726;
 
   --highlight-speaker-client-bg: #1a2a3e;
-  --highlight-speaker-operator-bg: #2a1a3e;
+  /* C2 FIX (PHASE L audit): previously #2a1a3e (dark violet) — vision-gate
+     on 5 screenshots confirmed OPERATOR cards rendered purple instead of
+     green. Now green-tinted to align with --dict-channel-operator dark theme
+     (#66bb6a) and the brand invariant "operator = success/green". */
+  --highlight-speaker-operator-bg: rgba(67, 160, 71, 0.15);
   --highlight-segment-border: #424242;
   --highlight-ellipsis-color: #757575;
 
@@ -142,10 +149,13 @@
 }
 
 /* --- Level-specific styles (innermost = bg, outer = border) ---
- * Each level has a DISTINCT visual treatment:
- *   Q1 (level-1): Yellow background + dashed bottom border
- *   Q2 (level-2): Green background + solid bottom border
- *   Q3 (level-3): Blue background + solid left border
+ * Each level has a DISTINCT visual treatment (P0-2 rework — colors updated):
+ *   Level-1 (Depth 1, Критический): Red bg + dashed bottom border
+ *   Level-2 (Depth 2, Важный):      Orange bg + solid bottom border
+ *   Level-3 (Depth 3, Умеренный):   Amber bg + solid left border
+ *   Level-4 (Depth 4, Информационный): Teal bg + dotted border
+ *   Level-5 (Depth 5, Справочный):  Blue bg + solid right border
+ *   Level-6 (legacy, rarely used):  Orange top border
  * This ensures color-blind users can also distinguish levels. */
 .highlight-level-1 {
   background-color: var(--highlight-level-1-bg);
@@ -373,7 +383,27 @@
   font-size: 0.85em;
   margin-bottom: 4px;
   opacity: 0.8;
+  /* Default — overridden by channel-specific rules below when the parent
+     .segment-card has a data-speaker attribute. */
   color: var(--color-text-primary, #1a1a1a);
+}
+
+/* Speaker label channel colors — UX rework (AG-UX-NAV-DASHBOARD):
+   Previously the speaker label used `color-text-primary` for both
+   speakers, relying only on background tint to distinguish channels.
+   Now the label text itself uses the same channel CSS vars as the rest
+   of the app (--dict-channel-operator/client, derived from DS status
+   tokens --color-status-success/info), so:
+   - Клиент → blue (info)
+   - Сотрудник → green (success)
+   Dark theme adapts automatically (vars redefined in [data-theme="dark"]).
+   Selector targets the parent card's data-speaker attribute. */
+.segment-card[data-speaker="Клиент"] .segment-speaker {
+  color: var(--dict-channel-client, #1e88e5);
+}
+
+.segment-card[data-speaker="Сотрудник"] .segment-speaker {
+  color: var(--dict-channel-operator, #43a047);
 }
 
 .segment-text {
@@ -435,6 +465,21 @@
   font-size: 0.8em;
   opacity: 0.7;
   margin-bottom: 2px;
+  /* Default — overridden by channel-specific rules below. */
+  color: var(--color-text-primary, #1a1a1a);
+}
+
+/* Speaker label channel colors — UX rework (AG-UX-NAV-DASHBOARD):
+   Same treatment as .segment-speaker above: the label text uses
+   channel-specific CSS vars so speakers are distinguishable by color,
+   not just by background tint. Selector targets the parent bubble's
+   data-speaker attribute. */
+.dialogue-bubble[data-speaker="Клиент"] .dialogue-speaker-label {
+  color: var(--dict-channel-client, #1e88e5);
+}
+
+.dialogue-bubble[data-speaker="Сотрудник"] .dialogue-speaker-label {
+  color: var(--dict-channel-operator, #43a047);
 }
 
 /* --- Upload area --- */

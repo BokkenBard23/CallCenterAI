@@ -1,0 +1,46 @@
+/**
+ * PageBreadcrumbs — ensures visible wayfinding trail on all sub-pages.
+ *
+ * BUG 2 FIX: The DS Breadcrumbs component renders text items that can be
+ * visually subtle (inactive text color, small font). This CSS ensures:
+ * 1. The breadcrumb container is always visible (not hidden by overflow).
+ * 2. There is adequate vertical spacing above/below the trail.
+ * 3. The current-page text is readable (not too faint).
+ */
+
+.page-breadcrumbs {
+  display: block;
+  visibility: visible;
+  position: relative;
+  z-index: 1;
+  padding: var(--sizeSpacingX1, 4px) 0;
+  min-height: 24px;
+}
+
+/* Ensure the DS Breadcrumbs nav inside is visible and properly sized */
+.page-breadcrumbs .dsb-breadcrumbs,
+.page-breadcrumbs nav[aria-label] {
+  display: block;
+  visibility: visible;
+}
+
+.page-breadcrumbs .dsb-breadcrumbs__list {
+  margin: 0;
+  padding: 0;
+}
+
+/* Make the current page (last item) span more readable */
+.page-breadcrumbs .dsb-breadcrumbs__item > span[aria-current="page"] {
+  color: var(--color-text-active, inherit);
+  font-weight: 500;
+}
+
+/* Ensure link items have visible interactive affordance */
+.page-breadcrumbs .dsb-breadcrumbs__item a {
+  color: var(--color-text-link, var(--color-text-active, inherit));
+  text-decoration: none;
+}
+
+.page-breadcrumbs .dsb-breadcrumbs__item a:hover {
+  text-decoration: underline;
+}

@@ -121,7 +121,41 @@ type ViewMode = 'summary' | 'highlighted' | 'structure';
 | `highlighted` | Текст диалога с подсветкой совпадений | ResultsPage (default) |
 | `structure` | Структурированный вид (дерево словаря) | ResultsPage |
 
-> **⚠️ Known tech debt:** `ResultsPage.tsx:178` содержит cast `'structure' as ViewMode` — type-system врёт. Нужно расширить `ViewMode` union (см. TODO_AND_ROADMAP.md).
+> **✅ Tech debt resolved (Track B, 2026-07-07):** `ViewMode` union расширен, cast `'structure' as ViewMode` убран из `ResultsPage.tsx`. Три режима (`summary` | `highlighted` | `structure`) работают без type assertion.
+
+---
+
+## 5. Highlight Colors (P0-2 rework)
+
+> **⚠️ ВНИМАНИЕ:** Цветовая палитра подсветки была полностью переработана в P0-2 rework.
+> Источник правды: `src/components/highlight.scss`.
+
+### 5.1. Depth-based палитра (актуальная)
+
+| Depth | Название | Light bg | Dark bg | Border style |
+|-------|----------|----------|---------|--------------|
+| 1 | Критический | `rgba(211,47,47,0.15)` (red) | `rgba(239,83,80,0.25)` (red) | solid |
+| 2 | Важный | `rgba(230,81,0,0.15)` (orange) | `rgba(255,112,67,0.25)` (orange) | dashed |
+| 3 | Умеренный | `rgba(249,168,37,0.20)` (amber) | `rgba(255,202,40,0.25)` (amber) | dotted |
+| 4 | Информационный | `rgba(0,137,123,0.15)` (teal) | `rgba(29,233,182,0.20)` (teal) | double |
+| 5 | Справочный | `rgba(21,101,192,0.15)` (blue) | `rgba(66,165,245,0.25)` (blue) | dashed |
+| 6 | Legacy | `#ffe0b2` (light orange) | `#5d4037` (brown) | dashed top |
+
+### 5.2. Формула уровня
+
+```
+highlight_level = (cascade_order - 1) * 2 + word_distance_used
+depth = min(cascade_order, 5)  // cascade > 5 → depth=5
+```
+
+### 5.3. Speaker card backgrounds
+
+| Speaker | Light bg | Dark bg |
+|---------|----------|---------|
+| Клиент | `#e3f2fd` (light blue) | `#1a2a3e` (dark navy) |
+| Сотрудник | `#f3e5f5` (light purple) | `#2a1a3e` (dark purple) |
+
+> **⚠️ Known gap:** Speaker labels (`Сотрудник`/`Клиент`) используют `color-text-primary`, не channel-specific colors. Различение только через фон карточки.
 
 ---
 
@@ -180,16 +214,21 @@ highlight_level = (cascade_order - 1) * 2 + word_distance_used
 
 ## 8. Структура Frontend
 
-### 8.1. Pages
+### 8.1. Pages & Routes
 
-| Page | Назначение |
-|------|-----------|
-| `UploadPage.tsx` | Загрузка RTF + XML (Stepper + DropZone) |
-| `ResultsPage.tsx` | Результаты анализа (Grid responsive + TabPanel, 3 ViewMode) |
-| `BatchResultsPage.tsx` | Пакетные результаты (DS Table + AnimatedProgress) |
-| `HistoryPage.tsx` | История анализов (Pagination + Search) |
-| `SpeechLabPage.tsx` | SpeechLab (3-panel layout, XML tree, channel colors) |
-| `DictionaryEditorPage.tsx` | Редактор словарей (CRUD + AI + Mining + XML export) |
+> **Источник правды:** `src/App.tsx` — routes defined lines 126-132.
+
+| Route | Page | Назначение |
+|-------|------|-----------|
+| `/` | `UploadPage.tsx` | Загрузка RTF + XML (Stepper wizard + DropZone, auto-advance) |
+| `/results` | `ResultsPage.tsx` | Результаты анализа (Grid responsive + TabPanel, 3 ViewMode). sessionId из AnalysisContext, не из URL. |
+| `/batch-results/:batchId` | `BatchResultsPage.tsx` | Пакетные результаты (DS Table + AnimatedProgress, polling) |
+| `/history` | `HistoryPage.tsx` | История анализов (LocalStorage, Pagination + Search) |
+| `/speechlab` | `SpeechLabPage.tsx` | SpeechLab (3-panel resizable layout, XML tree, channel colors) |
+| `/speechlab/:sessionId` | `SpeechLabPage.tsx` | SpeechLab с предзагруженной сессией |
+| `/dictionary/:sessionId` | `DictionaryEditorPage.tsx` | Редактор словарей (CRUD + AI + Mining + XML export) |
+
+> **⚠️ Внимание:** Ранее документация упоминала `/results/:sessionId`, `/batch/:batchId` и `/speech-lab`. Эти пути **не существуют** в `App.tsx`. Реальные пути — в таблице выше. Код и внутренняя навигация (`navigate(...)`) консистентны с реальными путями.
 
 ### 8.2. Key components
 

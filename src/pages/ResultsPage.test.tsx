@@ -12,6 +12,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import * as React from 'react';
 import { AnalysisProvider, useAnalysisContext } from '../context/AnalysisContext';
+import { SnackbarProvider } from '../context/SnackbarContext';
 import ResultsPage from './ResultsPage';
 import type { SearchResult, LLMResult } from '../types/api';
 import * as api from '../api/client';
@@ -134,10 +135,12 @@ function renderWithProviders(
 ) {
   return render(
     <MemoryRouter initialEntries={initialEntries}>
-      <AnalysisProvider>
-        {stateOverrides && <StateSetter stateOverrides={stateOverrides} />}
-        {ui}
-      </AnalysisProvider>
+      <SnackbarProvider>
+        <AnalysisProvider>
+          {stateOverrides && <StateSetter stateOverrides={stateOverrides} />}
+          {ui}
+        </AnalysisProvider>
+      </SnackbarProvider>
     </MemoryRouter>,
   );
 }
@@ -403,10 +406,12 @@ describe('ResultsPage', () => {
   it('does not use hard-coded color fallbacks in inline styles', () => {
     const { container } = render(
       <MemoryRouter initialEntries={['/results']}>
-        <AnalysisProvider>
-          <StateSetter stateOverrides={{ searchResult: sampleSearchResult }} />
-          <ResultsPage />
-        </AnalysisProvider>
+        <SnackbarProvider>
+          <AnalysisProvider>
+            <StateSetter stateOverrides={{ searchResult: sampleSearchResult }} />
+            <ResultsPage />
+          </AnalysisProvider>
+        </SnackbarProvider>
       </MemoryRouter>,
     );
 

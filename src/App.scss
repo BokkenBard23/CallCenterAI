@@ -11,6 +11,30 @@
   min-height: 0;
 }
 
+/* ═══════════════════════════════════════════════════════════
+ * NavBar — DS Tabs navigation bar (below Header, above main).
+ * Part of the flex column chain (rule 06 universal layout pattern):
+ * Header (flex-shrink:0) → NavBar (flex-shrink:0) → main (flex:1).
+ * NOT sticky, NOT calc(100vh - Npx) — pure flexbox chain.
+ * ═══════════════════════════════════════════════════════════ */
+.app-navbar {
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 var(--sizeSpacingX4, 16px);
+  border-bottom: 1px solid var(--color-border-default, #e0e0e0);
+  background-color: var(--color-background-base, #fff);
+}
+
+/* DS Tabs renders its own internal body wrapper; for NavBar use-case we
+   suppress the body (we only render the tab header row, content is the
+   routed page). DS Tabs hides its body when no children are present, so
+   we just render <Tabs> with empty <Tab> children. */
+.app-navbar .Tabs,
+.app-navbar [class*="Tabs"] {
+  border-bottom: none;
+}
+
 /* Theme transition — applied only during theme change (via JS class toggle)
    to avoid interfering with DS hover/focus transitions. */
 .app-root--theme-transition,

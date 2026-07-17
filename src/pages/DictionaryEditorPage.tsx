@@ -47,43 +47,43 @@ import { ValidationIssuesPanel } from '../components/DictionaryEditor/Validation
 import { XmlExportDialog } from '../components/DictionaryEditor/XmlExportDialog';
 import { MiningPanel } from '../components/DictionaryEditor/MiningPanel';
 import { useDictionaryEditor } from '../components/DictionaryEditor/useDictionaryEditor';
+import { PageBreadcrumbs } from '../components/PageBreadcrumbs';
 import type { DictionarySuggestion } from '../types/api';
 import './DictionaryEditorPage.scss';
 import './DictionaryEditorPage.css';
 
-/** Chunk 2 overlay visibility state. */
-interface Chunk2Overlays {
-  ai: boolean;
-  suggest: boolean;
-  dup: boolean;
-  val: boolean;
-  stat: boolean;
-  xml: boolean;
-  mining: boolean;
-}
+/**
+ * Modal/overlay mutex state for the DictionaryEditor.
+ *
+ * Replaces the previous N-boolean `Chunk2Overlays` shape with a single
+ * enum: opening any overlay implicitly closes the previously-open one
+ * (mutual exclusion). Snackbar and Tooltip are transient and not part of
+ * this enum — they can coexist with overlays.
+ *
+ * `null` = no overlay open.
+ */
+type DictEditorOverlay =
+  | 'ai-analysis'
+  | 'phrase-suggestions'
+  | 'duplicates'
+  | 'validation'
+  | 'statistics'
+  | 'xml-export'
+  | 'mining'
+  | null;
 
-const INITIAL_OVERLAYS: Chunk2Overlays = {
-  ai: false,
-  suggest: false,
-  dup: false,
-  val: false,
-  stat: false,
-  xml: false,
-  mining: false,
-};
-
-/** Header action buttons (Chunk 2) — wired to overlay visibility. */
+/** Header action buttons — wired to the activeOverlay enum. */
 const CHUNK2_ACTIONS: {
-  key: keyof Chunk2Overlays;
+  key: Exclude<DictEditorOverlay, null>;
   label: string;
   icon: Icons;
 }[] = [
-  { key: 'ai', label: 'AI анализ', icon: Icons.CpuWarning },
-  { key: 'suggest', label: 'Подсказать фразы', icon: Icons.Magic },
-  { key: 'dup', label: 'Дубликаты', icon: Icons.Copy },
-  { key: 'val', label: 'Валидация', icon: Icons.Check },
-  { key: 'stat', label: 'Статистика', icon: Icons.DataTransferCheck },
-  { key: 'xml', label: 'Экспорт XML', icon: Icons.Download },
+  { key: 'ai-analysis', label: 'AI анализ', icon: Icons.CpuWarning },
+  { key: 'phrase-suggestions', label: 'Подсказать фразы', icon: Icons.Magic },
+  { key: 'duplicates', label: 'Дубликаты', icon: Icons.Copy },
+  { key: 'validation', label: 'Валидация', icon: Icons.Check },
+  { key: 'statistics', label: 'Статистика', icon: Icons.DataTransferCheck },
+  { key: 'xml-export', label: 'Экспорт XML', icon: Icons.Download },
   { key: 'mining', label: 'Mining', icon: Icons.Search },
 ];
 
@@ -96,13 +96,14 @@ export default function DictionaryEditorPage(): ReactNode {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileTreeOpen, setMobileTreeOpen] = useState(false);
 
-  // Chunk 2 overlay visibility (Sidesheet / Modals / Dialog).
-  const [overlays, setOverlays] = useState<Chunk2Overlays>(INITIAL_OVERLAYS);
-  const openOverlay = useCallback((key: keyof Chunk2Overlays) => {
-    setOverlays((prev) => ({ ...prev, [key]: true }));
+  // Chunk 2 overlay mutex — a single enum replaces N booleans so opening
+  // any overlay implicitly closes the previously-open one.
+  const [activeOverlay, setActiveOverlay] = useState<DictEditorOverlay>(null);
+  const openOverlay = useCallback((key: Exclude<DictEditorOverlay, null>) => {
+    setActiveOverlay(key);
   }, []);
-  const closeOverlay = useCallback((key: keyof Chunk2Overlays) => {
-    setOverlays((prev) => ({ ...prev, [key]: false }));
+  const closeOverlay = useCallback(() => {
+    setActiveOverlay(null);
   }, []);
 
   // Chunk 2 jump-to-condition: highlight + scroll target row in ConditionsTable.
@@ -148,10 +149,14 @@ export default function DictionaryEditorPage(): ReactNode {
   }, [editor.selectedPath]);
 
   // ── Page-level states ────────────────────────────────────
+  // BUG 2 FIX: PageBreadcrumbs must render in ALL states (loading, error,
+  // empty, ready) so wayfinding is always visible. Previously the early
+  // returns for loading/error/empty skipped breadcrumbs entirely.
 
   if (editor.treeStatus === 'loading') {
     return (
       <Box className="dict-editor dict-editor--loading" padding="x4">
+        <PageBreadcrumbs currentPage="Редактор словарей" />
         <Stack direction="vertical" gap="x3">
           <Skeleton variant="title" width="40%" />
           <Skeleton variant="text" width="100%" height={56} />
@@ -167,6 +172,7 @@ export default function DictionaryEditorPage(): ReactNode {
   if (editor.treeStatus === 'error') {
     return (
       <Box className="dict-editor dict-editor--error" padding="x4">
+        <PageBreadcrumbs currentPage="Редактор словарей" />
         <Stack direction="vertical" gap="x3" align="start">
           <InlineAlert type="error">
             {editor.treeError ?? 'Не удалось загрузить словарь'}
@@ -182,6 +188,7 @@ export default function DictionaryEditorPage(): ReactNode {
   if (editor.treeStatus === 'empty') {
     return (
       <Box className="dict-editor dict-editor--empty" padding="x6">
+        <PageBreadcrumbs currentPage="Редактор словарей" />
         <Stack direction="vertical" gap="x4" align="center">
           <Typography variant="h5">Нет словарей в сессии</Typography>
           <Typography variant="body1" color="colorTextInactive">
@@ -216,10 +223,16 @@ export default function DictionaryEditorPage(): ReactNode {
 
   return (
     <Box className="dict-editor">
+      {/* Page-level wayfinding trail — replaces the in-tree breadcrumbs.
+          The tree path is already visible inside DictionaryTreePanel; the
+          page-level Breadcrumbs provide global wayfinding consistent with
+          other sub-pages. */}
+      <PageBreadcrumbs currentPage="Редактор словарей" />
+
       {/* Sticky header */}
       <header className="dict-editor__header">
         <Stack direction="horizontal" gap="x3" align="center" justify="space-between">
-          {/* Left side: menu toggle, title, breadcrumbs, dirty badge,
+          {/* Left side: menu toggle, title, dirty badge,
               and the sidebar collapse toggle (H11 FIX — moved here from the
               right side where it visually read as a stray `<` symbol next
               to the Mining action button). */}
@@ -232,6 +245,8 @@ export default function DictionaryEditorPage(): ReactNode {
               onClick={() => setMobileTreeOpen((v) => !v)}
             />
             <Typography variant="h6">Редактор словарей</Typography>
+            {/* Inline tree-path display (kept for context when a node is
+                selected — non-clickable, separate from the page trail). */}
             {crumbs.length > 1 && (
               <Breadcrumbs value={crumbs.map((c, i) => ({
                 label: c.label,
@@ -269,6 +284,7 @@ export default function DictionaryEditorPage(): ReactNode {
                 disabled={editor.conditionsStatus !== 'ready' && editor.conditionsStatus !== 'empty'}
                 title={a.label}
                 onClick={() => openOverlay(a.key)}
+                aria-pressed={activeOverlay === a.key}
               >
                 {a.label}
               </Button>
@@ -370,13 +386,13 @@ export default function DictionaryEditorPage(): ReactNode {
 
               {/* Chunk 2 collapsible panels (Validation + Statistics). */}
               <ValidationIssuesPanel
-                open={overlays.val}
+                open={activeOverlay === 'validation'}
                 sessionId={sessionId}
                 dictName={selectedDictName}
                 onJumpToCondition={handleJumpToCondition}
               />
               <StatisticsPanel
-                open={overlays.stat}
+                open={activeOverlay === 'statistics'}
                 sessionId={sessionId}
                 dictName={selectedDictName}
               />
@@ -394,54 +410,68 @@ export default function DictionaryEditorPage(): ReactNode {
         />
       )}
 
-      {/* Chunk 2 overlays */}
-      <AIAnalysisPanel
-        open={overlays.ai}
-        onClose={() => closeOverlay('ai')}
-        sessionId={sessionId}
-        dictName={selectedDictName}
-      />
+      {/* Chunk 2 overlays — mutex: only one is open at a time, controlled by
+           the activeOverlay enum. Opening one implicitly closes any other.
+           BUG 4 FIX: Sidesheet-based overlays (AI Analysis, Mining) are
+           conditionally rendered instead of always-mounted with isOpen
+           toggling. This guarantees the previous Sidesheet's portal is
+           fully unmounted before the new one mounts, preventing the
+           "both panels visible" / "big black empty block" defect where
+           DS Sidesheet exit animations overlap with enter animations.
+           Dialog-based overlays (PhraseSuggestions, Duplicates, XmlExport)
+           handle unmount cleanly via the DS Dialog component. */}
+      {activeOverlay === 'ai-analysis' && (
+        <AIAnalysisPanel
+          open={true}
+          onClose={closeOverlay}
+          sessionId={sessionId}
+          dictName={selectedDictName}
+        />
+      )}
       <PhraseSuggestionsModal
-        open={overlays.suggest}
-        onClose={() => closeOverlay('suggest')}
+        open={activeOverlay === 'phrase-suggestions'}
+        onClose={closeOverlay}
         sessionId={sessionId}
         dictName={selectedDictName}
         onAddSuggestion={handleAddSuggestion}
       />
       <DuplicatesModal
-        open={overlays.dup}
-        onClose={() => closeOverlay('dup')}
+        open={activeOverlay === 'duplicates'}
+        onClose={closeOverlay}
         sessionId={sessionId}
         dictName={selectedDictName}
         onJumpToCondition={handleJumpToCondition}
       />
       <XmlExportDialog
-        open={overlays.xml}
-        onClose={() => closeOverlay('xml')}
+        open={activeOverlay === 'xml-export'}
+        onClose={closeOverlay}
         sessionId={sessionId}
         rootDictNames={rootDictNames}
         defaultDictName={selectedDictName}
       />
 
-      {/* Track B — MiningPanel overlay (Variant C: Sidesheet) */}
-      <Sidesheet
-        isOpen={overlays.mining}
-        onClose={() => closeOverlay('mining')}
-        title="Mining"
-        mode="modal"
-        placement="right"
-        size="large"
-        hasOverlay
-        className="dict-editor__mining-sidesheet"
-        content={
-          <MiningPanel
-            sessionId={sessionId}
-            dictionaryId={selectedDictName}
-            tree={editorTree}
-            onAddSuggestion={handleAddSuggestion}
-          />
-        }
-      />
+      {/* Track B — MiningPanel overlay (Variant C: Sidesheet).
+          Conditionally rendered to guarantee mutex with AIAnalysisPanel. */}
+      {activeOverlay === 'mining' && (
+        <Sidesheet
+          isOpen={true}
+          onClose={closeOverlay}
+          title="Mining"
+          mode="modal"
+          placement="right"
+          size="large"
+          hasOverlay
+          className="dict-editor__mining-sidesheet"
+          content={
+            <MiningPanel
+              sessionId={sessionId}
+              dictionaryId={selectedDictName}
+              tree={editorTree}
+              onAddSuggestion={handleAddSuggestion}
+            />
+          }
+        />
+      )}
     </Box>
   );
 }

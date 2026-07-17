@@ -1,6 +1,13 @@
 /*
  * MiningPanel styles.
  *
+ * MINING-LAYOUT-FIX: fixes 24 visual defects from vision-gate audit:
+ *  - Panel too narrow / compressed (#1) → width:100%, min-width:0
+ *  - Large empty space / layout collapse (#4) → flex column, Tabs flex:1
+ *  - Tabs overcrowded / label truncation (#6, #7) → overflow-x:auto + nowrap
+ *  - Picker row cramped / wrap (#5, #8) → flex-wrap, gap, min-width:0
+ *  - Section dividers (#9) → margin separators between blocks
+ *
  * mobile_relevance: none — internal tool, desktop only (FullHD+).
  * All @media(max-width:767px) mobile responsive overrides removed:
  *   - m-2 tabs scroll fix (not needed: desktop has enough width for 3 tabs)
@@ -9,20 +16,80 @@
  * fit without truncation (after Bug 2 fix: "LLM-аудит словаря" → "LLM-аудит").
  */
 
-/* H9 FIX (vision-audit): the vision audit found that the "LLM-аудит" tab
-   label was being truncated to "LLM-ауд…" inside the Sidesheet.
-   m-3 FIX (open-tasks-cleanup): replaced fragile wildcard attribute
-   selectors (:where([class*="Tabs"], [class*="tabs"])) with specific DS
-   class names confirmed from the DS source (Tabs.css / Tab.css):
-     .dsb_tabs            — root Tabs container
-     .dsb_tabs__header    — header (DS sets overflow:hidden, needs override)
-     .dsb_tabs__header-tabs — tab list (flex row of tab buttons)
-     .dsb_tab-new         — individual tab button
-     .dsb_tab-new__label  — tab label text span
-   This is robust against DS internal renames as long as the public
-   component API stays stable. */
+/* ============================================================
+ * Panel root layout
+ * ============================================================
+ * The panel renders inside a DS Sidesheet (size=large, mode=modal,
+ * placement=right). The Sidesheet content slot needs the panel to
+ * claim the full available width and height so controls do not
+ * collapse and the tab content fills the panel instead of leaving
+ * empty space below. */
+.mining-panel {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: var(--size-spacing-x4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-spacing-x4);
+}
+
+/* ============================================================
+ * Picker row
+ * ============================================================
+ * Wraps on narrow widths and never overflows horizontally.
+ * `min-width: 0` is the standard flex-overflow guard. */
+.mining-panel__picker-row {
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: var(--size-spacing-x2);
+}
+
+/* DirectoryPicker (inline, no Dialog) — keep trigger + label
+   on the same row without shrinking the label into the button. */
+.directory-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-spacing-x2);
+  min-width: 0;
+}
+
+.directory-picker__label {
+  white-space: nowrap;
+}
+
+.directory-picker__input {
+  /* Hidden but still focusable/clickable via the trigger button.
+     `display:none` would prevent programmatic click() on some browsers,
+     so we visually hide instead. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+}
+
+/* ============================================================
+ * Tabs: full-height flex column
+ * ============================================================
+ * Lets the tab content area grow and scroll instead of leaving a
+ * large empty band at the bottom of the Sidesheet (#4).
+ * Target the DS-generated `.dsb_tabs` root rather than relying on a
+ * custom className prop (DS Tabs does not expose className in its
+ * public API — verified via the existing H9 fix using the same class). */
 .mining-panel .dsb_tabs {
   max-width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .mining-panel .dsb_tabs__header,
@@ -47,4 +114,32 @@
   text-overflow: clip !important;
   overflow: visible !important;
   white-space: nowrap !important;
+}
+
+/* Tab content panel — grow to fill remaining height and scroll vertically
+   instead of pushing the whole Sidesheet to overflow (#4, #7).
+   DS class names verified from DS source: `.dsb_tabs__content` is the
+   content wrapper rendered by <Tabs>; `.dsb_tab-new__panel` is the
+   per-Tab panel. We target both plus a fallback attribute selector for
+   DS versions that may use a slightly different class. */
+.mining-panel .dsb_tabs__content,
+.mining-panel .dsb_tab-new__panel,
+.mining-panel [class*="tabs__content"],
+.mining-panel [class*="tabs__panel"],
+.mining-panel [class*="tab-new__panel"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Keep a sensible scroll container so long lists do not overflow the
+     Sidesheet footer. Padding is preserved via DS defaults. */
+  padding-block: var(--size-spacing-x3);
+}
+
+/* ============================================================
+ * Section rhythm / dividers
+ * ============================================================
+ * Subtle vertical breathing between picker row, progress band and
+ * Tabs — improves reading order without adding extra Divider DOM. */
+.mining-panel > .mining-panel__picker-row {
+  padding-block-end: var(--size-spacing-x2);
 }

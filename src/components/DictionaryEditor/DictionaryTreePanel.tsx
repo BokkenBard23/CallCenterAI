@@ -163,6 +163,14 @@ function DictionaryTreePanelBase({
 
   const renderNodes = (nodes: NodeRuntime[]): React.ReactNode =>
     nodes.map((n) => (
+      // BUG 3 FIX: The outer DS Tooltip was removed because:
+      // 1. DS TreeNode already has a built-in Tooltip on its title text
+      //    (shows when text is truncated via text-overflow: ellipsis).
+      // 2. Wrapping a function component (TreeNodeWithMenu) in DS Tooltip
+      //    causes "Function components cannot be given refs" console error
+      //    because Tooltip/Popover tries to attach a ref to the child.
+      // The internal TreeNode Tooltip handles the truncated-name discovery
+      // use case without any ref forwarding issues.
       <TreeNodeWithMenu
         key={n.id}
         node={n}

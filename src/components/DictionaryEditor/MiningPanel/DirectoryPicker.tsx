@@ -3,8 +3,16 @@
  *
  * MP-GAP-1: browser has no native directory picker API standardised in DS.
  * DS FileUploader supports only `multiple` + `accept` (no `webkitdirectory`),
- * so we wrap a hidden `<input type="file" webkitdirectory multiple>` inside a
- * DS Dialog and render the selected RTF file list via DS List + ListItem.
+ * so we wrap a hidden `<input type="file" webkitdirectory multiple>` and
+ * trigger it directly from a DS Button. The picked files are auto-confirmed
+ * (no separate confirm step) and reported back to the parent via `onPick`.
+ *
+ * Layout fix (MINING-LAYOUT-FIX): previously this component rendered a DS
+ * `Dialog` (nested modal) inside the parent `Sidesheet`, which caused a
+ * z-index conflict — the Dialog appeared over the table content behind the
+ * Sidesheet rather than over the Sidesheet content, and lacked a proper
+ * backdrop. Replacing the Dialog with an inline hidden-input pattern
+ * eliminates the nested-modal overlay problem entirely.
  *
  * Hybrid mode compliant (.opencode/rules/01-design-system-first.md п.8).
  * webkitdirectory is a stable HTML5 attribute supported by all modern
@@ -14,20 +22,11 @@
  * the BE resolves the absolute directory_path server-side (browser sandbox
  * only exposes relative paths inside the chosen folder, so we send the file
  * list and let BE inspect the directory). For Quick Win demo we also expose
- * `directoryPath` (top-level folder name) so the UI can label the chosen dir.
+ * `directoryLabel` (top-level folder name) so the UI can label the chosen dir.
  */
 
-import { memo, useCallback, useRef, useState, type ChangeEvent } from 'react';
-import {
-  Box,
-  Button,
-  Dialog,
-  Icon,
-  List,
-  ListItem,
-  Stack,
-  Typography,
-} from '@beeline/design-system-react';
+import { memo, useCallback, useRef, type ChangeEvent } from 'react';
+import { Button, Icon, Typography } from '@beeline/design-system-react';
 import { Icons } from '@beeline/design-tokens/js/iconfont';
 
 export interface PickedFile {
@@ -42,19 +41,12 @@ export interface DirectoryPickerProps {
   directoryLabel: string | null;
   /** Number of files selected — shown next to the trigger button. */
   fileCount: number;
-  /** Open dialog state (parent-controlled). */
-  open: boolean;
-  /** Open the picker dialog. */
-  onOpen: () => void;
-  /** Close the picker dialog (cancel). */
-  onClose: () => void;
-  /** Confirm selection — receives the picked files + directory label. */
-  onConfirm: (files: PickedFile[], directoryLabel: string) => void;
-}
-
-interface PendingSelection {
-  files: PickedFile[];
-  directoryLabel: string;
+  /** Called immediately when the user picks a directory (auto-confirm). */
+  onPick: (files: PickedFile[], directoryLabel: string) => void;
+  /** Optional: disable the trigger button (e.g. while indexing). */
+  disabled?: boolean;
+  /** Optional: show loading state on the trigger button. */
+  loading?: boolean;
 }
 
 function extractDirectoryLabel(fileList: FileList | null): string {
@@ -80,110 +72,59 @@ function toPickedFiles(fileList: FileList | null): PickedFile[] {
 function DirectoryPickerBase({
   directoryLabel,
   fileCount,
-  open,
-  onOpen,
-  onClose,
-  onConfirm,
+  onPick,
+  disabled,
+  loading,
 }: DirectoryPickerProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [pending, setPending] = useState<PendingSelection | null>(null);
 
-  const handleInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const fileList = event.target.files;
-    const files = toPickedFiles(fileList);
-    const directoryLabel = extractDirectoryLabel(fileList);
-    setPending({ files, directoryLabel });
-    // Reset input value so the same directory can be re-picked if needed.
-    event.target.value = '';
-  }, []);
-
-  const handleConfirm = useCallback(() => {
-    if (!pending || pending.files.length === 0) return;
-    onConfirm(pending.files, pending.directoryLabel);
-    setPending(null);
-  }, [pending, onConfirm]);
-
-  const handleCancel = useCallback(() => {
-    setPending(null);
-    onClose();
-  }, [onClose]);
-
-  const pendingFiles = pending?.files ?? [];
-  const pendingLabel = pending?.directoryLabel ?? '';
+  const handleInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const fileList = event.target.files;
+      const files = toPickedFiles(fileList);
+      const label = extractDirectoryLabel(fileList);
+      if (files.length > 0) {
+        onPick(files, label);
+      }
+      // Reset input value so the same directory can be re-picked if needed.
+      event.target.value = '';
+    },
+    [onPick],
+  );
 
   return (
-    <>
-      <Button variant="secondary" startIcon={<Icon iconName={Icons.Folder} />} onClick={onOpen}>
+    <span className="directory-picker">
+      <Button
+        variant="secondary"
+        startIcon={<Icon iconName={Icons.Folder} />}
+        disabled={disabled}
+        loading={loading}
+        onClick={() => inputRef.current?.click()}
+      >
         Указать директорию с RTF
       </Button>
+
       {directoryLabel && (
-        <Typography variant="caption" color="colorTextInactive">
+        <Typography variant="caption" color="colorTextInactive" className="directory-picker__label">
           {directoryLabel} ({fileCount} файлов)
         </Typography>
       )}
 
-      <Dialog open={open} onClose={handleCancel} applicationRootElement="root">
-        <Box style={{ padding: 'var(--size-spacing-x4)', minWidth: 'min(520px, 92vw)' }}>
-          <Stack direction="vertical" gap="x3">
-            <Stack direction="horizontal" gap="x2" align="center" justify="space-between">
-              <Typography variant="h6">Выбор директории с RTF</Typography>
-            </Stack>
-
-            {/* MP-GAP-1 controlled fallback: hidden native input with webkitdirectory.
-                DS FileUploader does not support webkitdirectory (verified, 14 props). */}
-            <input
-              ref={inputRef}
-              type="file"
-              // webkitdirectory is a non-standard but universally-supported HTML attribute.
-              // React types do not declare it; cast to any is forbidden by eslint rule,
-              // so we set it via a wrapper attribute object spread below.
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleInputChange}
-              {...({ webkitdirectory: '' } as unknown as Record<string, string>)}
-            />
-            <Button
-              variant="secondary"
-              startIcon={<Icon iconName={Icons.Folder} />}
-              onClick={() => inputRef.current?.click()}
-            >
-              Выбрать папку
-            </Button>
-
-            <Typography variant="caption" color="colorTextInactive">
-              Выбрано файлов: {pendingFiles.length}
-              {pendingLabel ? ` в папке «${pendingLabel}»` : ''}
-            </Typography>
-
-            {pendingFiles.length > 0 && (
-              <Box style={{ maxHeight: '240px', overflow: 'auto' }}>
-                <List>
-                  {pendingFiles.slice(0, 200).map((f) => (
-                    <ListItem key={f.path}>{f.path}</ListItem>
-                  ))}
-                  {pendingFiles.length > 200 && (
-                    <ListItem>…и ещё {pendingFiles.length - 200} файлов</ListItem>
-                  )}
-                </List>
-              </Box>
-            )}
-
-            <Stack direction="horizontal" gap="x2" justify="end">
-              <Button variant="ghost" onClick={handleCancel}>
-                Отмена
-              </Button>
-              <Button
-                variant="primary"
-                disabled={pendingFiles.length === 0}
-                onClick={handleConfirm}
-              >
-                Подтвердить
-              </Button>
-            </Stack>
-          </Stack>
-        </Box>
-      </Dialog>
-    </>
+      {/* MP-GAP-1 controlled fallback: hidden native input with webkitdirectory.
+          DS FileUploader does not support webkitdirectory (verified, 14 props).
+          Kept hidden — no nested modal is rendered, avoiding the Sidesheet
+          z-index / backdrop conflict described in MINING-LAYOUT-FIX. */}
+      <input
+        ref={inputRef}
+        type="file"
+        // webkitdirectory is a non-standard but universally-supported HTML attribute.
+        // React types do not declare it; cast to a record and spread below.
+        multiple
+        className="directory-picker__input"
+        onChange={handleInputChange}
+        {...({ webkitdirectory: '' } as unknown as Record<string, string>)}
+      />
+    </span>
   );
 }
 

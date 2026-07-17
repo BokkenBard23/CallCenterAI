@@ -134,7 +134,7 @@ describe('UploadPage', () => {
 
   it('renders page title', async () => {
     renderUploadPage();
-    expect(screen.getByText('Загрузка данных для анализа')).toBeTruthy();
+    expect(screen.getByText('Анализ диалогов')).toBeTruthy();
   });
 
   it('renders RTF upload area via DropZone', () => {

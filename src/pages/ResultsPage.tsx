@@ -40,6 +40,7 @@ import { Icons } from '@beeline/design-tokens/js/iconfont';
 import { indexDialogue, getEmbeddingStatus, exportExcel, exportPdf, ApiError } from '../api/client';
 import { useAnalysisContext } from '../context/AnalysisContext';
 import { HoverProvider } from '../context/HoverContext';
+import { useSnackbar } from '../context/SnackbarContext';
 import SummaryView from '../components/SummaryView';
 import HighlightedTextView from '../components/HighlightedTextView';
 import DictionaryTree from '../components/DictionaryTree';
@@ -48,6 +49,7 @@ import SemanticSearchPanel from '../components/SemanticSearchPanel';
 import MatchCounter from '../components/MatchCounter/MatchCounter';
 import { QualityScorePanel } from '../components/QualityScorePanel';
 import { BlurFade } from '../components/ui/blur-fade';
+import { PageBreadcrumbs } from '../components/PageBreadcrumbs';
 import type { Group as NavGroup } from '@beeline/design-system-react';
 import type { DictMatch, DictionaryCondition, DictionaryNode, EmbeddingStatusResponse, ViewMode } from '../types/api';
 
@@ -126,6 +128,12 @@ export default function ResultsPage() {
 function ResultsPageContent() {
   const { state, dispatch } = useAnalysisContext();
   const navigate = useNavigate();
+  // C4 FIX (PHASE L audit): export failures (503 backend, network errors)
+  // were previously only surfaced via an InlineAlert buried mid-page —
+  // vision audit confirmed "silent failure / swallowed error". Now we
+  // also fire a snackbar for both error and success, giving the user
+  // immediate visible feedback regardless of scroll position.
+  const { showSnackbar } = useSnackbar();
   const breakpoints = useBreakpoints();
   const { isMobile, isTablet, isDesktop } = breakpoints;
 
@@ -346,15 +354,18 @@ function ResultsPageContent() {
       a.download = `analysis_${state.sessionId}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
+      showSnackbar('Excel-файл готов', { variant: 'elastic', delay: 4000 });
     } catch (err) {
       if (controller.signal.aborted) return;
-      setExportError(err instanceof ApiError ? err.message : 'Ошибка при экспорте Excel');
+      const message = err instanceof ApiError ? err.message : 'Ошибка при экспорте Excel';
+      setExportError(message);
+      showSnackbar(`Ошибка экспорта: ${message}`, { variant: 'fixed', delay: 6000 });
     } finally {
       if (!controller.signal.aborted) {
         setExportExcelLoading(false);
       }
     }
-  }, [state.sessionId]);
+  }, [state.sessionId, showSnackbar]);
 
   // ── Export PDF handler ──
   const handleExportPdf = useCallback(async () => {
@@ -375,15 +386,18 @@ function ResultsPageContent() {
       a.download = `analysis_${state.sessionId}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+      showSnackbar('PDF-файл готов', { variant: 'elastic', delay: 4000 });
     } catch (err) {
       if (controller.signal.aborted) return;
-      setExportError(err instanceof ApiError ? err.message : 'Ошибка при экспорте PDF');
+      const message = err instanceof ApiError ? err.message : 'Ошибка при экспорте PDF';
+      setExportError(message);
+      showSnackbar(`Ошибка экспорта: ${message}`, { variant: 'fixed', delay: 6000 });
     } finally {
       if (!controller.signal.aborted) {
         setExportPdfLoading(false);
       }
     }
-  }, [state.sessionId]);
+  }, [state.sessionId, showSnackbar]);
 
   // ── Cross-highlighting: result click → scroll to turn ──
   const handleResultClick = useCallback((_dialogueId: string, turnIndex: number) => {
@@ -421,9 +435,13 @@ function ResultsPageContent() {
   );
 
   // ─── Empty state: no results yet ──────────────────────
+  // BUG 2 FIX: PageBreadcrumbs must render even in the empty/error states
+  // so wayfinding is always visible. Previously the early return skipped
+  // breadcrumbs entirely when no searchResult/llmResult was available.
   if (!state.searchResult && !state.llmResult) {
     return (
       <Stack direction="vertical" spacing="x6" align="center">
+        <PageBreadcrumbs currentPage="Результаты" />
         <Typography variant="h1" style={{ margin: 0 }}>Результаты не найдены</Typography>
         <Typography variant="body1" inactive>
           Сначала загрузите диалог и выполните анализ.
@@ -504,33 +522,36 @@ function ResultsPageContent() {
           )}
           {/* ── Header row ── */}
           <Stack direction="horizontal" spacing="x3" align="center" justify="space-between">
-            <Stack direction="horizontal" spacing="x3" align="center">
-              {/* Burger button — mobile/tablet only */}
-              {!isDesktop && (
-                <IconButton
-                  iconName={Icons.Menu}
-                  variant="plain"
-                  aria-label="Открыть панель словаря"
-                  onClick={() => setDrawerOpen(true)}
-                />
-              )}
+            <Stack direction="vertical" spacing="x1" align="start">
+              <PageBreadcrumbs currentPage="Результаты" />
+              <Stack direction="horizontal" spacing="x3" align="center">
+                {/* Burger button — mobile/tablet only */}
+                {!isDesktop && (
+                  <IconButton
+                    iconName={Icons.Menu}
+                    variant="plain"
+                    aria-label="Открыть панель словаря"
+                    onClick={() => setDrawerOpen(true)}
+                  />
+                )}
 
-              {/* Expand button (when desktop sidebar collapsed) */}
-              {isDesktop && sidebarCollapsed && (
+                {/* Expand button (when desktop sidebar collapsed) */}
+                {isDesktop && sidebarCollapsed && (
+                  <IconButton
+                    iconName={Icons.Expand}
+                    variant="plain"
+                    aria-label="Развернуть панель словаря"
+                    onClick={toggleSidebar}
+                  />
+                )}
                 <IconButton
-                  iconName={Icons.Expand}
+                  iconName={Icons.ArrowLeft}
                   variant="plain"
-                  aria-label="Развернуть панель словаря"
-                  onClick={toggleSidebar}
+                  aria-label="Назад к загрузке"
+                  onClick={handleBack}
                 />
-              )}
-              <IconButton
-                iconName={Icons.ArrowLeft}
-                variant="plain"
-                aria-label="Назад к загрузке"
-                onClick={handleBack}
-              />
-              <Typography variant="h1" style={{ margin: 0 }}>Результаты анализа</Typography>
+                <Typography variant="h1" style={{ margin: 0 }}>Результаты анализа</Typography>
+              </Stack>
             </Stack>
 
             {/* ── Action buttons ── */}
