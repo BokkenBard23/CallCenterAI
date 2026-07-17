@@ -172,8 +172,11 @@ function ResultsPageContent() {
 
   const handleViewModeChange = useCallback(
     (tabIndex: number) => {
-      const mode: ViewMode =
-        tabIndex === 0 ? 'summary' : tabIndex === 1 ? 'highlighted' : 'structure';
+      // N.MAJ.3 FIX: 'structure' view mode was declared but never implemented
+      // in the UI (no third <Tab>). Clamping to 'highlighted' for any index
+      // beyond the supported tabs prevents the dead 'structure' path from
+      // polluting the dispatched state.
+      const mode: ViewMode = tabIndex === 0 ? 'summary' : 'highlighted';
       dispatch({
         type: 'SET_VIEW_MODE',
         payload: mode,
@@ -425,7 +428,9 @@ function ResultsPageContent() {
   );
 
   // ─── Derived values ──────────────────────────────────
-  const activeTabIndex = state.viewMode === 'summary' ? 0 : state.viewMode === 'highlighted' ? 1 : 2;
+  // N.MAJ.3 FIX: only two supported tabs ('summary' | 'highlighted').
+  // activeTabIndex is 0 for 'summary' and 1 for 'highlighted'.
+  const activeTabIndex = state.viewMode === 'summary' ? 0 : 1;
   const fridaAvailable = fridaStatus?.frida_available ?? false;
   const dictionaryNodes = state.dictionaries.map((d) => d.response.dictionary).filter(Boolean);
 

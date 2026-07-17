@@ -1009,7 +1009,26 @@ async def export_xml(
             detail=f"XML serialisation failed: {exc}",
         ) from exc
 
-    filename = f"{node.name}.xml"
+    # JK4 FIX: node.name may contain non-latin-1 characters (Cyrillic dict
+    # names like "Тестовый словарь UI"). Starlette encodes header values
+    # as latin-1, so a raw Cyrillic filename raises UnicodeEncodeError
+    # inside StreamingResponse.init_headers — which FastAPI surfaces as a
+    # generic 500 "Internal Server Error" (no detail JSON, plain-text body)
+    # BEFORE the response is sent. The route's own try/except never fires
+    # because the exception happens after the handler returns.
+    #
+    # Use RFC 5987 `filename*=UTF-8''<urlencoded>` form so the browser
+    # still receives the correct unicode filename, and supply an ASCII
+    # fallback `filename="..."` for legacy clients. Both forms must be
+    # latin-1 encodable.
+    from urllib.parse import quote
+
+    safe_ascii = (node.name or "dictionary").encode("ascii", "replace").decode("ascii")
+    utf8_quoted = quote(node.name or "dictionary", safe="")
+    content_disposition = (
+        f"attachment; filename=\"{safe_ascii}.xml\"; "
+        f"filename*=UTF-8''{utf8_quoted}.xml"
+    )
     logger.info(
         "dictionary.export_xml session=%s dict=%s bytes=%d",
         session_id, node.name, len(xml_bytes),
@@ -1017,5 +1036,5 @@ async def export_xml(
     return StreamingResponse(
         iter([xml_bytes]),
         media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition},
     )

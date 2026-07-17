@@ -37,6 +37,7 @@ import { Icons } from '@beeline/design-tokens/js/iconfont';
 import { analyzeDictionaryAi, getProviders } from '../../api/client';
 import type { DictionaryAnalysisResult, ProviderInfo } from '../../types/api';
 import { SimpleSelect, type SimpleOption } from './SimpleSelect';
+import './AIAnalysisPanel.css';
 
 export interface AIAnalysisPanelProps {
   open: boolean;
@@ -169,7 +170,7 @@ function AIAnalysisPanelBase({
           <Stack direction="vertical" gap="x3">
             <Stack direction="vertical" gap="x1">
               <Typography variant="h6">Сводка</Typography>
-              <Box>
+              <Box className="ai-analysis-content">
                 {/* ds_gap: react-markdown for AI summary (NOT LexiCore regex). */}
                 <ReactMarkdown>{data.summary}</ReactMarkdown>
               </Box>

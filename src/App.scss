@@ -98,6 +98,27 @@ textarea:focus-visible,
   outline-offset: 2px;
 }
 
+/* N.MAJ.1 FIX (PHASE N audit): DS Tree renders <ul role="tree"> and
+   <li role="treeitem" tabindex="0"> elements. The audit found the roving
+   tabindex lands on the <li> but no visible focus indicator was rendered
+   (computed outline: rgb(0,0,0) none 0px). The generic [tabindex]:focus-visible
+   rule above should match in theory, but DS Tree's internal CSS (and the
+   cascade order between DS styles and our App.scss) can prevent it from
+   firing on the specific <li role="treeitem"> selector. The explicit rule
+   below guarantees a visible ring on every keyboard-focusable tree node
+   in both Dictionary and SpeechLab trees.
+   Also targets the DS internal `.dsb_tree__node` class (verified in
+   node_modules/@beeline/design-system-react/build/components/Tree/Tree.css)
+   in case DS uses that wrapper instead of role="treeitem". */
+[role="treeitem"]:focus-visible,
+.dsb_tree__node:focus-visible,
+.dsb_tree li:focus-visible,
+[role="tree"] li:focus-visible {
+  outline: 2px solid var(--color-border-focus, #1e88e5) !important;
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
 .app-main {
   flex: 1;
   min-width: 0;

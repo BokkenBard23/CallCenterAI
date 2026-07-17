@@ -8,6 +8,23 @@
 
 ---
 
+## Pending — UX backlog
+
+### N.MAJ.3 — ViewMode "Структура" (unimplemented tab)
+**Status:** deferred (was: removed from ViewMode union, 2026-07-17)
+**Reason:** PHASE N research audit found that `ViewMode` type declared
+`'summary' | 'highlighted' | 'structure'` but `ResultsPage.tsx` only
+rendered two `<Tab>` elements ("Сводка" and "Выделенный текст"). The
+`activeTabIndex` ternary mapped `tabIndex=2` to `'structure'` with no
+matching `<Tab>` — a dead code path. Removed `'structure'` from the union
+and clamped `handleViewModeChange` so any unexpected index falls back to
+`'highlighted'`. If a tree-structure view of the search result is later
+desired (per original ResultsPage brief L.7), re-introduce the literal in
+`src/types/api.ts` together with the corresponding `<Tab>` element in
+`ResultsPage.tsx` and the rendering branch in `activeTabIndex`.
+
+---
+
 ## Текущий статус
 
 **Active task:** Track B — Quick Win Mining Panel — ✅ ALL DONE (2026-07-12)

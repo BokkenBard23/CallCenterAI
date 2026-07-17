@@ -320,7 +320,13 @@ export interface HistoryEntry {
 export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 export type AnalysisStatus = 'idle' | 'analyzing' | 'completed' | 'error';
 export type ProviderStatus = 'loading' | 'loaded' | 'error';
-export type ViewMode = 'summary' | 'highlighted' | 'structure';
+// N.MAJ.3 FIX (PHASE N audit): the 'structure' view mode was declared in
+// the union but never implemented — ResultsPage renders only two tabs
+// ("Сводка" and "Выделенный текст") and the activeTabIndex ternary mapped
+// tabIndex=2 to 'structure' with no matching <Tab>. Removed from the union
+// to prevent dead code paths. Tracked in TODO_AND_ROADMAP.md for future
+// implementation if needed.
+export type ViewMode = 'summary' | 'highlighted';
 
 // ═══════════════════════════════════════════════════════════
 // FRIDA Embeddings Models

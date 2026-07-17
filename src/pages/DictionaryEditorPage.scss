@@ -63,6 +63,49 @@
   min-width: 0;
   overflow: auto;
   padding: 16px;
+  /* JK7 FIX (PHASE J+K audit): when Sidesheet (AI Analysis / Mining)
+     opens with hasOverlay=true, the semi-transparent backdrop dims the
+     page below. With .dict-editor__main having no background, the page's
+     near-black --color-background-base showed through the empty area
+     below the short ConditionsTable content, and combined with the
+     backdrop the vision-gate repeatedly reported a "Большой полностью
+     чёрный прямоугольник" (large pure-black rectangle) in the
+     lower-center-left of the viewport.
+     Aligning the main background with the sidebar's
+     --color-background-secondary keeps the empty area visually
+     consistent with the surrounding panels (a muted dark-grey surface
+     instead of pure black), so the modal overlay no longer produces
+     a "missing/broken" black void. */
+  background: var(--color-background-secondary);
+}
+
+/* JK7 ROOT-CAUSE FIX: DS Sidesheet is rendered inline (position: relative,
+   height: 100%) and expects its parent to be a bounded-height container.
+   When placed inside .dict-editor (display:flex; flex-direction: column)
+   it becomes a flex item and participates in the column layout, consuming
+   vertical space at the bottom of the dict-editor. The Sidesheet element
+   is full-width (1376px) but its visible content panel is only 444px on
+   the right — the left ~900px appears as a large empty black rectangle
+   under the conditions table (vision-gate: "Большой полностью чёрный
+   прямоугольник, занимающий значительную часть нижней области экрана").
+   The DS Sidesheet mode="modal" prop only adds a `modal` class to the
+   inner `.dsb_sidesheet__content` (cursor:pointer, overflow:hidden) and
+   `has-shadow` to the elevation — it does NOT promote the Sidesheet to a
+   fixed-position overlay. We force the open Sidesheet inside .dict-editor
+   to position: fixed covering the viewport, so the inner overlay-bg
+   (position: absolute inside .dsb_sidesheet) covers the whole screen
+   and the content panel sits on the right at the proper z-index, without
+   taking any space in the column flex layout. */
+.dict-editor .dsb_sidesheet.dsb_sidesheet_open {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  z-index: 1000;
 }
 
 /* H7 FIX (vision-audit): page-level empty-state for the main area when
