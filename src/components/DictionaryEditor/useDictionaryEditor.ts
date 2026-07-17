@@ -227,7 +227,11 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
 
       const body: ConditionUpdateRequest = { [field]: value } as ConditionUpdateRequest;
       try {
-        await updateDictionaryCondition(sessionId, node.id || node.name, rowIdx, body, dictName);
+        // JK2 FIX: backend `_find_node_recursive` (dictionary.py:253) matches
+        // nodes by `node.name`, NOT by `node.id`. Sending `node.id` (e.g.
+        // "test-dict-ui") returns 404. Always send `node.name` (e.g.
+        // "Тестовый словарь UI"); client.ts already URL-encodes it.
+        await updateDictionaryCondition(sessionId, node.name, rowIdx, body, dictName);
         setRowStates((prev) => ({ ...prev, [rowIdx]: { status: 'idle' } }));
         // Note: response does not include logic_operator/open_brackets/close_brackets,
         // so we keep our optimistic local state for those fields.
@@ -262,7 +266,7 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
         close_brackets: 0,
       };
       try {
-        const res = await addDictionaryCondition(sessionId, node.id || node.name, body, dictName);
+        const res = await addDictionaryCondition(sessionId, node.name, body, dictName);
         const newCond = editorConditionFromCreate(res.condition);
         setConditions((prev) => {
           const next = [...prev];
@@ -276,7 +280,11 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
         setConditionsStatus('ready');
         markDirty();
       } catch (err) {
+        // JK3 FIX: also set conditionsStatus='error' so DictionaryEditorPage's
+        // InlineAlert renders the error message. Previously only
+        // setConditionsError() was called, leaving InlineAlert hidden.
         setConditionsError(errorMessage(err, 'Не удалось добавить условие'));
+        setConditionsStatus('error');
       }
     },
     [sessionId, selectedNodeId, tree, markDirty],
@@ -289,7 +297,7 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
       if (!node) return;
       const dictName = tree.length > 0 ? tree[0].name : undefined;
       try {
-        await deleteDictionaryCondition(sessionId, node.id || node.name, rowIdx, dictName);
+        await deleteDictionaryCondition(sessionId, node.name, rowIdx, dictName);
         setConditions((prev) => prev.filter((_, i) => i !== rowIdx));
         setRowStates((prev) => {
           const next = { ...prev };
@@ -323,13 +331,15 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
         close_brackets: 0,
       };
       try {
-        const res = await addDictionaryCondition(sessionId, node.id || node.name, body, dictName);
+        const res = await addDictionaryCondition(sessionId, node.name, body, dictName);
         const newCond = editorConditionFromCreate(res.condition);
         setConditions((prev) => [...prev, newCond]);
         setConditionsStatus('ready');
         markDirty();
       } catch (err) {
+        // JK3 FIX: mirror addCondition — also set status='error'.
         setConditionsError(errorMessage(err, 'Не удалось добавить фразу из подсказки'));
+        setConditionsStatus('error');
       }
     },
     [sessionId, selectedNodeId, tree, markDirty],
@@ -355,7 +365,7 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
         close_brackets: src.close_brackets,
       };
       try {
-        const res = await addDictionaryCondition(sessionId, node.id || node.name, body, dictName);
+        const res = await addDictionaryCondition(sessionId, node.name, body, dictName);
         const newCond = editorConditionFromCreate(
           res.condition,
           src.logic_operator,
@@ -369,7 +379,9 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
         });
         markDirty();
       } catch (err) {
+        // JK3 FIX: mirror addCondition — also set status='error'.
         setConditionsError(errorMessage(err, 'Не удалось дублировать'));
+        setConditionsStatus('error');
       }
     },
     [conditions, sessionId, selectedNodeId, tree, markDirty],
@@ -396,7 +408,7 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
       const order = conditions.map((_, i) => i);
       [order[rowIdx], order[targetIdx]] = [order[targetIdx], order[rowIdx]];
       try {
-        await reorderDictionaryConditions(sessionId, node.id || node.name, { new_order: order }, dictName);
+        await reorderDictionaryConditions(sessionId, node.name, { new_order: order }, dictName);
       } catch (err) {
         // Rollback swap.
         setConditions((prev) => {
@@ -404,7 +416,9 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
           [next[rowIdx], next[targetIdx]] = [next[targetIdx], next[rowIdx]];
           return next;
         });
+        // JK3 FIX: mirror addCondition — also set status='error'.
         setConditionsError(errorMessage(err, 'Не удалось переместить'));
+        setConditionsStatus('error');
       }
     },
     [conditions, sessionId, selectedNodeId, tree, markDirty],
@@ -431,7 +445,7 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
       if (!node) return;
       setTreeNodeStates((prev) => ({ ...prev, [nodeId]: { status: 'saving' } }));
       try {
-        await updateDictionaryNode(sessionId, node.id || node.name, { name: newName });
+        await updateDictionaryNode(sessionId, node.name, { name: newName });
         await fetchTree();
         setTreeNodeStates((prev) => ({ ...prev, [nodeId]: { status: 'idle' } }));
         markDirty();
@@ -452,7 +466,7 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
       const dictName = tree.length > 0 ? tree[0].name : undefined;
       setTreeNodeStates((prev) => ({ ...prev, [nodeId]: { status: 'saving' } }));
       try {
-        await deleteDictionaryNode(sessionId, node.id || node.name, dictName);
+        await deleteDictionaryNode(sessionId, node.name, dictName);
         if (selectedNodeId === nodeId) setSelectedNodeId(null);
         await fetchTree();
         setTreeNodeStates((prev) => ({ ...prev, [nodeId]: { status: 'idle' } }));

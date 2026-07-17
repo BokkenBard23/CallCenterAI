@@ -72,3 +72,17 @@ temp_dialog.rtf
 
 # OpenCode pipeline lock
 docs/specs/opencode-pipeline.lock.json
+
+# Playwright MCP temp artifacts
+.playwright-mcp/
+
+# Mining diagnostic scripts (temp)
+backend/verify_frida.py
+backend/verify_new_key.py
+backend/compare_keys.py
+backend/check_mining_db.py
+backend/cleanup_mining_db.py
+
+# Mining temp result files
+mining-index-result*.txt
+mining-index-error*.txt

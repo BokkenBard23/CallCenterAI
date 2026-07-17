@@ -498,13 +498,23 @@ function ConditionsTableBase({
         <TablePagination
           rowsCount={filteredData.length}
           rowsPerPage={pagination.pageSize}
-          page={pagination.pageIndex}
+          // JK5 FIX: DS TablePagination treats `page` as 1-based
+          // (default=1, formula `page * rowsPerPage - rowsPerPage + 1`).
+          // Previously we passed `pagination.pageIndex` (0-based), which
+          // produced negative range text like "-9-0 из 1".
+          page={pagination.pageIndex + 1}
           rowsPerPageOptions={[...PAGE_SIZE_OPTIONS]}
           onUserActions={(event) => {
             if (event.rowsPerPage !== pagination.pageSize) {
-              setPagination((p) => ({ ...p, pageSize: event.rowsPerPage, pageIndex: 0 }));
-            } else if (event.page !== pagination.pageIndex) {
-              setPagination((p) => ({ ...p, pageIndex: event.page }));
+              // Rows-per-page change — reset to first page.
+              setPagination((p) => ({
+                ...p,
+                pageSize: event.rowsPerPage,
+                pageIndex: 0,
+              }));
+            } else if (event.page - 1 !== pagination.pageIndex) {
+              // Page change — DS emits 1-based page, TanStack wants 0-based.
+              setPagination((p) => ({ ...p, pageIndex: event.page - 1 }));
             }
           }}
         />
