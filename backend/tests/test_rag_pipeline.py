@@ -848,16 +848,37 @@ class TestRAGRouter:
 
     @pytest.fixture
     def client(self) -> TestClient:
-        """Create a test client with RAG service mocked."""
+        """Create a test client with RAG service mocked.
+
+        The mock must be set AFTER TestClient enters its context (which
+        triggers lifespan startup). The startup calls _init_services()
+        which creates a real RAGService and sets app.state.rag_service.
+        We override it with a mock after startup completes.
+        """
         from app.main import app
 
-        # Create mock RAG service
-        mock_rag_service = MagicMock(spec=RAGService)
-
-        # Attach to app.state before creating client
-        app.state.rag_service = mock_rag_service
-
         with TestClient(app) as test_client:
+            # Override the real RAG service (created during startup) with a mock
+            mock_rag_service = MagicMock(spec=RAGService)
+            mock_rag_service.query = AsyncMock(return_value=RagQueryResponse(
+                question="Тест",
+                answer="Test answer",
+                sources=[],
+                context_used=0,
+                search_source="hybrid",
+                provider="test",
+                model="test-model",
+                error=None,
+            ))
+            mock_rag_service.get_status = AsyncMock(return_value={
+                "frida_available": True,
+                "vector_store": {"total_vectors": 100, "unique_dialogues": 5, "index_size_bytes": 614400},
+                "hybrid_search": {"rrf_k": 60, "ner_available": True},
+                "rag_model": "glm-xlarge",
+                "rag_model_note": "glm-xlarge only for RAG inference",
+                "providers": {},
+            })
+            app.state.rag_service = mock_rag_service
             yield test_client
 
     def test_rag_query_endpoint_exists(self, client: TestClient) -> None:

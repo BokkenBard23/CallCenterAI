@@ -36,7 +36,7 @@ from app.services.xml_serializer import (
 
 
 _DOCS_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "..", "docs", "chat"
+    os.path.dirname(__file__), "..", "..", "docs-archive", "chat"
 )
 
 

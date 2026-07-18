@@ -396,6 +396,40 @@ Real XML-словари хранят time-gap limits в `<ExtraLimitations>`, а
 
 Time-gap filtering работает **только** если `DialogueTurn` содержит `start_offset`/`end_offset` (секунды от начала диалога). Если RTF не содержит временных меток → `None` → фильтрация пропускается (no-op). Аналогично, `EventType=Parent` no-op, если `parent_match_times=None` или пустой.
 
+### 10.7. Источник timestamps (RTF → float seconds)
+
+Pipeline извлечения временных меток:
+
+```
+SmartLogger RTF (data/input/rtf/*.rtf)
+  │
+  │  smartlogger.rtf_parser.extract_dialogue(rtf_path)
+  │  → regex \\trowd.*?\\row, split by \\cell
+  │  → 3-я ячейка каждой строки таблицы = timestamp строка
+  │
+  ▼
+{"speaker": "Клиент"|"Сотрудник", "text": str, "time": "H:MM:SS"}
+  │
+  │  app/services/rtf_parser.py: _parse_timestamp_to_seconds(turn["time"])
+  │  → regex ^(?P<h>\d{1,2}):(?P<m>\d{1,2}):(?P<s>\d{1,2})$
+  │  → float(h * 3600 + m * 60 + s)
+  │
+  ▼
+DialogueTurn.start_offset: float | None
+DialogueTurn.end_offset: float | None  (= next turn's start_offset, last turn = own start)
+```
+
+**Канонический формат SmartLogger RTF:** `H:MM:SS` (одноразрядный час), например `0:00:01`, `0:05:48`, `0:06:11`.
+
+**Regression guard:** `backend/tests/test_rtf_timestamps_real.py` проверяет:
+- `_parse_timestamp_to_seconds()` на всех вариантах формата (H:MM:SS, HH:MM:SS, MM:SS, bare seconds, None, garbage)
+- Committed RTF (`docs/assets/sample-dialog.rtf`): ≥90% turns имеют `start_offset`, timestamps монотонны, `end_offset[N] == start_offset[N+1]`
+- Real RTF directory (`data/input/rtf/`): при наличии директории, случайная выборка файлов — ≥90% turns с timestamps
+
+**Верифицировано (18.07.2026):** все RTF в `data/input/rtf/` дают 100% timestamps (34 ms/файл). Time-gap filter работает (e2e: 11 matches на `sample-dialogue.xml` + `sample-dialog.rtf`).
+
+**Если timestamps отсутствуют:** `_has_timestamps(turns)` возвращает `False` → `_apply_time_gap_filter` пропускается (no-op) → все matches проходят без фильтрации. Это ожидаемое поведение для тестовых фикстур и диалогов без временных меток.
+
 ---
 
 ## 11. Deprecated поля

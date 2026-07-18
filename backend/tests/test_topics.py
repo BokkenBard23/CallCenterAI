@@ -21,6 +21,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.services.topics import TopicModeler
 
+# networkx is an optional dependency — TopicModeler gracefully returns []
+# when it's not installed. Skip tests that require community detection.
+pytest.importorskip(
+    "networkx",
+    reason="networkx not installed — TopicModeler community detection disabled",
+)
+
 
 # ═══════════════════════════════════════════════════════════
 # Helpers
