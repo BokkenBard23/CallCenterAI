@@ -26,7 +26,7 @@ CASCADE / GATE (INV-7 — preserved):
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from app.models import (
     DictionaryCondition,
@@ -393,122 +393,187 @@ def _turn_offset(
     return None
 
 
-def _find_channel_gaps(
-    turns: List[dict], channel: str, min_duration: float
-) -> List[Tuple[float, float]]:
-    """Find time intervals where `channel` has no speech for >= min_duration.
+def _channel_turns(
+    turns: List[dict], channel: str,
+) -> List[dict]:
+    """Return sub-list of turns belonging to `channel` (or all for ANY)."""
+    ch = (channel or "ANY").upper()
+    if ch == "ANY":
+        return list(turns)
+    speaker = _SPEAKER_BY_CHANNEL.get(ch, "")
+    return [t for t in turns if t.get("speaker") == speaker]
 
-    A gap is a maximal interval between consecutive same-channel turn
-    intervals whose length (in seconds) >= min_duration. Gaps before the
-    first and after the last turn of the channel are also included.
 
-    For channel=ANY the function treats *any* turn as filling time, so gaps
-    are intervals of total dialogue silence (rare; useful for testing).
+def _build_seconds_window(
+    turns: List[dict], limit: ExtraLimitationLimit,
+) -> Optional[Tuple[float, float]]:
+    """Compute (win_start, win_end) for ValueType=Seconds.
 
-    Args:
-        turns: Dialogue turns with start_offset/end_offset.
-        channel: "CLIENT" | "OPERATOR" | "ANY".
-        min_duration: Minimum silence duration in seconds.
-
-    Returns:
-        List of (gap_start, gap_end) tuples (sorted, non-overlapping).
+    Channel=ANY:  window anchored to dialogue bounds (First/Last).
+    Channel=CLIENT/OPERATOR: window anchored to first/last channel turn.
     """
-    if not turns:
-        return []
+    ch_turns = _channel_turns(turns, limit.channel or "ANY")
+    if not ch_turns:
+        return None
 
-    speaker = _SPEAKER_BY_CHANNEL.get(channel.upper(), "")
-    intervals: List[Tuple[float, float]] = []
-    for t in turns:
-        if channel.upper() == "ANY" or t.get("speaker") == speaker:
+    n_seconds = float(limit.value)
+    if limit.limit_type == "First":
+        ref_start = ch_turns[0].get("start_offset")
+        if ref_start is None:
+            return None
+        return (float(ref_start), float(ref_start) + n_seconds)
+    if limit.limit_type == "Last":
+        ref_end = ch_turns[-1].get("end_offset")
+        if ref_end is None:
+            return None
+        return (float(ref_end) - n_seconds, float(ref_end))
+    return None
+
+
+def _build_words_window(
+    turns: List[dict], limit: ExtraLimitationLimit,
+) -> Optional[Tuple[float, float]]:
+    """Compute (win_start, win_end) for ValueType=Words.
+
+    Words are counted only within `limit.channel` (ANY = all speakers).
+      - First: window from first channel turn start to end of the N-th word.
+      - Last:  window from start of the (total-N+1)-th word to last channel
+               turn end.
+    """
+    ch_turns = _channel_turns(turns, limit.channel or "ANY")
+    if not ch_turns:
+        return None
+
+    n = int(limit.value)
+    if n <= 0:
+        return None
+
+    if limit.limit_type == "First":
+        first_start: Optional[float] = None
+        word_count = 0
+        nth_word_end: Optional[float] = None
+        for t in ch_turns:
             s = t.get("start_offset")
             e = t.get("end_offset")
-            if s is not None and e is not None:
-                intervals.append((float(s), float(e)))
+            text = t.get("text") or ""
+            words_in_turn = len(text.split())
+            if words_in_turn == 0:
+                continue
+            if first_start is None and s is not None:
+                first_start = float(s)
+            if word_count + words_in_turn >= n:
+                nth_word_end = float(e) if e is not None else None
+                break
+            word_count += words_in_turn
+        # If total words < N, the window extends to the end of the last
+        # channel word (i.e. all words fall inside the "first N" window).
+        if nth_word_end is None:
+            for t in reversed(ch_turns):
+                e = t.get("end_offset")
+                text = t.get("text") or ""
+                if text.split() and e is not None:
+                    nth_word_end = float(e)
+                    break
+        if first_start is None or nth_word_end is None:
+            return None
+        return (first_start, nth_word_end)
 
-    # Dialogue bounds (first turn start to last turn end).
-    dialogue_start = turns[0].get("start_offset")
-    dialogue_end = turns[-1].get("end_offset")
-    if dialogue_start is None or dialogue_end is None:
-        return []
+    if limit.limit_type == "Last":
+        last_end: Optional[float] = None
+        word_count = 0
+        nth_word_start: Optional[float] = None
+        for t in reversed(ch_turns):
+            s = t.get("start_offset")
+            e = t.get("end_offset")
+            text = t.get("text") or ""
+            words_in_turn = len(text.split())
+            if words_in_turn == 0:
+                continue
+            if last_end is None and e is not None:
+                last_end = float(e)
+            if word_count + words_in_turn >= n:
+                nth_word_start = float(s) if s is not None else None
+                break
+            word_count += words_in_turn
+        # If total words < N, the window starts at the first channel word.
+        if nth_word_start is None:
+            for t in ch_turns:
+                s = t.get("start_offset")
+                text = t.get("text") or ""
+                if text.split() and s is not None:
+                    nth_word_start = float(s)
+                    break
+        if last_end is None or nth_word_start is None:
+            return None
+        return (nth_word_start, last_end)
 
-    if not intervals:
-        # No turns of this channel — the entire dialogue is a gap.
-        if dialogue_end - dialogue_start >= min_duration:
-            return [(dialogue_start, dialogue_end)]
-        return []
-
-    intervals.sort(key=lambda iv: iv[0])
-    gaps: List[Tuple[float, float]] = []
-
-    # Gap before first channel turn.
-    if intervals[0][0] - dialogue_start >= min_duration:
-        gaps.append((dialogue_start, intervals[0][0]))
-
-    # Gaps between channel turns.
-    for i in range(1, len(intervals)):
-        prev_end = intervals[i - 1][1]
-        curr_start = intervals[i][0]
-        if curr_start - prev_end >= min_duration:
-            gaps.append((prev_end, curr_start))
-
-    # Gap after last channel turn.
-    if dialogue_end - intervals[-1][1] >= min_duration:
-        gaps.append((intervals[-1][1], dialogue_end))
-
-    return gaps
-
-
-def _match_in_gaps(
-    turn_idx: int,
-    turns: List[dict],
-    gaps: List[Tuple[float, float]],
-) -> bool:
-    """Return True iff the match turn's time interval is fully inside a gap."""
-    s = _turn_offset(turns, turn_idx, "start_offset")
-    e = _turn_offset(turns, turn_idx, "end_offset")
-    if s is None or e is None:
-        return False
-    for g_start, g_end in gaps:
-        if g_start <= s and e <= g_end:
-            return True
-    return False
+    return None
 
 
-def _apply_gap_filter(
-    matches: List[Tuple[int, str, dict]],
-    turns: List[dict],
-    el: ExtraLimitation,
-    limit: ExtraLimitationLimit,
-) -> List[Tuple[int, str, dict]]:
-    """Apply OnlyInGaps / ExcludeGaps filter using limit.value as gap threshold.
+def _build_phrases_predicate(
+    turns: List[dict], limit: ExtraLimitationLimit,
+) -> Optional[Callable[[int], bool]]:
+    """Compute in-window predicate for ValueType=Phrases (turn-index based).
 
-    SearchSpecifier semantics (reconstructed from real XML structure):
-      - OnlyInGaps:  keep matches whose turn interval is fully inside a gap
-                     (interval of silence on the limit's channel >= value sec)
-      - ExcludeGaps: exclude matches whose turn interval is fully inside a gap
-
-    limit.value is interpreted as the minimum gap duration in seconds when
-    value_type == "Seconds"; otherwise filtering is skipped (returns matches
-    unchanged) — the only value_type observed in real dictionaries is Seconds.
+    Phrases = turns (channel-scoped when Channel != ANY).
+      - First: first N channel turns (indices in `turns` list).
+      - Last:  last N channel turns.
     """
-    if el.search_specifier not in ("OnlyInGaps", "ExcludeGaps"):
-        return matches
+    ch = (limit.channel or "ANY").upper()
+    if ch == "ANY":
+        relevant_indices = list(range(len(turns)))
+    else:
+        speaker = _SPEAKER_BY_CHANNEL.get(ch, "")
+        relevant_indices = [
+            i for i, t in enumerate(turns) if t.get("speaker") == speaker
+        ]
 
-    if limit.value_type != "Seconds":
-        return matches
+    n = int(limit.value)
+    if n <= 0:
+        return None
 
-    min_duration = float(limit.value)
-    gaps = _find_channel_gaps(turns, limit.channel or "ANY", min_duration)
-    if not gaps:
-        # No qualifying gaps → OnlyInGaps keeps nothing, ExcludeGaps keeps all.
-        if el.search_specifier == "OnlyInGaps":
-            return []
-        return matches
+    if limit.limit_type == "First":
+        window_indices = set(relevant_indices[:n])
+    elif limit.limit_type == "Last":
+        window_indices = set(relevant_indices[-n:])
+    else:
+        return None
 
-    if el.search_specifier == "OnlyInGaps":
-        return [m for m in matches if _match_in_gaps(m[0], turns, gaps)]
-    # ExcludeGaps
-    return [m for m in matches if not _match_in_gaps(m[0], turns, gaps)]
+    def predicate(turn_idx: int) -> bool:
+        return turn_idx in window_indices
+
+    return predicate
+
+
+def _build_time_predicate(
+    turns: List[dict], limit: ExtraLimitationLimit,
+) -> Optional[Callable[[int], bool]]:
+    """Build predicate that returns True if a match's turn is in the window.
+
+    Used for ValueType=Seconds | Words (time-window based).
+    """
+    if limit.value_type == "Seconds":
+        window = _build_seconds_window(turns, limit)
+    elif limit.value_type == "Words":
+        window = _build_words_window(turns, limit)
+    else:
+        return None
+
+    if window is None:
+        return None
+    win_start, win_end = window
+
+    def predicate(turn_idx: int) -> bool:
+        if not (0 <= turn_idx < len(turns)):
+            return False
+        s = turns[turn_idx].get("start_offset")
+        e = turns[turn_idx].get("end_offset")
+        if s is None or e is None:
+            return False
+        # Intersection of [s, e] and [win_start, win_end].
+        return float(s) <= win_end and float(e) >= win_start
+
+    return predicate
 
 
 def _filter_start_end(
@@ -517,42 +582,41 @@ def _filter_start_end(
     el: ExtraLimitation,
     limit: ExtraLimitationLimit,
 ) -> List[Tuple[int, str, dict]]:
-    """EventType=StartEnd: keep matches in first/last N seconds of dialogue.
+    """EventType=StartEnd: filter matches by dialogue-bounded window.
 
-    - LimitType=First: keep matches with start_offset <= dialogue_start + N
-    - LimitType=Last:  keep matches with end_offset >= dialogue_end - N
+    SearchSpecifier semantics (ground truth from SmartLogger dictionaries):
+      - OnlyInGaps:  INCLUDE mode — keep only matches inside the window.
+      - ExcludeGaps: EXCLUDE mode — drop matches inside the window.
+
+    The window is derived from Limit:
+      - LimitType=First | Last: anchor at start / end of dialogue or channel.
+      - ValueType=Seconds: time window [anchor, anchor±value].
+      - ValueType=Words:   time window from first channel turn start to the
+                            end of the N-th channel word (First) or from the
+                            start of the (total-N+1)-th channel word to the
+                            last channel turn end (Last).
+      - ValueType=Phrases:  set of turn indices — first/last N channel turns.
+      - Channel=ANY|CLIENT|OPERATOR: scope turn/word/phrase counting to a
+        specific speaker (ANY = all speakers combined).
     """
     if not turns:
         return matches
-    dialogue_start = turns[0].get("start_offset")
-    dialogue_end = turns[-1].get("end_offset")
-    if dialogue_start is None or dialogue_end is None:
-        return matches
-    if limit.value_type != "Seconds":
+    if el.search_specifier not in ("OnlyInGaps", "ExcludeGaps"):
+        # Unknown SearchSpecifier — defensive no-op.
         return matches
 
-    n_seconds = float(limit.value)
-    if limit.limit_type == "First":
-        window_end = dialogue_start + n_seconds
-        result = [
-            m for m in matches
-            if (_turn_offset(turns, m[0], "start_offset") is not None
-                and _turn_offset(turns, m[0], "start_offset") <= window_end)
-        ]
-    elif limit.limit_type == "Last":
-        window_start = dialogue_end - n_seconds
-        result = [
-            m for m in matches
-            if (_turn_offset(turns, m[0], "end_offset") is not None
-                and _turn_offset(turns, m[0], "end_offset") >= window_start)
-        ]
+    if limit.value_type == "Phrases":
+        predicate = _build_phrases_predicate(turns, limit)
     else:
-        # Unknown LimitType — keep matches unchanged (defensive).
-        result = matches
+        predicate = _build_time_predicate(turns, limit)
 
-    # Apply SearchSpecifier (OnlyInGaps / ExcludeGaps) on top.
-    result = _apply_gap_filter(result, turns, el, limit)
-    return result
+    if predicate is None:
+        return matches
+
+    if el.search_specifier == "OnlyInGaps":
+        return [m for m in matches if predicate(m[0])]
+    # ExcludeGaps
+    return [m for m in matches if not predicate(m[0])]
 
 
 def _filter_parent(
@@ -562,41 +626,71 @@ def _filter_parent(
     limit: ExtraLimitationLimit,
     parent_match_times: Optional[List[float]],
 ) -> List[Tuple[int, str, dict]]:
-    """EventType=Parent: keep matches within N seconds before/after parent match.
+    """EventType=Parent: filter matches by window relative to parent matches.
 
-    - SearchDirection=Before: keep matches within N seconds BEFORE a parent match
-      (parent_match_time - N <= match_start <= parent_match_time)
-    - SearchDirection=After:  keep matches within N seconds AFTER a parent match
-      (parent_match_time <= match_start <= parent_match_time + N)
+    SearchSpecifier semantics (ground truth from SmartLogger dictionaries):
+      - OnlyInGaps:  INCLUDE mode — keep only matches inside any parent window.
+      - ExcludeGaps: EXCLUDE mode — drop matches inside any parent window.
 
-    When parent_match_times is None or empty (root-level node, no parent
-    context), Parent-type limits cannot be evaluated — return matches
-    unchanged (filtering skipped, per UI-2.6 contract).
+    Window per parent match (parent_t = parent match start_offset):
+      - SearchDirection=Before: [parent_t - value, parent_t]
+      - SearchDirection=After:  [parent_t, parent_t + value]
+
+    EventSelector selects which parent matches anchor the windows:
+      - First: only the first parent match.
+      - Last:  only the last parent match.
+      - Each:  every parent match (union of windows).
+
+    If parent_match_times is None or empty, Parent filtering cannot be
+    evaluated → no-op (per UI-2.6 contract: never silently drop all matches
+    when parent context is unavailable).
     """
     if not parent_match_times:
+        return matches
+    if el.search_specifier not in ("OnlyInGaps", "ExcludeGaps"):
         return matches
     if limit.value_type != "Seconds":
         return matches
 
     n_seconds = float(limit.value)
-    result: List[Tuple[int, str, dict]] = []
-    for m in matches:
-        t = _turn_offset(turns, m[0], "start_offset")
-        if t is None:
-            continue
-        if limit.search_direction == "Before":
-            if any(0 <= (pt - t) <= n_seconds for pt in parent_match_times):
-                result.append(m)
-        elif limit.search_direction == "After":
-            if any(0 <= (t - pt) <= n_seconds for pt in parent_match_times):
-                result.append(m)
-        else:
-            # Unknown SearchDirection — keep the match (defensive).
-            result.append(m)
+    direction = limit.search_direction
+    if direction not in ("Before", "After"):
+        # Unknown direction — defensive no-op.
+        return matches
 
-    # Apply SearchSpecifier (OnlyInGaps / ExcludeGaps) on top.
-    result = _apply_gap_filter(result, turns, el, limit)
-    return result
+    selector = (limit.event_selector or "Each").lower() if limit.event_selector else "each"
+    if selector == "first":
+        selected_parents: List[float] = [parent_match_times[0]]
+    elif selector == "last":
+        selected_parents = [parent_match_times[-1]]
+    else:  # each
+        selected_parents = list(parent_match_times)
+
+    windows: List[Tuple[float, float]] = []
+    for pt in selected_parents:
+        if direction == "Before":
+            windows.append((float(pt) - n_seconds, float(pt)))
+        else:  # After
+            windows.append((float(pt), float(pt) + n_seconds))
+
+    def in_window(turn_idx: int) -> bool:
+        if not (0 <= turn_idx < len(turns)):
+            return False
+        s = turns[turn_idx].get("start_offset")
+        e = turns[turn_idx].get("end_offset")
+        if s is None or e is None:
+            return False
+        s_f = float(s)
+        e_f = float(e)
+        for w_start, w_end in windows:
+            if s_f <= w_end and e_f >= w_start:
+                return True
+        return False
+
+    if el.search_specifier == "OnlyInGaps":
+        return [m for m in matches if in_window(m[0])]
+    # ExcludeGaps
+    return [m for m in matches if not in_window(m[0])]
 
 
 def _filter_by_limit(
@@ -635,18 +729,28 @@ def _apply_time_gap_filter(
     when timing data is missing.
 
     For EventType=StartEnd:
-        - LimitType=First: keep matches in first N seconds of dialogue
-        - LimitType=Last:  keep matches in last N seconds of dialogue
-        - OnlyInGaps:      keep matches whose turn falls within a silence
-                          gap on limit.channel of >= N seconds
-        - ExcludeGaps:     exclude matches whose turn falls within such a gap
+        - LimitType=First: window anchored at the start of the dialogue
+          (or the start of the channel's first turn when Channel != ANY).
+        - LimitType=Last:  window anchored at the end of the dialogue
+          (or the end of the channel's last turn when Channel != ANY).
+        - ValueType=Seconds: time window [anchor, anchor ± N] seconds.
+        - ValueType=Words:   time window from the first channel turn start
+                              to the end of the N-th channel word (First) or
+                              from the start of the (total-N+1)-th channel
+                              word to the last channel turn end (Last).
+        - ValueType=Phrases: set of turn indices — first/last N channel turns.
+        - Channel=ANY|CLIENT|OPERATOR scopes word/phrase/turn counting to a
+          specific speaker (ANY = all speakers combined, in dialogue order).
+        - SearchSpecifier=OnlyInGaps:  INCLUDE — keep matches inside window.
+        - SearchSpecifier=ExcludeGaps: EXCLUDE — drop matches inside window.
 
     For EventType=Parent:
-        - SearchDirection=Before: keep matches within N seconds before any
-          parent match (parent_match_times)
-        - SearchDirection=After:  keep matches within N seconds after any
-          parent match
-        - OnlyInGaps / ExcludeGaps: same gap semantics, applied on top
+        - SearchDirection=Before: window [parent_t - N, parent_t].
+        - SearchDirection=After:  window [parent_t, parent_t + N].
+        - EventSelector=First | Last | Each: which parent matches anchor
+          the windows (only the first, only the last, or every one).
+        - SearchSpecifier=OnlyInGaps / ExcludeGaps: same INCLUDE/EXCLUDE
+          semantics applied to the union of parent-anchored windows.
 
     Args:
         matches: List of (turn_idx, speaker, detail) tuples.
@@ -673,9 +777,24 @@ def _apply_time_gap_filter(
         for limit in el.limits:
             if not limit.enabled:
                 continue
+            # Snapshot matches before this limit is applied so we can log
+            # how many were discarded by it (observability for the
+            # "0 matches" regression — see pii_masking.py fix).
+            matches_before = list(filtered)
             filtered = _filter_by_limit(
                 filtered, turns, el, limit, parent_match_times
             )
+            if len(filtered) < len(matches_before):
+                logger.info(
+                    "time_gap_filter discarded %d/%d matches "
+                    "(event_type=%s, limit_type=%s, value=%s, specifier=%s)",
+                    len(matches_before) - len(filtered),
+                    len(matches_before),
+                    el.event_type,
+                    getattr(limit, "limit_type", None),
+                    getattr(limit, "value", None),
+                    getattr(el, "search_specifier", None),
+                )
             if not filtered:
                 break
         if not filtered:

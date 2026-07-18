@@ -492,16 +492,37 @@ def _parse_extra_limitations(element: etree._Element) -> List[ExtraLimitation]:
           <Limits>
             <Limit>
               <Value>{int}</Value>
-              <ValueType>Seconds | Words | ...</ValueType>
+              <ValueType>Seconds | Words | Phrases</ValueType>
               <Channel>CLIENT | OPERATOR | ANY</Channel>
               <Enabled>true | false</Enabled>
               <LimitType>First | Last</LimitType>           <!-- StartEnd only -->
-              <EventSelector>Each | First | ...</EventSelector>  <!-- Parent only -->
+              <EventSelector>Each | First | Last</EventSelector>  <!-- Parent only -->
               <SearchDirection>Before | After</SearchDirection>  <!-- Parent only -->
             </Limit>
           </Limits>
         </ExtraLimitation>
       </ExtraLimitations>
+
+    Ground-truth semantics (confirmed against test dictionary):
+      - SearchSpecifier is the filter MODE, NOT a silence-gap detector.
+        * OnlyInGaps  = INCLUDE — keep matches that fall inside the window.
+        * ExcludeGaps = EXCLUDE — drop matches that fall inside the window.
+      - <Limit> defines the window:
+        * StartEnd + LimitType=First|Last: anchor at start/end of dialogue
+          (or channel's first/last turn when Channel != ANY).
+        * StartEnd + ValueType=Seconds: time window [anchor, anchor ± N].
+        * StartEnd + ValueType=Words: time window bounded by the N-th word
+          of the channel speech (counted in dialogue order).
+        * StartEnd + ValueType=Phrases: first/last N turns of the channel.
+        * Parent + SearchDirection=Before|After: window relative to parent
+          matches ([parent_t - N, parent_t] or [parent_t, parent_t + N]).
+        * Parent + EventSelector=First|Last|Each: which parent matches anchor
+          the windows.
+      - Channel=ANY counts words/phrases across all speakers in dialogue
+        order; Channel=CLIENT|OPERATOR counts only that speaker's words/
+        turns.
+      - When an ExtraLimitation has multiple <Limit> elements, all enabled
+        limits are applied as AND (every limit must keep/allow the match).
 
     There is NO <Tokens> inside <ExtraLimitation> in real dictionaries
     (verified against 10 real samples in smartlogger-xml-verification.md).

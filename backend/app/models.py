@@ -211,30 +211,42 @@ class ExtraLimitationLimit(BaseModel):
     Maps from <Limit> inside <Limits> inside <ExtraLimitation>.
     Fields Value/ValueType/Channel/Enabled are universal; LimitType is only
     for EventType=StartEnd; EventSelector/SearchDirection only for EventType=Parent.
+
+    SearchSpecifier (defined on ExtraLimitation, not on Limit) controls the
+    filter MODE: OnlyInGaps = INCLUDE (keep matches in window), ExcludeGaps =
+    EXCLUDE (drop matches in window). The window itself is derived from the
+    fields below.
     """
 
-    value: int = Field(0, description="<Value> (int seconds/words)")
+    value: int = Field(0, description="<Value> (int seconds/words/phrases)")
     value_type: str = Field(
         "Seconds",
-        description="<ValueType>: Seconds | Words | ...",
+        description="<ValueType>: Seconds | Words | Phrases",
     )
     channel: str = Field(
         "ANY",
-        description="<Channel>: CLIENT | OPERATOR | ANY",
+        description="<Channel>: CLIENT | OPERATOR | ANY. Scopes word/phrase/"
+        "turn counting to a specific speaker; ANY = all speakers combined.",
     )
     enabled: bool = Field(False, description="<Enabled> boolean")
     # Only for EventType=StartEnd:
     limit_type: Optional[str] = Field(
-        None, description="<LimitType>: 'First' | 'Last' (EventType=StartEnd only)"
+        None,
+        description="<LimitType>: First | Last (EventType=StartEnd only). "
+        "First = window anchored at the start of the dialogue (or channel's "
+        "first turn). Last = window anchored at the end.",
     )
     # Only for EventType=Parent:
     event_selector: Optional[str] = Field(
         None,
-        description="<EventSelector>: 'Each' | 'First' | ... (EventType=Parent only)",
+        description="<EventSelector>: First | Last | Each (EventType=Parent "
+        "only). Selects which parent matches anchor the time window.",
     )
     search_direction: Optional[str] = Field(
         None,
-        description="<SearchDirection>: 'Before' | 'After' (EventType=Parent only)",
+        description="<SearchDirection>: Before | After (EventType=Parent "
+        "only). Before = [parent_t - value, parent_t]; "
+        "After = [parent_t, parent_t + value].",
     )
 
 
@@ -243,8 +255,12 @@ class ExtraLimitation(BaseModel):
 
     V1 (smartlogger-xml-verification.md): real dictionaries store
     EventType + SearchSpecifier + Settings + Limits/Limit, NOT <Tokens>.
-    Time-gap FILTERING (OnlyInGaps / ExcludeGaps) against real turn timestamps
-    is a TODO — only the model + parser are implemented here.
+
+    SearchSpecifier semantics (ground truth from SmartLogger dictionaries):
+      - OnlyInGaps:  INCLUDE mode — keep only matches that fall inside the
+                     window defined by <Limit>.
+      - ExcludeGaps: EXCLUDE mode — drop matches that fall inside the window.
+      - Other values: filter is a no-op (defensive).
     """
 
     event_type: str = Field(
@@ -253,7 +269,9 @@ class ExtraLimitation(BaseModel):
     )
     search_specifier: str = Field(
         "",
-        description="<SearchSpecifier>: 'OnlyInGaps' | 'ExcludeGaps' | ...",
+        description="<SearchSpecifier>: 'OnlyInGaps' = INCLUDE mode (keep "
+        "matches inside the window); 'ExcludeGaps' = EXCLUDE mode (drop "
+        "matches inside the window).",
     )
     settings: Dict[str, Any] = Field(
         default_factory=dict,

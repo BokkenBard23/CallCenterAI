@@ -310,11 +310,13 @@ class TestContainerParentMatchTimesPassthrough:
             ],
         )
 
-        # Q2 has a Parent-type After=10s limit. Parent (Q1) matched at t=10.
-        # turn 2 (start=30) is within 10s after parent? 30-10=20 > 10 → NO.
-        # So Q2 should NOT match turn 2 even though the phrase is there.
-        # If the container dropped parent_match_times, Q2 would match turn 2
-        # (filter skipped) — that's the regression we're guarding against.
+        # Q2 has a Parent-type After=10s INCLUDE limit (OnlyInGaps). Parent
+        # (Q1) matched at t=10. Window = [10, 20].
+        # turn 2 (start=30) is NOT in window → filtered out (kept out by
+        # OnlyInGaps since match must be inside window to survive).
+        # If the container dropped parent_match_times, Q2's filter would be
+        # a no-op and Q2 would match turn 2 — that's the regression we guard
+        # against.
         q2 = DictionaryNode(
             id="q2",
             name="Q2",
@@ -327,7 +329,7 @@ class TestContainerParentMatchTimesPassthrough:
                     extra_limitations=[
                         ExtraLimitation(
                             event_type="Parent",
-                            search_specifier="",
+                            search_specifier="OnlyInGaps",
                             limits=[
                                 ExtraLimitationLimit(
                                     value=10,

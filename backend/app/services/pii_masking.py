@@ -831,12 +831,27 @@ class PIIMaskingService:
                     error=f"Masking failed on turn {turn.turn_index}: {result.error}",
                 )
 
-            # Build masked turn — preserve all fields except text
+            # Build masked turn — preserve all fields except text.
+            # IMPORTANT: start_offset/end_offset MUST be carried over so that
+            # downstream time-gap filters (_apply_time_gap_filter in
+            # search.py) keep working when PII masking is enabled.
+            # Regression 13.07→17.07: previously these fields were dropped,
+            # which made _has_timestamps() return False and silently disabled
+            # the SearchSpecifier (OnlyInGaps / ExcludeGaps) windows anchored
+            # to dialogue bounds (StartEnd: First/Last) or parent matches
+            # (Parent: Before/After). Symptom: when masking was ON (timestamps
+            # lost → filter no-op → all matches passed → 11 found on 13.07);
+            # when masking was OFF (timestamps preserved → filter active →
+            # ExcludeGaps dropped the windowed matches → 0 found on 17.07).
+            # Carrying offsets through masking makes the filter behave
+            # identically in both modes.
             masked_turn = DialogueTurn(
                 turn_index=turn.turn_index,
                 speaker=turn.speaker,
                 text=result.masked_text,
                 timestamp=turn.timestamp,
+                start_offset=turn.start_offset,
+                end_offset=turn.end_offset,
             )
             masked_turns.append(masked_turn)
 
