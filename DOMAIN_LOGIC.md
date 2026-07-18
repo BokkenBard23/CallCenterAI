@@ -320,6 +320,8 @@ _ASPECTUAL_PAIRS = {
 
 ## 10. Time-gap filtering (ExtraLimitations)
 
+> **Canonical reference:** [`docs/specs/extra-limitations-semantics.md`](docs/specs/extra-limitations-semantics.md) — семантика проверена напрямую в SmartLogger UI через тестовый словарь `data/input/ins/sample_limitations.xml` (18.07.2026). При расхождениях с этим документом canonical reference прав.
+
 ### 10.1. Структура
 
 Real XML-словари хранят time-gap limits в `<ExtraLimitations>`, а не в `<Tokens>`:
@@ -333,37 +335,66 @@ Real XML-словари хранят time-gap limits в `<ExtraLimitations>`, а
     <Limits>
       <Limit>
         <Value>{число}</Value>
-        <ValueType>Seconds | Words</ValueType>
+        <ValueType>Seconds | Words | Phrases</ValueType>
         <Channel>CLIENT | OPERATOR | ANY</Channel>
         <Enabled>true</Enabled>
         <!-- Только для EventType=StartEnd: -->
         <LimitType>First | Last</LimitType>
         <!-- Только для EventType=Parent: -->
-        <EventSelector>Each | First</EventSelector>
+        <EventSelector>Each | First | Last</EventSelector>
         <SearchDirection>Before | After</SearchDirection>
       </Limit>
+      <!-- несколько Limit комбинируются через AND -->
     </Limits>
   </ExtraLimitation>
+  <!-- несколько ExtraLimitation комбинируются через AND -->
 </ExtraLimitations>
 ```
 
-### 10.2. Два типа EventType
+### 10.2. SearchSpecifier — режим фильтра (INCLUDE/EXCLUDE)
 
-| EventType | Описание | Поля |
-|-----------|----------|------|
-| `StartEnd` | Limits относительно начала/конца диалога | `LimitType` (First/Last) |
-| `Parent` | Limits относительно совпадений родительского узла | `EventSelector` (Each/First), `SearchDirection` (Before/After) |
+**КРИТИЧЕСКОЕ:** названия `OnlyInGaps` / `ExcludeGaps` — обманчивые. Это **НЕ** фильтр пауз в речи. Это режим относительно **окна, заданного `<Limit>`**.
 
-### 10.3. SearchSpecifier
+| SearchSpecifier | Семантика | Прочтение в UI SmartLogger |
+|-----------------|-----------|---------------------------|
+| `OnlyInGaps` | **INCLUDE** — оставить только matches, попадающие в окно | «Искать только в промежутке: ...» |
+| `ExcludeGaps` | **EXCLUDE** — убрать matches, попадающие в окно | «Не искать в следующих промежутках: ...» |
 
-| SearchSpecifier | Описание |
-|-----------------|----------|
-| `OnlyInGaps` | Искать только в временных промежутках между событиями |
-| `ExcludeGaps` | Исключить временные промежутки между событиями |
+### 10.3. EventType=StartEnd — окно от границ диалога
 
-### 10.4. Требования
+| LimitType | Анкор | Окно |
+|-----------|-------|------|
+| `First` | Начало диалога / канальной речи | Первые N единиц от начала |
+| `Last` | Конец диалога / канальной речи | Последние N единиц от конца |
 
-Time-gap filtering работает **только** если `DialogueTurn` содержит `start_offset`/`end_offset` (секунды от начала диалога). Если RTF не содержит временных меток → `None` → фильтрация пропускается (no-op).
+| ValueType | Что считается |
+|-----------|---------------|
+| `Seconds` | Секунды реального времени (по `start_offset` / `end_offset` turn-ов) |
+| `Words` | Слова (токены, разделённые пробелами) — для `Channel=ANY` все слова, для `CLIENT`/`OPERATOR` — только слова этого канала |
+| `Phrases` | Реплики (turn-ы целиком) — для `Channel=ANY` все turn-ы, для `CLIENT`/`OPERATOR` — только turn-ы этого канала |
+
+### 10.4. EventType=Parent — окно относительно parent matches
+
+Применяется только для child `<SpeechLabRequest>`, когда родительский узел нашёл хотя бы один match (GATE открыт). `parent_match_times` — список `start_offset` parent matches.
+
+| SearchDirection | Окно |
+|-----------------|------|
+| `Before` | `[parent_t - N, parent_t]` |
+| `After` | `[parent_t, parent_t + N]` |
+
+| EventSelector | Какие parent matches используются |
+|---------------|----------------------------------|
+| `Each` | Все parent matches |
+| `First` | Только первый parent match |
+| `Last` | Только последний parent match |
+
+### 10.5. Комбинирование
+
+Несколько активных `<Limit>` (в одном или нескольких `<ExtraLimitation>`) комбинируются через **AND** — все условия должны выполняться одновременно.
+
+### 10.6. Требования
+
+Time-gap filtering работает **только** если `DialogueTurn` содержит `start_offset`/`end_offset` (секунды от начала диалога). Если RTF не содержит временных меток → `None` → фильтрация пропускается (no-op). Аналогично, `EventType=Parent` no-op, если `parent_match_times=None` или пустой.
 
 ---
 
