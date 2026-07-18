@@ -86,7 +86,9 @@ class Settings(BaseSettings):
     qwen36_max_concurrent: int = 6    # qwen-medium-dense ✅ 6 parallel slots (was 3)
 
     # ── Embeddings: FRIDA (Beeline AI) ──
-    frida_base_url: str = "https://api.ai.beeline.ru/api/v3"
+    # FRIDA embeddings endpoint: /api/v2/embeddings (verified 2026-07-18).
+    # /api/v3/embeddings returns 404 — do NOT use v3.
+    frida_base_url: str = "https://api.ai.beeline.ru/api/v2"
     frida_model: str = "frida"
     frida_dimensions: int = 1536
     frida_max_context_tokens: int = 500

@@ -10,10 +10,13 @@ Provides async client for FRIDA embeddings API (Beeline AI):
   - Observability (logging, latency metrics, get_stats())
 
 API contract:
-  POST https://api.ai.beeline.ru/api/v3/embeddings
+  POST https://api.ai.beeline.ru/api/v2/embeddings
   Authorization: Bearer {BEELINE_API_KEY}
   Request:  {"model": "frida", "input": ["text 1", "text 2"]}
   Response: {"object": "list", "data": [{"embedding": [...], "index": 0}, ...], "model": "frida"}
+
+Note: /api/v2 is the verified working endpoint (confirmed 2026-07-18).
+      /api/v3/embeddings returns 404 — do NOT use v3.
 """
 
 from __future__ import annotations
@@ -36,7 +39,9 @@ from tenacity import (
 logger = logging.getLogger(__name__)
 
 # Default configuration constants
-_DEFAULT_BASE_URL = "https://api.ai.beeline.ru/api/v3"
+# FRIDA embeddings endpoint: /api/v2/embeddings (verified 2026-07-18).
+# /api/v3/embeddings returns 404 — do NOT use v3.
+_DEFAULT_BASE_URL = "https://api.ai.beeline.ru/api/v2"
 # FRIDA embedding model id ("frida"). FRIDA requires GLM backing (per Beeline AI spec);
 # the embeddings endpoint itself accepts the "frida" model id — no glm-5.x reference needed
 # here. If a future FRIDA revision requires an explicit GLM model, set it via settings.frida_model.
@@ -416,16 +421,23 @@ class FridaEmbeddingService:
     embed_texts = embed_batch
 
     async def is_available(self) -> bool:
-        """Check if FRIDA API is reachable AND the ``frida`` model is available.
+        """Check if FRIDA embeddings API is reachable and returns valid vectors.
+
+        Probes the ``POST /embeddings`` endpoint with a minimal test text
+        (``"test"``). Returns True only if:
+        - circuit breaker is not open,
+        - HTTP status is 200,
+        - response contains a valid embedding vector (non-empty list).
+
+        Previous implementation called ``GET /models`` and checked for
+        ``capabilities.embeddings: true`` on the ``frida`` model entry.
+        However, the verified working endpoint is ``/api/v2/embeddings``
+        (confirmed 2026-07-18), and ``/api/v2/models`` may not return
+        the ``capabilities`` field. A direct embeddings probe is more
+        reliable and matches the actual production usage pattern.
 
         Returns:
-            True if the FRIDA model is listed in ``GET /models`` with
-            ``embeddings: true``, False otherwise (including when circuit
-            breaker is open or the API key's tenant lacks FRIDA access).
-
-        Bug fix: previously this method only checked HTTP 200 on
-        ``GET /models``, which returned True even when the ``frida``
-        model was absent from the response (e.g. wrong tenant/policy).
+            True if FRIDA returns a valid embedding for the probe text.
         """
         if self._circuit_open:
             # Check if circuit breaker should auto-reset
@@ -435,18 +447,23 @@ class FridaEmbeddingService:
                 return False
 
         try:
-            response = await self.http_client.get("/models")
+            response = await self.http_client.post(
+                "/embeddings",
+                json={"model": self.model, "input": ["test"]},
+            )
             if response.status_code != 200:
+                logger.debug(
+                    "FRIDA is_available: HTTP %d", response.status_code
+                )
                 return False
             data = response.json()
-            models = data.get("data", [])
-            for m in models:
-                if m.get("id") == self.model:
-                    caps = m.get("capabilities", {})
-                    return caps.get("embeddings", False)
-            # frida not in list — key's tenant/policy lacks embeddings access
-            return False
-        except Exception:
+            vectors = data.get("data", [])
+            if not vectors or not vectors[0].get("embedding"):
+                logger.debug("FRIDA is_available: no embedding in response")
+                return False
+            return True
+        except Exception as exc:
+            logger.debug("FRIDA is_available: error: %s", exc)
             return False
 
     def get_stats(self) -> Dict[str, object]:

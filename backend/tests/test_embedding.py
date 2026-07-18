@@ -195,12 +195,13 @@ async def test_embed_batch_empty(service: FridaEmbeddingService) -> None:
 
 @pytest.mark.asyncio
 async def test_is_available_true(service: FridaEmbeddingService) -> None:
-    """is_available() returns True when API is reachable."""
+    """is_available() returns True when /embeddings probe returns valid vector."""
     mock_response = MagicMock()
     mock_response.status_code = 200
+    mock_response.json.return_value = _make_api_response(1)
 
-    with patch.object(service.http_client, "get", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = mock_response
+    with patch.object(service.http_client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
         result = await service.is_available()
 
     assert result is True
@@ -209,8 +210,8 @@ async def test_is_available_true(service: FridaEmbeddingService) -> None:
 @pytest.mark.asyncio
 async def test_is_available_false(service: FridaEmbeddingService) -> None:
     """is_available() returns False when API is unreachable."""
-    with patch.object(service.http_client, "get", new_callable=AsyncMock) as mock_get:
-        mock_get.side_effect = httpx.ConnectError("Connection refused")
+    with patch.object(service.http_client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.side_effect = httpx.ConnectError("Connection refused")
         result = await service.is_available()
 
     assert result is False
@@ -222,8 +223,8 @@ async def test_is_available_non_200(service: FridaEmbeddingService) -> None:
     mock_response = MagicMock()
     mock_response.status_code = 503
 
-    with patch.object(service.http_client, "get", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = mock_response
+    with patch.object(service.http_client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
         result = await service.is_available()
 
     assert result is False
