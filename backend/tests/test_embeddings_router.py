@@ -969,7 +969,7 @@ class TestEdgeCases:
         assert data["results"] == []
 
     def test_index_same_session_twice(self, client):
-        """Index the same session twice → vectors accumulate."""
+        """Index the same session twice → second request returns 409 (dedup guard)."""
         _register_session_with_dialog("dup-session")
 
         # First index
@@ -979,17 +979,58 @@ class TestEdgeCases:
         )
         assert resp1.status_code == 200
         vectors_after_first = resp1.json()["vectors_stored"]
+        assert vectors_after_first > 0
 
-        # Second index (same session)
+        # Second index (same session) → 409 Conflict
         resp2 = client.post(
             "/api/embeddings/index",
             json={"session_id": "dup-session", "chunk_type": "utterance"},
         )
-        assert resp2.status_code == 200
-        vectors_after_second = resp2.json()["vectors_stored"]
+        assert resp2.status_code == 409
+        assert "already indexed" in resp2.json()["detail"].lower()
 
-        # Vectors should have doubled (no dedup in add)
-        assert vectors_after_second >= vectors_after_first
+        # Vectors did NOT double
+        status_resp = client.get("/api/embeddings/status")
+        assert status_resp.status_code == 200
+        assert status_resp.json()["vectors_stored"] == vectors_after_first
+
+    def test_delete_indexed_dialogue(self, client):
+        """DELETE /api/embeddings/index/{dialogue_id} removes vectors and allows reindex."""
+        _register_session_with_dialog("del-session")
+
+        # Index
+        resp = client.post(
+            "/api/embeddings/index",
+            json={"session_id": "del-session", "chunk_type": "utterance"},
+        )
+        assert resp.status_code == 200
+        vectors_after_index = resp.json()["vectors_stored"]
+        assert vectors_after_index > 0
+
+        # Delete
+        del_resp = client.delete("/api/embeddings/index/del-session")
+        assert del_resp.status_code == 200
+        del_data = del_resp.json()
+        assert del_data["dialogue_id"] == "del-session"
+        assert del_data["removed_vectors"] > 0
+        assert del_data["vectors_stored"] < vectors_after_index
+
+        # Status: vectors decreased
+        status_resp = client.get("/api/embeddings/status")
+        assert status_resp.status_code == 200
+        assert status_resp.json()["vectors_stored"] == del_data["vectors_stored"]
+
+        # Re-index works after deletion
+        resp2 = client.post(
+            "/api/embeddings/index",
+            json={"session_id": "del-session", "chunk_type": "utterance"},
+        )
+        assert resp2.status_code == 200
+
+    def test_delete_nonexistent_index(self, client):
+        """DELETE /api/embeddings/index/{dialogue_id} on unknown dialogue returns 404."""
+        del_resp = client.delete("/api/embeddings/index/nonexistent-dialogue")
+        assert del_resp.status_code == 404
 
     def test_hybrid_search_with_session_without_dictionaries(self, client):
         """Hybrid search with session that has no dictionaries."""

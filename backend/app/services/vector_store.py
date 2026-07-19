@@ -223,6 +223,19 @@ class VectorStore:
 
         return results
 
+    # ── Dialogue presence check ─────────────────────────────────
+
+    def has_dialogue(self, dialogue_id: str) -> bool:
+        """Check if any vectors exist for the given dialogue_id.
+
+        Args:
+            dialogue_id: Dialogue/session identifier to check.
+
+        Returns:
+            True if at least one vector with this dialogue_id is stored.
+        """
+        return any(m.get("dialogue_id") == dialogue_id for m in self._metadata)
+
     # ── Delete by dialogue ──────────────────────────────────────
 
     def delete_by_dialogue(self, dialogue_id: str) -> int:

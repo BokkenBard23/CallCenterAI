@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -81,6 +82,12 @@ def _init_services() -> None:
     # Chunker (razdel + Natasha NER)
     chunker = Chunker()
 
+    # SearchCache (P2 optimization — caches run_hierarchical_search results
+    # so repeated "Анализировать" clicks on the same dialog + dictionaries
+    # do not re-run the expensive morphological search).
+    from app.services.search_cache import SearchCache
+    search_cache = SearchCache(max_entries=256, ttl_seconds=3600)
+
     # HybridSearchService (RRF + NER boost)
     hybrid_search_service = HybridSearchService(
         embedding_service=embedding_service,
@@ -95,6 +102,7 @@ def _init_services() -> None:
     app.state.vector_store = vector_store
     app.state.chunker = chunker
     app.state.hybrid_search_service = hybrid_search_service
+    app.state.search_cache = search_cache
 
     # Track B — offline corpus mining (composition over FRIDA + FAISS + LLM).
     # NEВ production-runtime: dict_mining does NOT call into search.py runtime.
@@ -208,6 +216,14 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+# ── GZip compression (P4 Level 1) ─────────────────────────────
+# Compress HTTP responses larger than 100 KB. This turns a ~62 MB
+# dictionary payload into a ~5 MB transfer over the wire (≈90% reduction)
+# with negligible CPU cost — clients send `Accept-Encoding: gzip`
+# automatically. Must be added after CORS so that headers are not
+# stripped before compression runs.
+app.add_middleware(GZipMiddleware, minimum_size=100 * 1024)
 
 # ── Structured logging middleware (opt-in, does not replace existing handlers) ──
 app.add_middleware(StructuredLoggingMiddleware)

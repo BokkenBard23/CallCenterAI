@@ -171,6 +171,86 @@ export async function getResults(
 }
 
 // ═══════════════════════════════════════════════════════════
+// P2: Split search (Phase 1) and LLM (Phase 2) endpoints
+// ═══════════════════════════════════════════════════════════
+
+export interface SearchOnlyRequest {
+  session_id: string;
+  dictionary_ids?: string[];
+}
+
+export interface SearchOnlyResponse {
+  analysis_id: string;
+  session_id: string;
+  status: string;
+  search_result: import('../types/api').SearchResult;
+  cache_hit: boolean;
+}
+
+export interface LLMOnlyRequest {
+  analysis_id: string;
+  llm_provider: string;
+  llm_model?: string | null;
+  include_summary?: boolean;
+  include_restructured?: boolean;
+}
+
+export interface LLMOnlyResponse {
+  analysis_id: string;
+  session_id: string;
+  status: string;
+  llm_result: import('../types/api').LLMResult | null;
+  warning?: string | null;
+}
+
+/**
+ * Phase 1: dictionary search only (no LLM). Returns analysis_id + search_result.
+ * Results are cached server-side — repeated calls with the same dialog +
+ * dictionaries return the cached result without re-running the search.
+ */
+export async function search(
+  searchRequest: SearchOnlyRequest,
+  signal?: AbortSignal,
+): Promise<SearchOnlyResponse> {
+  return request<SearchOnlyResponse>('/api/analysis/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(searchRequest),
+    signal,
+  });
+}
+
+/**
+ * Phase 2: LLM analysis only. UPDATES the existing analysis record
+ * (analysis_id is NOT changed) so that /results/{id} returns both
+ * search_result and llm_result. This fixes the P2 bug where re-opening
+ * an analysis from History showed no LLM summary.
+ */
+export async function startLLMAnalysis(
+  llmRequest: LLMOnlyRequest,
+  signal?: AbortSignal,
+): Promise<LLMOnlyResponse> {
+  return request<LLMOnlyResponse>('/api/analysis/llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(llmRequest),
+    signal,
+  });
+}
+
+/**
+ * Poll LLM analysis status (alias for /results/{id} with LLM-focused response).
+ */
+export async function getLLMStatus(
+  analysisId: string,
+  signal?: AbortSignal,
+): Promise<LLMOnlyResponse> {
+  return request<LLMOnlyResponse>(`/api/analysis/llm/${analysisId}/status`, {
+    signal,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
 // Providers
 // ═══════════════════════════════════════════════════════════
 

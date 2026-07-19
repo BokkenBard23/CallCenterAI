@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.models import (
@@ -170,6 +170,293 @@ async def get_results(analysis_id: str) -> AnalysisResponse:
             detail=f"Analysis '{analysis_id}' not found.",
         )
     return result
+
+
+# ═══════════════════════════════════════════════════════════
+# P2: Split search and LLM into separate endpoints
+# ═══════════════════════════════════════════════════════════
+
+
+class SearchOnlyRequest(BaseModel):
+    """Request body for POST /api/analysis/search (Phase 1).
+
+    Runs ONLY dictionary search (no LLM). Returns an analysis_id that
+    can be passed to POST /api/analysis/llm to attach an LLM summary
+    to the SAME analysis record.
+    """
+
+    session_id: str = Field(..., description="Session with uploaded dialogue")
+    dictionary_ids: List[str] = Field(
+        default_factory=list,
+        description="Dictionary names to include in search (empty = all)",
+    )
+
+
+class SearchOnlyResponse(BaseModel):
+    """Response for POST /api/analysis/search."""
+
+    analysis_id: str = Field(..., description="New analysis ID (use with /llm and /results)")
+    session_id: str = Field(...)
+    status: str = Field("completed")
+    search_result: SearchResult = Field(...)
+    cache_hit: bool = Field(
+        False,
+        description="True if the search result was served from the in-memory cache",
+    )
+
+
+class LLMOnlyRequest(BaseModel):
+    """Request body for POST /api/analysis/llm (Phase 2).
+
+    Runs ONLY the LLM summary and attaches it to an existing analysis
+    record (created by POST /api/analysis/search). The analysis_id is
+    NOT changed — the same record now carries both search_result and
+    llm_result, so reloading from /results/{id} returns the LLM summary.
+    """
+
+    analysis_id: str = Field(
+        ..., description="Existing analysis ID (from POST /api/analysis/search)"
+    )
+    llm_provider: str = Field("beeline", description="LLM provider id")
+    llm_model: Optional[str] = Field(None, description="Optional model override")
+    include_summary: bool = Field(True, description="Run dialogue summary")
+    include_restructured: bool = Field(False, description="Run restructured dialogue")
+
+
+class LLMOnlyResponse(BaseModel):
+    """Response for POST /api/analysis/llm."""
+
+    analysis_id: str = Field(..., description="Same analysis_id as the request")
+    session_id: str = Field(...)
+    status: str = Field("completed")
+    llm_result: Optional[LLMResult] = Field(None)
+    warning: Optional[str] = Field(None)
+
+
+def _get_search_cache(request: Request):
+    """Get SearchCache from app state, or None if not initialized."""
+    return getattr(request.app.state, "search_cache", None)
+
+
+@router.post(
+    "/search",
+    response_model=SearchOnlyResponse,
+    summary="Run dictionary search only (Phase 1)",
+    description=(
+        "Run hierarchical dictionary search on the session's dialogue. "
+        "No LLM call is made — fast (~1 sec). Returns a new analysis_id "
+        "that can be used with POST /api/analysis/llm to attach an LLM "
+        "summary to the SAME record. Results are cached: repeated calls "
+        "with the same dialog+dictionaries return the cached SearchResult "
+        "without re-running run_hierarchical_search()."
+    ),
+)
+async def search_only(
+    request: Request,
+    body: SearchOnlyRequest,
+) -> SearchOnlyResponse:
+    """Phase 1: dictionary search only (no LLM)."""
+    session = session_store.get(body.session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session '{body.session_id}' not found. Upload a dialogue first.",
+        )
+    if session.dialog is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No dialogue uploaded for this session. Upload an RTF file first.",
+        )
+    if not session.dictionaries:
+        raise HTTPException(
+            status_code=400,
+            detail="No dictionaries uploaded for this session. Upload an XML dictionary first.",
+        )
+
+    dict_list = list(session.dictionaries.values())
+    selected_names = body.dictionary_ids if body.dictionary_ids else None
+    if selected_names:
+        dict_list = [d for d in dict_list if d.name in selected_names]
+
+    # ── Cache lookup ──────────────────────────────────────────
+    cache = _get_search_cache(request)
+    cache_hit = False
+    search_result: Optional[SearchResult] = None
+
+    if cache is not None:
+        search_result = cache.get(
+            dialog=session.dialog,
+            dictionary_names=selected_names,
+            dictionaries=dict_list,
+        )
+        if search_result is not None:
+            cache_hit = True
+            logger.info(
+                "SearchCache HIT for session %s (returning cached SearchResult)",
+                body.session_id,
+            )
+
+    # ── Cache miss: run the expensive search ─────────────────
+    if search_result is None:
+        try:
+            search_result = await run_hierarchical_search(
+                dialog=session.dialog,
+                dictionaries=dict_list,
+                selected_dict_names=selected_names,
+            )
+        except Exception as exc:
+            logger.error("Search failed for session %s: %s", body.session_id, exc)
+            search_result = SearchResult(
+                segments=[],
+                total_matches=0,
+                matches=[],
+                matches_by_level={},
+            )
+
+        if cache is not None:
+            cache.put(
+                search_result,
+                dialog=session.dialog,
+                dictionary_names=selected_names,
+                dictionaries=dict_list,
+            )
+
+    analysis_id = uuid.uuid4().hex[:12]
+    response = AnalysisResponse(
+        analysis_id=analysis_id,
+        session_id=body.session_id,
+        status="completed",
+        search_result=search_result,
+        llm_result=None,
+    )
+    session_store.add_analysis(body.session_id, response)
+
+    return SearchOnlyResponse(
+        analysis_id=analysis_id,
+        session_id=body.session_id,
+        status="completed",
+        search_result=search_result,
+        cache_hit=cache_hit,
+    )
+
+
+@router.post(
+    "/llm",
+    response_model=LLMOnlyResponse,
+    summary="Run LLM analysis only (Phase 2) — updates an existing analysis",
+    description=(
+        "Run LLM summary/restructuring analysis on the dialogue of the session "
+        "associated with the given analysis_id. The result is ATTACHED to the "
+        "existing analysis record (the analysis_id is NOT changed), so a "
+        "subsequent GET /api/analysis/results/{id} returns both the search "
+        "result and the LLM summary. This fixes the P2 bug where re-opening "
+        "an analysis from History showed no LLM summary."
+    ),
+)
+async def llm_only(
+    request: Request,
+    body: LLMOnlyRequest,
+) -> LLMOnlyResponse:
+    """Phase 2: LLM analysis only — updates existing analysis_id with llm_result."""
+    # Look up the existing analysis (across all sessions)
+    existing = session_store.get_analysis(body.analysis_id)
+    if existing is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Analysis '{body.analysis_id}' not found. "
+                "Call POST /api/analysis/search first to create it."
+            ),
+        )
+
+    session = session_store.get(existing.session_id)
+    if session is None or session.dialog is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Session or dialogue is no longer available. Re-upload the dialogue.",
+        )
+
+    # Run LLM analysis
+    llm_result: Optional[LLMResult] = None
+    warning: Optional[str] = None
+
+    try:
+        dialogue_text = _build_dialogue_text(session.dialog.turns)
+        llm_result = await analyze_dialogue(
+            dialogue_text=dialogue_text,
+            provider_id=body.llm_provider,
+            model=body.llm_model,
+        )
+        if llm_result.provider == "none":
+            warning = "LLM unavailable: all providers failed"
+            logger.warning(
+                "LLM analysis degraded for analysis %s: all providers failed",
+                body.analysis_id,
+            )
+    except Exception as exc:
+        warning = f"LLM analysis error: {exc}"
+        logger.error(
+            "Unexpected LLM error for analysis %s: %s", body.analysis_id, exc
+        )
+
+    # Determine status
+    if llm_result is not None and llm_result.provider != "none":
+        new_status = "completed"
+    elif warning is not None:
+        new_status = "partial"
+    else:
+        new_status = "completed"
+
+    # ── Update the EXISTING analysis record (same analysis_id) ──
+    updated = session_store.update_analysis_llm(
+        analysis_id=body.analysis_id,
+        llm_result=llm_result,
+        status=new_status,
+        warning=warning,
+    )
+    if updated is None:
+        # Race condition: analysis was deleted between get_analysis and update
+        raise HTTPException(
+            status_code=404,
+            detail=f"Analysis '{body.analysis_id}' disappeared during LLM update.",
+        )
+
+    return LLMOnlyResponse(
+        analysis_id=updated.analysis_id,
+        session_id=updated.session_id,
+        status=updated.status,
+        llm_result=updated.llm_result,
+        warning=updated.warning,
+    )
+
+
+@router.get(
+    "/llm/{analysis_id}/status",
+    response_model=LLMOnlyResponse,
+    summary="Poll LLM analysis status (optional)",
+    description=(
+        "Returns the current state of an analysis record. Useful when the "
+        "client wants to poll for LLM completion instead of awaiting "
+        "POST /api/analysis/llm synchronously. Equivalent to "
+        "GET /api/analysis/results/{id} but with a clearer name for "
+        "polling semantics."
+    ),
+)
+async def llm_status(analysis_id: str) -> LLMOnlyResponse:
+    """Poll LLM status (alias for /results/{id} with LLM-focused response)."""
+    result = session_store.get_analysis(analysis_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Analysis '{analysis_id}' not found.",
+        )
+    return LLMOnlyResponse(
+        analysis_id=result.analysis_id,
+        session_id=result.session_id,
+        status=result.status,
+        llm_result=result.llm_result,
+        warning=result.warning,
+    )
 
 
 def _build_dialogue_text(turns) -> str:

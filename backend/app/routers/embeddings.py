@@ -275,6 +275,20 @@ async def index_dialogue(
             detail="No dialogue uploaded for this session. Upload an RTF file first.",
         )
 
+    # Deduplication guard: refuse to index the same dialogue twice.
+    # Use DELETE /api/embeddings/index/{dialogue_id} to remove old vectors first.
+    if vector_store.has_dialogue(body.session_id):
+        stats = vector_store.get_stats()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Dialogue '{body.session_id}' is already indexed "
+                f"({stats['unique_dialogues']} unique dialogue(s), "
+                f"{stats['total_vectors']} vectors total). "
+                "Use DELETE /api/embeddings/index/{dialogue_id} to remove old vectors first."
+            ),
+        )
+
     # Check FRIDA availability
     try:
         frida_available = await embedding_service.is_available()
@@ -332,6 +346,46 @@ async def index_dialogue(
         chunks_indexed=len(chunks),
         vectors_stored=vector_store.get_stats()["total_vectors"],
     )
+
+
+@router.delete(
+    "/index/{dialogue_id}",
+    summary="Delete indexed vectors for a dialogue",
+    description=(
+        "Remove all FAISS vectors and metadata associated with the given dialogue_id. "
+        "After deletion, the dialogue can be re-indexed via POST /api/embeddings/index."
+    ),
+)
+@limiter.limit("10/minute")
+async def delete_index(
+    request: Request,
+    dialogue_id: str,
+) -> dict:
+    """Delete all vectors belonging to a dialogue_id."""
+    vector_store = _get_vector_store(request)
+
+    if not vector_store.has_dialogue(dialogue_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dialogue '{dialogue_id}' is not indexed. Nothing to delete.",
+        )
+
+    try:
+        removed = vector_store.delete_by_dialogue(dialogue_id)
+    except Exception as exc:
+        logger.error("VectorStore delete failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Vector store delete failed: {exc}",
+        )
+
+    stats = vector_store.get_stats()
+    return {
+        "dialogue_id": dialogue_id,
+        "removed_vectors": removed,
+        "vectors_stored": stats["total_vectors"],
+        "unique_dialogues": stats["unique_dialogues"],
+    }
 
 
 @router.post(

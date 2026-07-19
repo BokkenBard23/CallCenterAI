@@ -33,6 +33,8 @@ const mockGetProviders = vi.fn();
 const mockUploadRtf = vi.fn();
 const mockUploadDictionary = vi.fn();
 const mockAnalyze = vi.fn();
+const mockSearch = vi.fn();
+const mockStartLLMAnalysis = vi.fn();
 const mockSubmitBatch = vi.fn();
 
 vi.mock('../api/client', () => ({
@@ -41,6 +43,8 @@ vi.mock('../api/client', () => ({
   uploadRtf: (...args: unknown[]) => mockUploadRtf(...args),
   uploadDictionary: (...args: unknown[]) => mockUploadDictionary(...args),
   analyze: (...args: unknown[]) => mockAnalyze(...args),
+  search: (...args: unknown[]) => mockSearch(...args),
+  startLLMAnalysis: (...args: unknown[]) => mockStartLLMAnalysis(...args),
   submitBatch: (...args: unknown[]) => mockSubmitBatch(...args),
   getResults: vi.fn(),
   getProviderStatus: vi.fn(),
@@ -91,6 +95,27 @@ function renderUploadPage() {
 
 // ─── Tests ────────────────────────────────────────────────
 
+/** Mock search result returned by Phase 1 (api.search) */
+const MOCK_SEARCH_RESULT = {
+  total_matches: 5,
+  matches_by_level: { high: 2, medium: 3 },
+  segments: [],
+  matches: [],
+};
+
+/** Mock LLM result returned by Phase 2 (api.startLLMAnalysis) */
+const MOCK_LLM_RESULT = {
+  summary: 'Test summary',
+  restructured_dialogue: '',
+  topic: 'Test topic',
+  result: 'positive',
+  key_points: [],
+  client_sentiment: 'neutral',
+  resolution: 'resolved',
+  provider: 'ollama',
+  model: 'llama3',
+};
+
 describe('UploadPage', () => {
   beforeEach(() => {
     mockNavigate.mockReset();
@@ -99,6 +124,8 @@ describe('UploadPage', () => {
     mockUploadRtf.mockReset();
     mockUploadDictionary.mockReset();
     mockAnalyze.mockReset();
+    mockSearch.mockReset();
+    mockStartLLMAnalysis.mockReset();
     mockSubmitBatch.mockReset();
     mockCheckHealth.mockResolvedValue({ status: 'ok', version: '1.0.0' });
     mockGetProviders.mockResolvedValue({
@@ -126,6 +153,20 @@ describe('UploadPage', () => {
       search_result: null,
       llm_result: null,
       error: null,
+      warning: null,
+    });
+    mockSearch.mockResolvedValue({
+      analysis_id: 'analysis-1',
+      session_id: 'test-session',
+      status: 'completed',
+      search_result: MOCK_SEARCH_RESULT,
+      cache_hit: false,
+    });
+    mockStartLLMAnalysis.mockResolvedValue({
+      analysis_id: 'analysis-1',
+      session_id: 'test-session',
+      status: 'completed',
+      llm_result: MOCK_LLM_RESULT,
       warning: null,
     });
   });
@@ -518,45 +559,22 @@ describe('UploadPage', () => {
   }
 
   /** Mock search result returned by Phase 1 */
-  const MOCK_SEARCH_RESULT = {
-    total_matches: 5,
-    matches_by_level: { high: 2, medium: 3 },
-    segments: [],
-    matches: [],
-  };
+  // (defined at module top — MOCK_SEARCH_RESULT)
 
   /** Mock LLM result returned by Phase 2 */
-  const MOCK_LLM_RESULT = {
-    summary: 'Test summary',
-    restructured_dialogue: '',
-    topic: 'Test topic',
-    result: 'positive',
-    key_points: [],
-    client_sentiment: 'neutral',
-    resolution: 'resolved',
-    provider: 'ollama',
-    model: 'llama3',
-  };
+  // (defined at module top — MOCK_LLM_RESULT)
 
   it('Phase 1 is awaited: navigates to /results before Phase 2 resolves', async () => {
-    // Phase 2 promise that never resolves during this test
+    // Phase 2 (startLLMAnalysis) promise that never resolves during this test
     const phase2Promise = new Promise(() => {});
-    mockAnalyze.mockImplementation((params: { include_summary?: boolean }) => {
-      if (params.include_summary) {
-        // Phase 2 — pending forever
-        return phase2Promise;
-      }
-      // Phase 1 — resolves immediately
-      return Promise.resolve({
-        analysis_id: 'analysis-1',
-        session_id: 'test-session',
-        status: 'completed',
-        search_result: MOCK_SEARCH_RESULT,
-        llm_result: null,
-        error: null,
-        warning: null,
-      });
+    mockSearch.mockResolvedValue({
+      analysis_id: 'analysis-1',
+      session_id: 'test-session',
+      status: 'completed',
+      search_result: MOCK_SEARCH_RESULT,
+      cache_hit: false,
     });
+    mockStartLLMAnalysis.mockReturnValue(phase2Promise);
 
     const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
       dispatch({ type: 'SET_SESSION_ID', payload: 'test-session' });
@@ -606,34 +624,33 @@ describe('UploadPage', () => {
 
     // Phase 2 was called (fire-and-forget) but hasn't resolved yet
     await waitFor(() => {
-      expect(mockAnalyze).toHaveBeenCalledTimes(2);
+      expect(mockSearch).toHaveBeenCalledTimes(1);
+      expect(mockStartLLMAnalysis).toHaveBeenCalledTimes(1);
     });
 
-    // The first call is Phase 1 (include_summary: false)
-    expect(mockAnalyze.mock.calls[0][0]).toMatchObject({ include_summary: false });
-    // The second call is Phase 2 (include_summary: true)
-    expect(mockAnalyze.mock.calls[1][0]).toMatchObject({ include_summary: true });
+    // Phase 1 was search() with session_id
+    expect(mockSearch.mock.calls[0][0]).toMatchObject({ session_id: 'test-session' });
+    // Phase 2 was startLLMAnalysis() with analysis_id + include_summary: true
+    expect(mockStartLLMAnalysis.mock.calls[0][0]).toMatchObject({
+      analysis_id: 'analysis-1',
+      include_summary: true,
+    });
   });
 
   it('Phase 2 fire-and-forget: SET_LLM_RESULT + snackbar when LLM completes', async () => {
     let resolvePhase2!: (value: unknown) => void;
 
-    mockAnalyze.mockImplementation((params: { include_summary?: boolean }) => {
-      if (params.include_summary) {
-        // Phase 2 — controlled resolution
-        return new Promise((resolve) => {
-          resolvePhase2 = resolve;
-        });
-      }
-      // Phase 1
-      return Promise.resolve({
-        analysis_id: 'analysis-1',
-        session_id: 'test-session',
-        status: 'completed',
-        search_result: MOCK_SEARCH_RESULT,
-        llm_result: null,
-        error: null,
-        warning: null,
+    mockSearch.mockResolvedValue({
+      analysis_id: 'analysis-1',
+      session_id: 'test-session',
+      status: 'completed',
+      search_result: MOCK_SEARCH_RESULT,
+      cache_hit: false,
+    });
+    mockStartLLMAnalysis.mockImplementation(() => {
+      // Phase 2 — controlled resolution
+      return new Promise((resolve) => {
+        resolvePhase2 = resolve;
       });
     });
 
@@ -682,7 +699,8 @@ describe('UploadPage', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/results');
     });
     await waitFor(() => {
-      expect(mockAnalyze).toHaveBeenCalledTimes(2);
+      expect(mockSearch).toHaveBeenCalledTimes(1);
+      expect(mockStartLLMAnalysis).toHaveBeenCalledTimes(1);
     });
 
     // Before Phase 2 resolves: button is re-enabled (setAnalyzing(false) after Phase 1)
@@ -695,9 +713,7 @@ describe('UploadPage', () => {
       analysis_id: 'analysis-1',
       session_id: 'test-session',
       status: 'completed',
-      search_result: null,
       llm_result: MOCK_LLM_RESULT,
-      error: null,
       warning: null,
     });
 
@@ -710,20 +726,16 @@ describe('UploadPage', () => {
   it('Phase 2 failure: snackbar error (non-blocking, search results still available)', async () => {
     let rejectPhase2!: (reason: unknown) => void;
 
-    mockAnalyze.mockImplementation((params: { include_summary?: boolean }) => {
-      if (params.include_summary) {
-        return new Promise((_resolve, reject) => {
-          rejectPhase2 = reject;
-        });
-      }
-      return Promise.resolve({
-        analysis_id: 'analysis-1',
-        session_id: 'test-session',
-        status: 'completed',
-        search_result: MOCK_SEARCH_RESULT,
-        llm_result: null,
-        error: null,
-        warning: null,
+    mockSearch.mockResolvedValue({
+      analysis_id: 'analysis-1',
+      session_id: 'test-session',
+      status: 'completed',
+      search_result: MOCK_SEARCH_RESULT,
+      cache_hit: false,
+    });
+    mockStartLLMAnalysis.mockImplementation(() => {
+      return new Promise((_resolve, reject) => {
+        rejectPhase2 = reject;
       });
     });
 
@@ -782,7 +794,7 @@ describe('UploadPage', () => {
   });
 
   it('Phase 1 failure: no Phase 2 call, error snackbar shown', async () => {
-    mockAnalyze.mockRejectedValue(new Error('Search failed'));
+    mockSearch.mockRejectedValue(new Error('Search failed'));
 
     const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
       dispatch({ type: 'SET_SESSION_ID', payload: 'test-session' });
@@ -830,7 +842,8 @@ describe('UploadPage', () => {
     });
 
     // Phase 2 should NOT have been called
-    expect(mockAnalyze).toHaveBeenCalledTimes(1);
+    expect(mockSearch).toHaveBeenCalledTimes(1);
+    expect(mockStartLLMAnalysis).not.toHaveBeenCalled();
     // Navigate should NOT have been called
     expect(mockNavigate).not.toHaveBeenCalled();
   });

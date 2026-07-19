@@ -228,6 +228,40 @@ class TestDeleteByDialogue:
         assert deleted == 0
         assert store.index.ntotal == 3
 
+    def test_has_dialogue_true_after_add(self) -> None:
+        """has_dialogue returns True when vectors for the dialogue exist."""
+        store = VectorStore(dimension=DIMENSION, auto_save=False)
+        vecs = _random_embeddings(3, seed_start=710)
+        metas = _sample_metadata(3, dialogue_id="present")
+        store.add(vecs, metas)
+
+        assert store.has_dialogue("present") is True
+
+    def test_has_dialogue_false_when_absent(self) -> None:
+        """has_dialogue returns False when no vectors exist for the dialogue."""
+        store = VectorStore(dimension=DIMENSION, auto_save=False)
+        vecs = _random_embeddings(3, seed_start=720)
+        metas = _sample_metadata(3, dialogue_id="present")
+        store.add(vecs, metas)
+
+        assert store.has_dialogue("absent") is False
+
+    def test_has_dialogue_false_on_empty_store(self) -> None:
+        """has_dialogue returns False on a fresh (empty) store."""
+        store = VectorStore(dimension=DIMENSION, auto_save=False)
+        assert store.has_dialogue("anything") is False
+
+    def test_has_dialogue_false_after_delete(self) -> None:
+        """has_dialogue returns False after all dialogue vectors have been deleted."""
+        store = VectorStore(dimension=DIMENSION, auto_save=False)
+        vecs = _random_embeddings(3, seed_start=730)
+        metas = _sample_metadata(3, dialogue_id="will-delete")
+        store.add(vecs, metas)
+        assert store.has_dialogue("will-delete") is True
+
+        store.delete_by_dialogue("will-delete")
+        assert store.has_dialogue("will-delete") is False
+
     def test_delete_all_vectors_results_in_empty_store(self) -> None:
         """Deleting all vectors results in empty store."""
         store = VectorStore(dimension=DIMENSION, auto_save=False)
