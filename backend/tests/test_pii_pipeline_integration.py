@@ -191,9 +191,10 @@ class TestMaskDialogue:
             pytest.skip("Presidio unavailable — cannot test masking")
 
         dialog = ParsedDialog(
+            filename="test.rtf",
             turns=[
-                DialogueTurn(speaker="Клиент", text="Мой телефон +7-999-123-45-67"),
-                DialogueTurn(speaker="Сотрудник", text="Хорошо, записал."),
+                DialogueTurn(speaker="Клиент", text="Мой телефон +7-999-123-45-67", turn_index=0),
+                DialogueTurn(speaker="Сотрудник", text="Хорошо, записал.", turn_index=1),
             ],
         )
         result = pii_service.mask_dialogue(dialog)
@@ -207,10 +208,11 @@ class TestMaskDialogue:
             pytest.skip("Presidio unavailable — cannot test masking")
 
         dialog = ParsedDialog(
+            filename="test.rtf",
             turns=[
-                DialogueTurn(speaker="Клиент", text="Привет"),
-                DialogueTurn(speaker="Сотрудник", text="Здравствуйте"),
-                DialogueTurn(speaker="Клиент", text="У меня вопрос."),
+                DialogueTurn(speaker="Клиент", text="Привет", turn_index=0),
+                DialogueTurn(speaker="Сотрудник", text="Здравствуйте", turn_index=1),
+                DialogueTurn(speaker="Клиент", text="У меня вопрос.", turn_index=2),
             ],
         )
         result = pii_service.mask_dialogue(dialog)
@@ -225,8 +227,9 @@ class TestMaskDialogue:
             pytest.skip("Presidio unavailable — cannot test masking")
 
         dialog = ParsedDialog(
+            filename="test.rtf",
             turns=[
-                DialogueTurn(speaker="Клиент", text="Мой номер +7-999-123-45-67"),
+                DialogueTurn(speaker="Клиент", text="Мой номер +7-999-123-45-67", turn_index=0),
             ],
         )
         result = pii_service.mask_dialogue(dialog)
@@ -241,8 +244,9 @@ class TestMaskDialogue:
             pytest.skip("Presidio unavailable — cannot test masking")
 
         dialog = ParsedDialog(
+            filename="test.rtf",
             turns=[
-                DialogueTurn(speaker="Клиент", text="Мой номер +7-999-123-45-67"),
+                DialogueTurn(speaker="Клиент", text="Мой номер +7-999-123-45-67", turn_index=0),
             ],
         )
         result = pii_service.mask_dialogue(dialog)
@@ -257,7 +261,7 @@ class TestMaskDialogue:
         if not pii_service.is_available():
             pytest.skip("Presidio unavailable — cannot test masking")
 
-        dialog = ParsedDialog(turns=[])
+        dialog = ParsedDialog(filename="test.rtf", turns=[])
         result = pii_service.mask_dialogue(dialog)
         assert result.masked_dialogue is not None
         assert len(result.masked_dialogue.turns) == 0
@@ -270,8 +274,9 @@ class TestMaskDialogue:
             pytest.skip("Presidio unavailable — cannot test masking")
 
         dialog = ParsedDialog(
+            filename="test.rtf",
             turns=[
-                DialogueTurn(speaker="Клиент", text="+7-999-123-45-67"),
+                DialogueTurn(speaker="Клиент", text="+7-999-123-45-67", turn_index=0),
             ],
         )
         result = pii_service.mask_dialogue(dialog)
@@ -284,7 +289,10 @@ class TestMaskDialogue:
         if not pii_service.is_available():
             pytest.skip("Presidio unavailable — cannot test masking")
 
-        dialog = ParsedDialog(turns=[DialogueTurn(speaker="К", text="Привет")])
+        dialog = ParsedDialog(
+            filename="test.rtf",
+            turns=[DialogueTurn(speaker="К", text="Привет", turn_index=0)],
+        )
         result = pii_service.mask_dialogue(dialog)
         assert result.processing_time_ms >= 0
 

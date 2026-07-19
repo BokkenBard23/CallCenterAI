@@ -694,7 +694,7 @@ def test_config_has_frida_settings() -> None:
     assert hasattr(settings, "frida_dimensions")
     assert hasattr(settings, "frida_max_context_tokens")
     assert hasattr(settings, "frida_batch_size")
-    assert settings.frida_base_url == "https://api.ai.beeline.ru/api/v3"
+    assert settings.frida_base_url == "https://api.ai.beeline.ru/api/v2"
     assert settings.frida_model == "frida"
     assert settings.frida_dimensions == 1536
     assert settings.frida_max_context_tokens == 500
