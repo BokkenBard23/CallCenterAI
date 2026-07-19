@@ -14,6 +14,7 @@ The schema uses standard SQL types compatible with PostgreSQL:
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -23,7 +24,6 @@ from typing import Any, Dict, List, Optional
 
 from app.models import AnalysisResponse, BatchAnalysisResponse, DictionaryNode
 from app.services.session_store_base import (
-    MAX_SESSIONS,
     Session,
     SessionStoreBase,
     deserialize_session,
@@ -48,11 +48,16 @@ class SqliteSessionStore(SessionStoreBase):
         self,
         db_path: str = "data/sessions.db",
         ttl_seconds: int = 7200,
+        max_sessions: int = 100,
+        cache_size_kb: int = 524288,  # 512 MB default
     ) -> None:
-        super().__init__(ttl_seconds=ttl_seconds)
+        super().__init__(ttl_seconds=ttl_seconds, max_sessions=max_sessions)
         self._db_path = db_path
         self._lock = threading.Lock()
         self._local = threading.local()
+        self._write_count = 0
+        self._auto_vacuum_ensured = False
+        self._cache_size_kb = cache_size_kb
         self._init_db()
 
     # ── Connection management ─────────────────────────────────
@@ -62,18 +67,34 @@ class SqliteSessionStore(SessionStoreBase):
 
         Each thread gets its own connection (SQLite requirement).
         WAL mode is enabled for better concurrent read performance.
+        Connection-level pragmas (mmap_size, cache_size, synchronous,
+        temp_store, journal_size_limit) are set on every new connection.
         """
         if not hasattr(self._local, "conn") or self._local.conn is None:
             path = Path(self._db_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(str(path), check_same_thread=False)
+            # page_size MUST be set BEFORE journal_mode or any other statement
+            # that touches the database — otherwise SQLite creates the file
+            # with the default page_size (4096) and subsequent PRAGMA is ignored.
+            conn.execute("PRAGMA page_size = 16384")
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA mmap_size=268435456")       # 256 MB memory-mapped I/O
+            conn.execute(f"PRAGMA cache_size={-self._cache_size_kb}")  # configurable (default 512 MB)
+            conn.execute("PRAGMA temp_store=MEMORY")          # temp tables in RAM
+            conn.execute("PRAGMA journal_size_limit=67108864")  # 64 MB WAL cap
             self._local.conn = conn
         return self._local.conn
 
     def _init_db(self) -> None:
         """Create tables if they don't exist.
+
+        Sets persistent PRAGMAs (auto_vacuum, page_size) BEFORE any tables
+        are created so they take effect immediately for new databases.
+        For existing databases, runs a one-time VACUUM migration to enable
+        auto_vacuum=INCREMENTAL (see :meth:`_ensure_auto_vacuum`).
 
         Creates the ``sessions`` table (primary session storage) plus the
         Track B mining tables (``mining_jobs``, ``mining_corpus``,
@@ -83,6 +104,10 @@ class SqliteSessionStore(SessionStoreBase):
         single source of truth for schema migrations on first connect.
         """
         conn = self._get_connection()
+        # Persistent PRAGMAs — must be set BEFORE any tables are created
+        # so they take effect for a newly created database file.
+        conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        conn.execute("PRAGMA page_size = 16384")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -94,6 +119,53 @@ class SqliteSessionStore(SessionStoreBase):
         # Track B mining schema (additive — sessions table NOT modified).
         _create_mining_tables(conn)
         conn.commit()
+        # One-time auto_vacuum migration for existing databases.
+        # (Runs VACUUM only once per store lifetime.)
+        if not self._auto_vacuum_ensured:
+            self._ensure_auto_vacuum()
+            self._auto_vacuum_ensured = True
+
+    def _ensure_auto_vacuum(self) -> None:
+        """Migrate an existing database to auto_vacuum=INCREMENTAL and page_size=16384.
+
+        Checks ``PRAGMA auto_vacuum`` on the current database.  If it is not
+        already 2 (INCREMENTAL), sets the pragma and runs a full VACUUM so
+        that the new setting takes effect.  Also re-applies ``page_size``
+        so that an existing database with the default 4096-byte pages is
+        migrated to 16384 during the VACUUM.  Truncates the WAL.
+
+        Graceful on failure: logs a warning but does **not** prevent the
+        store from operating (the DB continues without auto_vacuum).
+        The VACUUM will be attempted again on the next server start.
+        """
+        conn = self._get_connection()
+        try:
+            current = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+            if current == 2:
+                return
+            logger.warning(
+                "DB auto_vacuum=%d (expected 2=INCREMENTAL). "
+                "Running one-time VACUUM to migrate.",
+                current,
+            )
+            # Both PRAGMAs must be set BEFORE VACUUM so that the
+            # VACUUM rebuilds the database with the new settings.
+            conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+            conn.execute("PRAGMA page_size = 16384")
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.commit()
+            logger.info(
+                "VACUUM migration complete. auto_vacuum is now INCREMENTAL, "
+                "page_size is 16384."
+            )
+        except sqlite3.OperationalError as exc:
+            logger.error(
+                "VACUUM migration failed (%s). "
+                "DB continues without auto_vacuum. "
+                "Will retry on next server start.",
+                exc,
+            )
 
     def close(self) -> None:
         """Close the thread-local database connection."""
@@ -119,6 +191,9 @@ class SqliteSessionStore(SessionStoreBase):
                 ),
             )
             conn.commit()
+            self._write_count += 1
+            if self._write_count % 100 == 0:
+                self._maybe_incremental_vacuum(conn)
         return session
 
     def get(self, session_id: str) -> Optional[Session]:
@@ -134,6 +209,8 @@ class SqliteSessionStore(SessionStoreBase):
             if session.is_expired(self._ttl_seconds):
                 conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
                 conn.commit()
+                self._write_count += 1
+                self._maybe_incremental_vacuum(conn)
                 return None
             session.touch()
             conn.execute(
@@ -141,6 +218,9 @@ class SqliteSessionStore(SessionStoreBase):
                 (serialize_session(session), session.last_accessed.isoformat(), session_id),
             )
             conn.commit()
+            self._write_count += 1
+            if self._write_count % 100 == 0:
+                self._maybe_incremental_vacuum(conn)
             return session
 
     def get_or_create(self, session_id: Optional[str] = None) -> Session:
@@ -161,6 +241,9 @@ class SqliteSessionStore(SessionStoreBase):
                 (serialize_session(session), session.last_accessed.isoformat(), session.id),
             )
             conn.commit()
+            self._write_count += 1
+            if self._write_count % 100 == 0:
+                self._maybe_incremental_vacuum(conn)
 
     def delete(self, session_id: str) -> bool:
         """Delete a session. Returns True if found."""
@@ -168,6 +251,9 @@ class SqliteSessionStore(SessionStoreBase):
             conn = self._get_connection()
             cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             conn.commit()
+            self._write_count += 1
+            if self._write_count % 100 == 0:
+                self._maybe_incremental_vacuum(conn)
             return cursor.rowcount > 0
 
     def list_sessions(self) -> List[str]:
@@ -270,7 +356,7 @@ class SqliteSessionStore(SessionStoreBase):
         """Remove expired sessions if above threshold. Must be called under lock."""
         conn = self._get_connection()
         count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-        if count < MAX_SESSIONS:
+        if count < self._max_sessions:
             return
         self._delete_expired(conn)
 
@@ -278,13 +364,18 @@ class SqliteSessionStore(SessionStoreBase):
         """Delete expired sessions from DB. Returns list of deleted IDs."""
         cutoff = (datetime.now() - timedelta(seconds=self._ttl_seconds)).isoformat()
         cursor = conn.execute(
-            "DELETE FROM sessions WHERE last_accessed < ?", (cutoff,)
+            "DELETE FROM sessions WHERE last_accessed < ? "
+            "RETURNING id",
+            (cutoff,),
         )
+        deleted_ids = [row[0] for row in cursor.fetchall()]
         conn.commit()
-        deleted_count = cursor.rowcount
+        deleted_count = len(deleted_ids)
+        self._write_count += 1
         if deleted_count > 0:
             logger.info("Cleaned up %d expired sessions", deleted_count)
-        return []
+            self._maybe_incremental_vacuum(conn)
+        return deleted_ids
 
     def cleanup_expired(self) -> int:
         """Force cleanup of all expired sessions. Returns count removed."""
@@ -295,7 +386,55 @@ class SqliteSessionStore(SessionStoreBase):
                 "DELETE FROM sessions WHERE last_accessed < ?", (cutoff,)
             )
             conn.commit()
-            return cursor.rowcount
+            removed = cursor.rowcount
+            self._write_count += 1
+            if removed > 0:
+                self._maybe_incremental_vacuum(conn)
+            return removed
+
+    def vacuum(self) -> None:
+        """Full VACUUM of the database + WAL checkpoint truncation.
+
+        Safe to call on an empty or dormant database — VACUUM on a
+        freshly-created DB with no deleted pages is nearly instant.
+
+        This method is **not** intended for hot-path use (it blocks all
+        writes for the duration).  Designed for:
+          - Application shutdown (see ``backend/app/main.py`` lifespan)
+          - Scheduled maintenance windows
+          - One-time migration after schema changes
+        """
+        with self._lock:
+            try:
+                conn = self._get_connection()
+                conn.execute("VACUUM")
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.commit()
+                self._write_count = 0
+                logger.info("Session DB vacuumed successfully")
+            except sqlite3.OperationalError as exc:
+                logger.warning("Session DB vacuum failed: %s", exc)
+
+    def _maybe_incremental_vacuum(self, conn: sqlite3.Connection) -> None:
+        """Reclaim free pages via incremental_vacuum when threshold is reached.
+
+        Checks ``PRAGMA freelist_count`` and runs ``PRAGMA
+        incremental_vacuum(N)`` if there are more than 50 free pages.
+        Up to 100 pages are reclaimed per call.
+
+        The check is cheap — ``freelist_count`` is a header read — and
+        ``incremental_vacuum`` is a no-op when the freelist is empty.
+        """
+        try:
+            freelist = conn.execute("PRAGMA freelist_count").fetchone()[0]
+            if freelist > 50:
+                conn.execute("PRAGMA incremental_vacuum(100)")
+                logger.debug(
+                    "Incremental vacuum: freelist=%d → reclaimed up to 100 pages",
+                    freelist,
+                )
+        except sqlite3.OperationalError as exc:
+            logger.warning("Incremental vacuum failed: %s", exc)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -400,10 +539,6 @@ class BatchStore:
             conn.commit()
             return len(to_remove)
 
-
-import json  # noqa: E402 — Track B mining helpers (added after primary imports)
-
-logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════

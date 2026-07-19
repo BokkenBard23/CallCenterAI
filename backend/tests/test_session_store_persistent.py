@@ -833,6 +833,8 @@ class TestFactory:
                     mock_settings.session_backend = "sqlite"
                     mock_settings.session_db_path = _db_path(tmp_dir, "factory.db")
                     mock_settings.session_ttl_seconds = 7200
+                    mock_settings.max_sessions = 50
+                    mock_settings.sqlite_cache_size_kb = 524288
                     store = create_session_store()
                     assert isinstance(store, SqliteSessionStore)
                     store.close()

@@ -75,15 +75,39 @@ class Settings(BaseSettings):
     qwen36_fast_model: str = "qwen-medium-dense-fast"   # Qwen3.6-27B Dense fast ✅ CLASSIFICATION (6 slots)
     coding_model: str = "coding-medium"                # Coding-focused model (for dict_ai structured output)
 
+    # ── LLM: DeepSeek V4 Flash via Beeline AI (OpenAI-compatible endpoint) ──
+    # MoE model for coding, complex analysis, and long agentic workflows.
+    # Especially useful for implementation design, complex debugging, large repo work,
+    # multi-step refactoring, and tasks requiring long agent work with files/terminal/tests.
+    #
+    # Available model codes (verified 2026-07-18):
+    #   coding-large           — Alias for DeepSeek V4 Flash ✅ RECOMMENDED (262K context, reasoning)
+    #   DeepSeek-V4-Flash      — Canonical name (same model)
+    #   deepseek-large         — Same model, alternative alias
+    #   deepseek-large-fast    — Fast mode without reasoning
+    #   deepseek-v4-pro        — Pro variant (vision: true, external)
+    #   deepseek-v4-flash-cdn  — CDNVideo-hosted variant (vision: true)
+    #
+    # Context window: 262,144 tokens (verified via API testing 2026-07-18: 252K pass, 280K fail)
+    # Parallelism: 6 slots per user (same as qwen-medium-dense, 2x more than qwen-medium)
+    # Rate limits: 2M tokens/hour, 20M tokens/day (per user)
+    # Vision: false (text-only model)
+    # Reasoning: true (uses "reasoning" field, NOT "reasoning_content" like Qwen)
+    # Tools: true (function calling supported)
+    deepseek_model: str = "coding-large"             # DeepSeek V4 Flash (262K, reasoning) ✅
+    deepseek_fast_model: str = "deepseek-large-fast" # DeepSeek V4 Flash fast (no reasoning)
+
     # ── Per-provider parallelism (asyncio.Semaphore sizes) ──
     # Total max parallel = 2 (GLM, FALLBACK) + 3 (Qwen3.5, FALLBACK) +
-    #                       6 (qwen-medium-dense, PRIMARY) + 6 (qwen-medium-dense-fast, CLASSIFICATION) = 17
+    #                       6 (qwen-medium-dense, PRIMARY) + 6 (qwen-medium-dense-fast, CLASSIFICATION) +
+    #                       6 (DeepSeek V4 Flash, CODING) = 23
     # NOTE: actual concurrent limits are also exposed dynamically via
     # GET /api/v3/me/limits?model={publicModelName} (see app.services.llm_limits).
     # These values are fallback defaults used when the limits API is unreachable.
     glm_max_concurrent: int = 2      # shared between glm-xlarge and glm-xlarge-fast (FALLBACK)
     qwen35_max_concurrent: int = 3    # Qwen3.5 (FALLBACK)
     qwen36_max_concurrent: int = 6    # qwen-medium-dense ✅ 6 parallel slots (was 3)
+    deepseek_max_concurrent: int = 6  # DeepSeek V4 Flash ✅ 6 parallel slots
 
     # ── Embeddings: FRIDA (Beeline AI) ──
     # FRIDA embeddings endpoint: /api/v2/embeddings (verified 2026-07-18).
@@ -126,6 +150,11 @@ class Settings(BaseSettings):
     session_backend: str = "sqlite"  # "memory" | "sqlite" (future: "postgresql")
     session_db_path: Path = Path("data/sessions.db")
     session_ttl_seconds: int = 7200  # 2 hours
+    max_sessions: int = 100  # dev/demo default; set 1000+ for production via .env
+    # SQLite page cache size (KB). Negative = kilobytes per SQLite convention.
+    # 512 MB handles multi-analyst workload (5-10 users × 30-60 MB dictionaries).
+    # Reduce to 262144 (256 MB) for memory-constrained environments.
+    sqlite_cache_size_kb: int = 524288  # 512 MB
 
     # ── Upload limits ──
     max_upload_size_mb: int = 50

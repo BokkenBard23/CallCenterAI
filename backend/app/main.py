@@ -162,11 +162,19 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown — clean up expired sessions
+    # Shutdown — clean up expired sessions, vacuum DB
     from app.utils.session import session_store
     removed = session_store.cleanup_expired()
     if removed:
         logger.info("Cleaned up %d expired sessions", removed)
+
+    # Vacuum the session database to reclaim free pages and truncate WAL.
+    # Safe to call on memory backends (no-op) and on SQLite with no free pages.
+    if hasattr(session_store, "vacuum"):
+        try:
+            session_store.vacuum()
+        except Exception as exc:
+            logger.warning("Session DB vacuum on shutdown failed: %s", exc)
 
     # Close FRIDA HTTP client
     if hasattr(app.state, "embedding_service"):

@@ -48,6 +48,24 @@ def _get_ttl_seconds() -> int:
         return 7200
 
 
+def _get_max_sessions() -> int:
+    """Get max sessions from config, with fallback."""
+    try:
+        from app.config import settings
+        return settings.max_sessions
+    except Exception:
+        return 100
+
+
+def _get_cache_size_kb() -> int:
+    """Get SQLite cache size (KB) from config, with fallback."""
+    try:
+        from app.config import settings
+        return settings.sqlite_cache_size_kb
+    except Exception:
+        return 524288  # 512 MB default
+
+
 def create_session_store() -> SessionStoreBase:
     """Factory: create the configured session store backend.
 
@@ -64,17 +82,25 @@ def create_session_store() -> SessionStoreBase:
 
     db_path = _get_db_path()
     ttl = _get_ttl_seconds()
+    max_sessions = _get_max_sessions()
+    cache_size_kb = _get_cache_size_kb()
 
     if backend == "memory":
         from app.services.session_store_memory import MemorySessionStore
         logger.info("Session backend: memory (configured)")
-        return MemorySessionStore(ttl_seconds=ttl)
+        return MemorySessionStore(ttl_seconds=ttl, max_sessions=max_sessions)
 
     # Default: sqlite
     try:
         from app.services.session_store_sqlite import SqliteSessionStore
-        store = SqliteSessionStore(db_path=db_path, ttl_seconds=ttl)
-        logger.info("Session backend: SQLite (db_path=%s)", db_path)
+        store = SqliteSessionStore(
+            db_path=db_path, ttl_seconds=ttl, max_sessions=max_sessions,
+            cache_size_kb=cache_size_kb,
+        )
+        logger.info(
+            "Session backend: SQLite (db_path=%s, cache=%d KB)",
+            db_path, cache_size_kb,
+        )
         return store
     except Exception as exc:
         from app.services.session_store_memory import MemorySessionStore
@@ -83,7 +109,7 @@ def create_session_store() -> SessionStoreBase:
             "Falling back to in-memory store. Sessions will NOT survive restarts.",
             exc,
         )
-        return MemorySessionStore(ttl_seconds=ttl)
+        return MemorySessionStore(ttl_seconds=ttl, max_sessions=max_sessions)
 
 
 # ═══════════════════════════════════════════════════════════

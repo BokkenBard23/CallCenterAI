@@ -25,8 +25,8 @@ from app.models import AnalysisResponse, BatchAnalysisResponse, DictionaryNode, 
 # Default session TTL in seconds (2 hours)
 DEFAULT_TTL_SECONDS = 7200
 
-# Maximum number of sessions before cleanup triggers
-MAX_SESSIONS = 1000
+# Maximum number of sessions before cleanup triggers (default; overridable)
+MAX_SESSIONS = 100
 
 
 # ═══════════════════════════════════════════════════════════
@@ -130,8 +130,13 @@ class SessionStoreBase(ABC):
     has a no-op default implementation for backends that don't hold resources.
     """
 
-    def __init__(self, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> None:
+    def __init__(
+        self,
+        ttl_seconds: int = DEFAULT_TTL_SECONDS,
+        max_sessions: int = 100,
+    ) -> None:
         self._ttl_seconds = ttl_seconds
+        self._max_sessions = max_sessions
 
     # ── Lifecycle ──────────────────────────────────────────────
 

@@ -26,8 +26,8 @@ class MemorySessionStore(SessionStoreBase):
     Suitable for development or as a fallback when SQLite is unavailable.
     """
 
-    def __init__(self, ttl_seconds: int = 7200) -> None:
-        super().__init__(ttl_seconds=ttl_seconds)
+    def __init__(self, ttl_seconds: int = 7200, max_sessions: int = 100) -> None:
+        super().__init__(ttl_seconds=ttl_seconds, max_sessions=max_sessions)
         self._lock = threading.Lock()
         self._sessions: Dict[str, Session] = {}
 
@@ -121,7 +121,7 @@ class MemorySessionStore(SessionStoreBase):
 
     def _maybe_cleanup(self) -> None:
         """Remove expired sessions if above threshold. Must be called under lock."""
-        if len(self._sessions) < 1000:
+        if len(self._sessions) < self._max_sessions:
             return
         expired_ids = [
             sid
