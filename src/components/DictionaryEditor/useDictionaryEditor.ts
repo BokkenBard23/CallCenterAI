@@ -21,7 +21,8 @@ import {
   addDictionaryNode,
   deleteDictionaryCondition,
   deleteDictionaryNode,
-  getDictionaryTree,
+  getDictionaryRoots,
+  getDictionarySubtree,
   reorderDictionaryConditions,
   updateDictionaryCondition,
   updateDictionaryNode,
@@ -49,6 +50,7 @@ export interface UseDictionaryEditorResult {
   treeStatus: EditorLoadStatus;
   treeError: string | null;
   reloadTree: () => void;
+  loadSubtree: (nodeId: string) => Promise<void>;
 
   // Selected node + conditions
   selectedNodeId: string | null;
@@ -115,6 +117,32 @@ function findPath(nodes: DictionaryNode[], nodeId: string, prefix: string[] = []
   return null;
 }
 
+/**
+ * Replace a node in the tree by its id with a new node (in-place immutable update).
+ * Used by lazy loading: when a subtree is fetched, it replaces the stub node
+ * (which had empty conditions/children) with the full node.
+ *
+ * Returns a new tree array (does not mutate the input).
+ */
+function replaceNodeInTree(
+  nodes: DictionaryNode[],
+  nodeId: string,
+  newNode: DictionaryNode,
+): DictionaryNode[] {
+  return nodes.map((n) => {
+    if ((n.id || n.name) === nodeId) {
+      return newNode;
+    }
+    if (n.children && n.children.length > 0) {
+      return {
+        ...n,
+        children: replaceNodeInTree(n.children, nodeId, newNode),
+      };
+    }
+    return n;
+  });
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'status' in err) {
     const e = err as ApiError;
@@ -146,7 +174,10 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
     setTreeStatus('loading');
     setTreeError(null);
     try {
-      const data = await getDictionaryTree(sessionId, controller.signal);
+      // P4 Level 2.5: lazy loading — initial fetch returns only root metadata
+      // (name, stats) without conditions or children. Each node's subtree is
+      // loaded on demand via loadSubtree() when the user expands it.
+      const data = await getDictionaryRoots(sessionId, controller.signal);
       setTree(data);
       if (data.length === 0) {
         setTreeStatus('empty');
@@ -161,6 +192,29 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
       setTreeError(errorMessage(err, 'Не удалось загрузить дерево словарей'));
     }
   }, [sessionId]);
+
+  // Load a subtree on demand (lazy expansion). Called when the user expands
+  // a node in the tree UI. Fetches only the requested subtree, not the whole
+  // dictionary.
+  const loadSubtree = useCallback(
+    async (nodeId: string) => {
+      const controller = new AbortController();
+      try {
+        const subtrees = await getDictionarySubtree(sessionId, nodeId, {
+          signal: controller.signal,
+        });
+        if (subtrees.length === 0) return;
+        const subtree = subtrees[0];
+        setTree((prevTree) =>
+          replaceNodeInTree(prevTree, nodeId, subtree),
+        );
+      } catch (err) {
+        // Silent fail — tree expansion is non-critical, user can retry
+        console.warn('Failed to load subtree for node', nodeId, err);
+      }
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
     void fetchTree();
@@ -486,6 +540,7 @@ export function useDictionaryEditor(sessionId: string): UseDictionaryEditorResul
     treeStatus,
     treeError,
     reloadTree,
+    loadSubtree,
     selectedNodeId,
     selectedNode,
     selectedPath,

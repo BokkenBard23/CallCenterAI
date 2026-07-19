@@ -14,6 +14,7 @@ The schema uses standard SQL types compatible with PostgreSQL:
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import sqlite3
@@ -31,6 +32,29 @@ from app.services.session_store_base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── Compression helpers (P4 Level 2 — item 6) ───────────────
+# Dictionary nodes are stored as gzip-compressed JSON BLOBs in the
+# ``dictionaries.node_json`` column. This gives ~5× compression on top
+# of the ``exclude_defaults=True`` ~3× reduction from P4 Level 1,
+# for a combined ~15× reduction vs. the original 62 MB payload.
+#
+# SQLite handles BLOB columns natively (no base64 overhead). The
+# compression is transparent to callers: ``_serialize_dict`` and
+# ``_deserialize_dict`` handle the (de)compression round-trip.
+
+
+def _serialize_dict(node: DictionaryNode) -> bytes:
+    """Serialize a DictionaryNode to gzip-compressed JSON bytes."""
+    json_str = node.model_dump_json(exclude_defaults=True, exclude_none=True)
+    return gzip.compress(json_str.encode("utf-8"), compresslevel=6)
+
+
+def _deserialize_dict(blob: bytes) -> DictionaryNode:
+    """Deserialize a gzip-compressed JSON BLOB back to a DictionaryNode."""
+    json_str = gzip.decompress(blob).decode("utf-8")
+    return DictionaryNode.model_validate_json(json_str)
 
 
 class SqliteSessionStore(SessionStoreBase):
@@ -129,7 +153,7 @@ class SqliteSessionStore(SessionStoreBase):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
                 name TEXT NOT NULL,
-                node_json TEXT NOT NULL,
+                node_blob BLOB NOT NULL,
                 created_at TEXT NOT NULL,
                 UNIQUE (session_id, name),
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -385,16 +409,14 @@ class SqliteSessionStore(SessionStoreBase):
             if row is None:
                 return None
             now = datetime.now().isoformat()
-            node_json = dictionary.model_dump_json(
-                exclude_defaults=True, exclude_none=True
-            )
+            node_blob = _serialize_dict(dictionary)
             conn.execute(
                 """
-                INSERT INTO dictionaries (session_id, name, node_json, created_at)
+                INSERT INTO dictionaries (session_id, name, node_blob, created_at)
                 VALUES (?, ?, ?, ?)
-                ON CONFLICT(session_id, name) DO UPDATE SET node_json = excluded.node_json
+                ON CONFLICT(session_id, name) DO UPDATE SET node_blob = excluded.node_blob
                 """,
-                (session_id, dictionary.name, node_json, now),
+                (session_id, dictionary.name, node_blob, now),
             )
             conn.commit()
             self._write_count += 1
@@ -413,12 +435,12 @@ class SqliteSessionStore(SessionStoreBase):
         with self._lock:
             conn = self._get_connection()
             row = conn.execute(
-                "SELECT node_json FROM dictionaries WHERE session_id = ? AND name = ?",
+                "SELECT node_blob FROM dictionaries WHERE session_id = ? AND name = ?",
                 (session_id, dict_name),
             ).fetchone()
         if row is None:
             return None
-        return DictionaryNode.model_validate_json(row[0])
+        return _deserialize_dict(row[0])
 
     # ── Dictionary table helpers (P4 Level 2) ─────────────────
 
@@ -440,15 +462,13 @@ class SqliteSessionStore(SessionStoreBase):
         )
         now = datetime.now().isoformat()
         for name, node in dictionaries.items():
-            node_json = node.model_dump_json(
-                exclude_defaults=True, exclude_none=True
-            )
+            node_blob = _serialize_dict(node)
             conn.execute(
                 """
-                INSERT INTO dictionaries (session_id, name, node_json, created_at)
+                INSERT INTO dictionaries (session_id, name, node_blob, created_at)
                 VALUES (?, ?, ?, ?)
                 """,
-                (session_id, name, node_json, now),
+                (session_id, name, node_blob, now),
             )
 
     def _load_dictionaries(self, session_id: str) -> Dict[str, DictionaryNode]:
@@ -459,13 +479,13 @@ class SqliteSessionStore(SessionStoreBase):
         """
         conn = self._get_connection()
         rows = conn.execute(
-            "SELECT name, node_json FROM dictionaries WHERE session_id = ?",
+            "SELECT name, node_blob FROM dictionaries WHERE session_id = ?",
             (session_id,),
         ).fetchall()
         result: Dict[str, DictionaryNode] = {}
-        for name, node_json in rows:
+        for name, node_blob in rows:
             try:
-                result[name] = DictionaryNode.model_validate_json(node_json)
+                result[name] = _deserialize_dict(node_blob)
             except Exception as exc:
                 logger.warning(
                     "Failed to deserialize dictionary '%s' for session '%s': %s",

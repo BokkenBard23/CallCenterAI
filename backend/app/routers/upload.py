@@ -11,6 +11,7 @@ form field to add data to an existing session instead of creating a new one.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -25,6 +26,7 @@ from app.models import (
     UploadDictionaryResponse,
     UploadRtfResponse,
 )
+from app.services.dict_utils import ValidationResult
 from app.services.rtf_parser import parse_rtf_bytes
 from app.services.xml_parser import group_into_display_tokens, parse_xml_bytes
 from app.utils.session import session_store
@@ -402,6 +404,12 @@ async def upload_dictionary(
 
     If `session_id` is provided, adds the dictionary to an existing session.
     Otherwise, creates a new session.
+
+    **Idempotency (P4 Level 3.8):** If the same XML file (by SHA-256 of its
+    raw bytes) has already been uploaded to this session, returns the
+    existing dictionary instead of creating a duplicate. The response
+    includes an ``idempotent`` flag indicating whether the dictionary was
+    served from cache.
     """
     # ── Sanitize filename ────────────────────────────────────────
     try:
@@ -426,6 +434,35 @@ async def upload_dictionary(
 
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+    # ── Resolve session (before parsing — cheap) ─────────────────
+    if session_id:
+        session = session_store.get(session_id, include_dictionaries=True)
+        if session is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session '{session_id}' not found.",
+            )
+    else:
+        session = session_store.create()
+
+    # ── Idempotency check (P4 Level 3.8) ────────────────────────
+    # Hash the raw XML bytes. If a dictionary with the same hash is already
+    # in this session, return the existing one — no re-parsing, no duplicate.
+    xml_hash = hashlib.sha256(content).hexdigest()
+    existing_dict = _find_dictionary_by_xml_hash(session, content)
+    if existing_dict is not None:
+        logger.info(
+            "Idempotent dictionary upload: '%s' (hash=%s) already in session %s, "
+            "returning existing dictionary '%s'",
+            filename, xml_hash[:12], session.id, existing_dict.name,
+        )
+        return UploadDictionaryResponse(
+            session_id=session.id,
+            dictionary=existing_dict,
+            validation=ValidationResult(valid=True, warnings=[], errors=[]),
+            display_tokens=None,
+        )
 
     # ── Parse XML ─────────────────────────────────────────────────
     try:
@@ -460,16 +497,6 @@ async def upload_dictionary(
                 )
 
     # ── Store in session ──────────────────────────────────────────
-    if session_id:
-        session = session_store.get(session_id)
-        if session is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session '{session_id}' not found.",
-            )
-    else:
-        session = session_store.create()
-
     session_store.add_dictionary(session.id, dictionary)
 
     # ── Build display tokens for root dictionary ─────────────────
@@ -484,3 +511,42 @@ async def upload_dictionary(
         validation=validation,
         display_tokens=display_tokens,
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# Idempotency helper (P4 Level 3.8)
+# ═══════════════════════════════════════════════════════════
+
+
+def _find_dictionary_by_xml_hash(session, xml_bytes: bytes):
+    """Check if the session already has a dictionary parsed from this XML.
+
+    Re-serializes each existing dictionary to XML and compares the SHA-256
+    hash against the incoming ``xml_bytes``. If a match is found, returns
+    the existing :class:`DictionaryNode`; otherwise returns ``None``.
+
+    This makes ``POST /api/upload/dictionary`` idempotent: uploading the
+    same XML twice to the same session does not create a duplicate
+    dictionary — the existing one is returned instead.
+
+    The check is O(N) over existing dictionaries (one serialize per dict),
+    but N is typically 1-5, so the cost is negligible compared to
+    re-parsing the XML and re-validating the hierarchy.
+    """
+    incoming_hash = hashlib.sha256(xml_bytes).hexdigest()
+    for name, existing_dict in session.dictionaries.items():
+        try:
+            from app.services.xml_serializer import serialize_dictionary_to_xml
+            existing_xml = serialize_dictionary_to_xml(existing_dict)
+            existing_hash = hashlib.sha256(
+                existing_xml.encode("utf-8")
+            ).hexdigest()
+            if existing_hash == incoming_hash:
+                return existing_dict
+        except Exception as exc:
+            logger.debug(
+                "Idempotency check failed for dictionary '%s': %s",
+                name, exc,
+            )
+            continue
+    return None

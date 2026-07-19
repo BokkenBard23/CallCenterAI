@@ -421,6 +421,54 @@ async def get_session_dictionaries(
 
 
 @router.get(
+    "/{session_id}/roots",
+    response_model=List[DictionaryNode],
+    summary="Get root dictionary metadata only (lazy loading)",
+    description=(
+        "Return a lightweight list of root dictionaries — each with its "
+        "metadata (name, id, condition_count, has_children, children_count, "
+        "saved_state) but WITHOUT the expensive ``conditions`` and ``children`` "
+        "payloads. Used by the FE for the initial navigation tree render: "
+        "instead of loading a 62 MB payload with all conditions, this endpoint "
+        "returns < 5 KB. The FE then calls ``GET /{session_id}?node_id=<name>`` "
+        "to fetch the full subtree on demand when the user expands a node."
+    ),
+)
+async def get_session_dictionary_roots(
+    session_id: str,
+) -> List[DictionaryNode]:
+    """Return root dictionaries with conditions and children stripped out.
+
+    This is the lazy-loading entry point: the FE gets the names and stats
+    of all dictionaries in a session without loading any condition data.
+    Each returned node has:
+      - ``name``, ``id``, ``parent_name`` — identity
+      - ``condition_count``, ``has_children``, ``children_count`` — stats
+      - ``conditions=[]`` — empty (loaded on demand)
+      - ``children=[]`` — empty (loaded on demand)
+
+    To get the full tree for a specific dictionary, call:
+        GET /api/dictionary/{session_id}?node_id=<name>
+    """
+    session = _resolve_session(session_id)
+    roots: List[DictionaryNode] = []
+    for root in session.dictionaries.values():
+        # Build a lightweight copy with conditions and children stripped
+        # but keep all metadata fields (id, name, stats, saved_state, etc.)
+        roots.append(
+            root.model_copy(
+                update={
+                    "conditions": [],
+                    "children": [],
+                    # Preserve has_children/children_count so the FE knows
+                    # whether to show an expand arrow.
+                }
+            )
+        )
+    return roots
+
+
+@router.get(
     "/{session_id}/tokens",
     response_model=List[DisplayToken],
     summary="Get display tokens for a dictionary",

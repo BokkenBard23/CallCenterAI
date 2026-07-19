@@ -457,13 +457,58 @@ export async function getQualityScore(
  * GET /api/dictionary/{session_id}
  * Fetch all root dictionaries (with full subtrees) stored in a session.
  * Used by the DictionaryEditorPage to render the navigation tree on mount.
+ *
+ * Optional lazy-loading params (P4 Level 2.5):
+ *   - depth: prune each tree to this depth (1 = root only, 2 = root + children)
+ *   - nodeId: return only the subtree under this node name
  */
 export async function getDictionaryTree(
   sessionId: string,
+  options?: {
+    depth?: number;
+    nodeId?: string;
+    signal?: AbortSignal;
+  },
+): Promise<DictionaryNode[]> {
+  const params = new URLSearchParams();
+  if (options?.depth !== undefined) params.set('depth', String(options.depth));
+  if (options?.nodeId) params.set('node_id', options.nodeId);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return request<DictionaryNode[]>(`/api/dictionary/${sessionId}${query}`, {
+    signal: options?.signal,
+  });
+}
+
+/**
+ * GET /api/dictionary/{session_id}/roots
+ * Fetch lightweight root dictionary metadata (names, stats) without conditions
+ * or children. Used for the initial tree render — loads < 5 KB instead of the
+ * full 62 MB payload. Then call getDictionaryTree({ nodeId }) to load a
+ * specific subtree on demand when the user expands a node.
+ */
+export async function getDictionaryRoots(
+  sessionId: string,
   signal?: AbortSignal,
 ): Promise<DictionaryNode[]> {
-  return request<DictionaryNode[]>(`/api/dictionary/${sessionId}`, {
+  return request<DictionaryNode[]>(`/api/dictionary/${sessionId}/roots`, {
     signal,
+  });
+}
+
+/**
+ * GET /api/dictionary/{session_id}?node_id=<name>
+ * Fetch a single dictionary subtree by node name. Used for lazy loading:
+ * the FE calls this when the user expands a node in the tree.
+ */
+export async function getDictionarySubtree(
+  sessionId: string,
+  nodeId: string,
+  options?: { depth?: number; signal?: AbortSignal },
+): Promise<DictionaryNode[]> {
+  return getDictionaryTree(sessionId, {
+    nodeId,
+    depth: options?.depth,
+    signal: options?.signal,
   });
 }
 
