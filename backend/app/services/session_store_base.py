@@ -75,7 +75,7 @@ class _SessionEncoder(json.JSONEncoder):
         return super().default(o)
 
 
-def serialize_session(session: Session) -> str:
+def serialize_session(session: Session, include_dictionaries: bool = True) -> str:
     """Serialize a Session dataclass to JSON string.
 
     Uses ``exclude_defaults=True, exclude_none=True`` on every Pydantic
@@ -84,6 +84,13 @@ def serialize_session(session: Session) -> str:
     and any explicit ``None`` values. This reduces storage size by 60-70%
     on large dictionaries (P4 Level 1 optimization) without information
     loss: Pydantic restores the defaults on deserialization.
+
+    When ``include_dictionaries=False`` (P4 Level 2 — schema normalization),
+    dictionaries are omitted from the JSON blob. This is used by
+    :class:`SqliteSessionStore` which stores dictionaries in a separate
+    ``dictionaries`` table (foreign-key CASCADE on session delete). The
+    in-memory :class:`MemorySessionStore` ignores this parameter and
+    keeps everything in the Session object directly.
     """
     data = {
         "id": session.id,
@@ -94,10 +101,14 @@ def serialize_session(session: Session) -> str:
             if session.dialog
             else None
         ),
-        "dictionaries": {
-            k: v.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
-            for k, v in session.dictionaries.items()
-        },
+        "dictionaries": (
+            {
+                k: v.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
+                for k, v in session.dictionaries.items()
+            }
+            if include_dictionaries
+            else {}
+        ),
         "analyses": {
             k: v.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
             for k, v in session.analyses.items()
@@ -174,10 +185,19 @@ class SessionStoreBase(ABC):
         """
 
     @abstractmethod
-    def get(self, session_id: str) -> Optional[Session]:
+    def get(self, session_id: str, include_dictionaries: bool = True) -> Optional[Session]:
         """Retrieve a session by ID.
 
         Returns None if not found or expired.
+
+        Args:
+            include_dictionaries: When True (default), load dictionaries
+                associated with the session. When False, the returned
+                Session has empty ``dictionaries={}`` — used by callers
+                that only need dialog/analyses metadata (e.g.
+                :meth:`get_analysis`, :meth:`update_analysis_llm`).
+                Backends that store dictionaries inline (Memory) may
+                ignore this parameter.
         """
 
     @abstractmethod
@@ -245,7 +265,9 @@ class SessionStoreBase(ABC):
         """
         # Find the analysis across all sessions
         for session_id in self.list_sessions():
-            session = self.get(session_id)
+            # Load session without dictionaries — update_analysis_llm only
+            # needs session.analyses, not the multi-MB dictionary payloads.
+            session = self.get(session_id, include_dictionaries=False)
             if session is None:
                 continue
             if analysis_id in session.analyses:

@@ -80,6 +80,7 @@ class SqliteSessionStore(SessionStoreBase):
             conn.execute("PRAGMA page_size = 16384")
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA foreign_keys = ON")  # required for CASCADE deletes
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA mmap_size=268435456")       # 256 MB memory-mapped I/O
             conn.execute(f"PRAGMA cache_size={-self._cache_size_kb}")  # configurable (default 512 MB)
@@ -116,6 +117,27 @@ class SqliteSessionStore(SessionStoreBase):
                 last_accessed TEXT NOT NULL
             )
         """)
+        # P4 Level 2 — normalized dictionaries table (foreign-key CASCADE).
+        # Each dictionary root is stored as a separate row keyed by (session_id, name).
+        # This keeps the sessions.data JSON small (no 62 MB blob) and enables:
+        #   - fast GET /api/sessions (list) without parsing dictionaries
+        #   - fast GET /api/dictionary/{session_id}/{name} without loading all dicts
+        #   - ON DELETE CASCADE so session deletion cleans up dictionaries
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS dictionaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                node_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (session_id, name),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dictionaries_session ON dictionaries(session_id)"
+        )
         # Track B mining schema (additive — sessions table NOT modified).
         _create_mining_tables(conn)
         conn.commit()
@@ -185,7 +207,7 @@ class SqliteSessionStore(SessionStoreBase):
                 "INSERT OR REPLACE INTO sessions (id, data, created_at, last_accessed) VALUES (?, ?, ?, ?)",
                 (
                     session.id,
-                    serialize_session(session),
+                    serialize_session(session, include_dictionaries=False),
                     session.created_at.isoformat(),
                     session.last_accessed.isoformat(),
                 ),
@@ -196,8 +218,17 @@ class SqliteSessionStore(SessionStoreBase):
                 self._maybe_incremental_vacuum(conn)
         return session
 
-    def get(self, session_id: str) -> Optional[Session]:
-        """Retrieve a session by ID. Returns None if not found or expired."""
+    def get(self, session_id: str, include_dictionaries: bool = True) -> Optional[Session]:
+        """Retrieve a session by ID. Returns None if not found or expired.
+
+        Args:
+            session_id: Session identifier.
+            include_dictionaries: When True (default), loads dictionaries from
+                the ``dictionaries`` table and attaches them to the returned
+                Session. When False, returns Session with empty
+                ``dictionaries={}`` — used by :meth:`get_analysis` and
+                :meth:`update_analysis_llm` which do not need dictionary data.
+        """
         with self._lock:
             conn = self._get_connection()
             row = conn.execute(
@@ -215,12 +246,20 @@ class SqliteSessionStore(SessionStoreBase):
             session.touch()
             conn.execute(
                 "UPDATE sessions SET data = ?, last_accessed = ? WHERE id = ?",
-                (serialize_session(session), session.last_accessed.isoformat(), session_id),
+                (
+                    serialize_session(session, include_dictionaries=False),
+                    session.last_accessed.isoformat(),
+                    session_id,
+                ),
             )
             conn.commit()
             self._write_count += 1
             if self._write_count % 100 == 0:
                 self._maybe_incremental_vacuum(conn)
+            # Load dictionaries from the normalized table (unless caller
+            # explicitly asked to skip — e.g. get_analysis / update_analysis_llm).
+            if include_dictionaries:
+                session.dictionaries = self._load_dictionaries(session_id)
             return session
 
     def get_or_create(self, session_id: Optional[str] = None) -> Session:
@@ -232,14 +271,30 @@ class SqliteSessionStore(SessionStoreBase):
         return self.create()
 
     def update(self, session: Session) -> None:
-        """Update a session in the store."""
+        """Update a session in the store.
+
+        Saves the session metadata (id, created_at, last_accessed, dialog,
+        analyses, metadata) as a compact JSON blob in ``sessions.data``
+        and separately persists all dictionaries into the ``dictionaries``
+        table (P4 Level 2 normalization).
+        """
         session.touch()
         with self._lock:
             conn = self._get_connection()
             conn.execute(
                 "UPDATE sessions SET data = ?, last_accessed = ? WHERE id = ?",
-                (serialize_session(session), session.last_accessed.isoformat(), session.id),
+                (
+                    serialize_session(session, include_dictionaries=False),
+                    session.last_accessed.isoformat(),
+                    session.id,
+                ),
             )
+            # Persist dictionaries into the normalized table. This is an
+            # upsert: existing rows for this session are replaced so that
+            # dictionary edits (rename, delete, condition changes) are
+            # reflected. For very large dictionaries this is O(N) but runs
+            # in a single transaction.
+            self._save_dictionaries(conn, session.id, session.dictionaries)
             conn.commit()
             self._write_count += 1
             if self._write_count % 100 == 0:
@@ -269,19 +324,26 @@ class SqliteSessionStore(SessionStoreBase):
         Unlike :meth:`get`, this does NOT update ``last_accessed`` and does
         not trigger TTL refresh — safe for listing/discovery endpoints.
 
+        P4 Level 2: dictionary count is fetched via a SQL LEFT JOIN on the
+        ``dictionaries`` table instead of parsing the session JSON blob.
+        This avoids loading multi-megabyte dictionary payloads just to
+        count them.
+
         Each entry: ``{session_id, created_at, turn_count, has_dictionary,
         dictionary_count}``.
         """
         with self._lock:
             conn = self._get_connection()
             rows = conn.execute(
-                "SELECT id, created_at, data FROM sessions"
+                """
+                SELECT s.id, s.created_at, s.data,
+                       (SELECT COUNT(*) FROM dictionaries d WHERE d.session_id = s.id) AS dict_count
+                FROM sessions s
+                """
             ).fetchall()
         summaries: List[Dict[str, Any]] = []
-        for sid, created_at, data_str in rows:
+        for sid, created_at, data_str, dict_count in rows:
             turn_count = 0
-            has_dictionary = False
-            dictionary_count = 0
             try:
                 blob = json.loads(data_str)
                 dialog = blob.get("dialog")
@@ -289,10 +351,6 @@ class SqliteSessionStore(SessionStoreBase):
                     turns = dialog.get("turns")
                     if isinstance(turns, list):
                         turn_count = len(turns)
-                dicts = blob.get("dictionaries")
-                if isinstance(dicts, dict):
-                    dictionary_count = len(dicts)
-                    has_dictionary = dictionary_count > 0
             except (ValueError, TypeError) as exc:
                 logger.warning(
                     "list_sessions_summary: failed to parse session '%s': %s",
@@ -303,27 +361,117 @@ class SqliteSessionStore(SessionStoreBase):
                     "session_id": sid,
                     "created_at": created_at,
                     "turn_count": turn_count,
-                    "has_dictionary": has_dictionary,
-                    "dictionary_count": dictionary_count,
+                    "has_dictionary": dict_count > 0,
+                    "dictionary_count": dict_count,
                 }
             )
         return summaries
 
     def add_dictionary(self, session_id: str, dictionary: DictionaryNode) -> Optional[Session]:
-        """Add a dictionary to a session. Returns updated session or None."""
-        session = self.get(session_id)
-        if session is None:
-            return None
-        session.dictionaries[dictionary.name] = dictionary
-        self.update(session)
-        return session
+        """Add a dictionary to a session. Returns updated session or None.
+
+        P4 Level 2: dictionaries are stored in the normalized
+        ``dictionaries`` table. This method performs a direct INSERT OR
+        REPLACE on that table without rewriting the session JSON blob,
+        which is O(1) for a single dictionary regardless of how many
+        other dictionaries the session has.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            # Verify the session exists
+            row = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            now = datetime.now().isoformat()
+            node_json = dictionary.model_dump_json(
+                exclude_defaults=True, exclude_none=True
+            )
+            conn.execute(
+                """
+                INSERT INTO dictionaries (session_id, name, node_json, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(session_id, name) DO UPDATE SET node_json = excluded.node_json
+                """,
+                (session_id, dictionary.name, node_json, now),
+            )
+            conn.commit()
+            self._write_count += 1
+            if self._write_count % 100 == 0:
+                self._maybe_incremental_vacuum(conn)
+        # Return the session with dictionaries loaded so callers see the new dict
+        return self.get(session_id)
 
     def get_dictionary(self, session_id: str, dict_name: str) -> Optional[DictionaryNode]:
-        """Get a specific dictionary from a session."""
-        session = self.get(session_id)
-        if session is None:
+        """Get a specific dictionary from a session.
+
+        P4 Level 2: performs a direct SELECT on the ``dictionaries`` table
+        keyed by (session_id, name). This is O(log N) via the UNIQUE index
+        instead of O(N) deserialization of the entire session JSON blob.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            row = conn.execute(
+                "SELECT node_json FROM dictionaries WHERE session_id = ? AND name = ?",
+                (session_id, dict_name),
+            ).fetchone()
+        if row is None:
             return None
-        return session.dictionaries.get(dict_name)
+        return DictionaryNode.model_validate_json(row[0])
+
+    # ── Dictionary table helpers (P4 Level 2) ─────────────────
+
+    def _save_dictionaries(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        dictionaries: Dict[str, DictionaryNode],
+    ) -> None:
+        """Replace all dictionaries for a session in a single transaction.
+
+        Used by :meth:`update` to persist the full set of dictionaries after
+        edits (rename, delete, condition changes). Deletes existing rows for
+        the session and re-inserts the current set. Runs in the caller's
+        transaction — does NOT commit.
+        """
+        conn.execute(
+            "DELETE FROM dictionaries WHERE session_id = ?", (session_id,)
+        )
+        now = datetime.now().isoformat()
+        for name, node in dictionaries.items():
+            node_json = node.model_dump_json(
+                exclude_defaults=True, exclude_none=True
+            )
+            conn.execute(
+                """
+                INSERT INTO dictionaries (session_id, name, node_json, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (session_id, name, node_json, now),
+            )
+
+    def _load_dictionaries(self, session_id: str) -> Dict[str, DictionaryNode]:
+        """Load all dictionaries for a session from the normalized table.
+
+        Used by :meth:`get` when ``include_dictionaries=True``. Returns
+        an empty dict if the session has no dictionaries or does not exist.
+        """
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT name, node_json FROM dictionaries WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        result: Dict[str, DictionaryNode] = {}
+        for name, node_json in rows:
+            try:
+                result[name] = DictionaryNode.model_validate_json(node_json)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to deserialize dictionary '%s' for session '%s': %s",
+                    name, session_id, exc,
+                )
+        return result
 
     def add_analysis(self, session_id: str, analysis: AnalysisResponse) -> Optional[Session]:
         """Add an analysis result to a session. Returns updated session or None."""
@@ -335,7 +483,14 @@ class SqliteSessionStore(SessionStoreBase):
         return session
 
     def get_analysis(self, analysis_id: str) -> Optional[AnalysisResponse]:
-        """Find an analysis across all sessions by its ID."""
+        """Find an analysis across all sessions by its ID.
+
+        P4 Level 2: iterates over session JSON blobs WITHOUT loading
+        dictionaries (they live in a separate table). This makes
+        get_analysis O(sessions) instead of O(sessions × dictionaries)
+        — a major speedup when searching for an analysis ID across
+        100 sessions each with multi-megabyte dictionaries.
+        """
         with self._lock:
             conn = self._get_connection()
             rows = conn.execute("SELECT data FROM sessions").fetchall()

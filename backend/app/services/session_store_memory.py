@@ -41,8 +41,13 @@ class MemorySessionStore(SessionStoreBase):
             self._sessions[session.id] = session
         return session
 
-    def get(self, session_id: str) -> Optional[Session]:
-        """Retrieve a session by ID. Returns None if not found or expired."""
+    def get(self, session_id: str, include_dictionaries: bool = True) -> Optional[Session]:
+        """Retrieve a session by ID. Returns None if not found or expired.
+
+        ``include_dictionaries`` is accepted for API compatibility with
+        :class:`SqliteSessionStore` but ignored — MemorySessionStore keeps
+        everything in the Session object directly.
+        """
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
