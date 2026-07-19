@@ -85,7 +85,7 @@ Nginx reverse proxy on port 80 routes `/api` to the backend (8000) and everythin
 
 - **44/53 backlog items completed** (9 pending, all low priority)
 - **565 frontend tests** passing
-- **1307+ backend tests** passing
+- **1976 backend tests** passing
 - **Lighthouse score**: 92+
 - Pipeline-driven development with AI agent orchestration via `pipeline-state.yaml`
 

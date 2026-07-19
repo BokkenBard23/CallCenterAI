@@ -9,13 +9,13 @@ tags: [testing, vitest, pytest, coverage, quality-gates, vision, drift]
 
 ## Overview
 
-CallCenterAI maintains **over 1800 tests** across frontend and backend, with multiple quality gates enforced in CI and pre-commit hooks.
+CallCenterAI maintains **2541 tests** across frontend and backend, with multiple quality gates enforced in CI and pre-commit hooks.
 
 | Suite | Count | Framework |
 |-------|-------|-----------|
 | Frontend | 565 | Vitest + Testing Library |
-| Backend | 1307+ | pytest |
-| **Total** | **1872+** | |
+| Backend | 1976 | pytest |
+| **Total** | **2541** | |
 
 ## Frontend Testing
 
@@ -64,8 +64,10 @@ npm run test:watch     # Watch mode
 |------|-------|
 | API routers | Endpoint behavior, request/response validation |
 | Services | Business logic, matching, analysis |
-| PII masking | 182 tests for Presidio + custom recognizers |
+| PII masking | 182+ tests for Presidio + custom recognizers (incl. timestamp propagation) |
 | SmartLogger | Matching accuracy, morphological handling |
+| RTF timestamps | 16 regression tests in `test_rtf_timestamps_real.py` (real-file extraction) |
+| Time-gap filtering | 27+ tests for `_apply_time_gap_filter` (ExtraLimitations semantics) |
 | Database | Session CRUD, batch operations |
 | LLM providers | Provider connectivity, fallback behavior |
 
@@ -127,20 +129,25 @@ Vision-based UI auditing using LLM:
 2. `scripts/h2-vision-batch.mjs` — Batch vision analysis
 3. Results verified through `.loops/` artifacts
 
-## Coverage Baseline (as of 2026-07-13)
+## Coverage Baseline (as of 2026-07-18)
 
 | Metric | Value |
 |--------|-------|
 | `tsc -b --force` | ExitCode 0 |
 | `vitest run` | 565/565 passing |
 | `eslint .` | 0 errors |
+| Backend pytest | 1976 passed, 1 skipped (networkx), 0 failed |
 | Dictionary Editor tests | 61/61 passing |
-| PII masking tests | 182/182 passing |
+| PII masking tests | 182+ passing |
 | Mining audit tests | 46/46 passing |
+| RTF timestamps regression | 16/16 passing |
+| Time-gap filtering | 27+ tests passing |
 
 ## Testing Tips
 
 - **Frontend**: Component tests use `@testing-library/react` — query by role/text, not implementation details
 - **Backend**: Use pytest fixtures for database isolation and mock LLM providers
-- **PII tests**: The 182 PII masking tests are comprehensive — add new Russian entity patterns with corresponding test cases
+- **PII tests**: The 182+ PII masking tests are comprehensive — add new Russian entity patterns with corresponding test cases. Timestamp propagation is verified in `test_pii_masking_timestamps.py`.
+- **RTF timestamps**: `test_rtf_timestamps_real.py` guards against silent regression where timestamps drop (would break time-gap filtering silently). Run against committed `docs/assets/sample-dialog.rtf` in CI.
+- **Time-gap filtering**: 27+ tests in `test_time_gap_filtering.py` covering all ExtraLimitations modes (StartEnd, Parent, Channel, Seconds/Words/Phrases).
 - **DS drift**: When a Beeline DS update introduces breaking changes, check the 8 documented gotchas in `UI_GUIDELINES.md` before updating tests

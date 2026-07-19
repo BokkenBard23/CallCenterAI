@@ -74,7 +74,7 @@ The backend follows a **router → service → store** layered architecture:
 
 | Service | Purpose |
 |---------|---------|
-| **FRIDA Embeddings** | Text-to-vector embedding generation |
+| **FRIDA Embeddings** | Text-to-vector embedding generation via `POST /api/v2/embeddings` (v3 confirmed 404 — use v2) |
 | **FAISS Index** | Vector similarity search |
 | **Hybrid Search** | Combines vector + keyword search |
 | **PII Masking** | Presidio + 7 custom Russian-language NER recognizers |
@@ -130,9 +130,10 @@ Backend configuration is loaded from environment variables and `backend/.env`:
 
 - **LLM provider endpoints and keys**
 - **Database path** (default: `data/sessions.db`)
-- **Embedding model settings**
-- **PII masking rules**
+- **FRIDA embeddings endpoint** (`backend/app/services/embedding.py`): `POST /api/v2/embeddings` (v3 returns 404 — do not use)
+- **PII masking rules** (new PII-related env vars added in `.env.example` section)
 - **RAG knowledge base code** (`RAG_KB_CODE`)
+- **PII masking setup guide:** [`docs/ops/pii-masking-setup.md`](/docs/ops/pii-masking-setup.md)
 
 Environment variables are never committed. See `backend/.env` patterns and `npmrc.example` for configuration structure.
 

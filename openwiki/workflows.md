@@ -19,8 +19,21 @@ User uploads RTF/XML
   (rtf_parser / xml_parser)
        │
        ▼
+  RTF timestamp extraction
+  (H:MM:SS → float seconds)
+       │
+       ▼
+  PII masking
+  (Presidio + spaCy ru_core_news_sm)
+  (BEFORE storage — 152-ФЗ compliance)
+       │
+       ▼
   SmartLogger matching
   (morphological engine)
+       │
+       ▼
+  Time-gap filtering
+  (ExtraLimitations: OnlyInGaps/ExcludeGaps)
        │
        ▼
   LLM analysis (parallel)
@@ -45,6 +58,9 @@ User uploads RTF/XML
 **Key details:**
 
 - Upload uses `FormData` for file uploads through `api/client.ts`
+- RTF timestamp extraction (`_parse_timestamp_to_seconds`): converts `H:MM:SS` to float seconds for time-gap filtering
+- PII masking runs **BEFORE** storage (Presidio + spaCy `ru_core_news_sm`; HTTP 503 if unavailable but enabled)
+- Time-gap filtering (`_apply_time_gap_filter`) applies SmartLogger `<ExtraLimitations>` via INCLUDE/EXCLUDE semantics on temporal windows
 - Analysis runs the matching engine and LLM analysis **in parallel** (partial loading — LLM results are non-blocking for initial match display)
 - Session IDs are managed in `AnalysisContext`, not URL params
 - Quality scoring runs as a separate step after basic analysis
@@ -201,6 +217,11 @@ Transcript text
   Masked output
   ([PERSON], [PHONE], etc.)
 ```
+
+**Key details:**
+- 🔒 PII masking runs **BEFORE** session storage — unmasked PII never persists (152-ФЗ compliance)
+- Timestamp propagation fix (2026-07-18): `mask_dialogue` now preserves `start_offset`/`end_offset` on masked turns
+- See full setup guide at [`docs/ops/pii-masking-setup.md`](/docs/ops/pii-masking-setup.md)
 
 ## Source Anchors
 

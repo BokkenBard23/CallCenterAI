@@ -104,7 +104,15 @@ The `validator.py` module enforces dictionary consistency:
 
 ## PII Masking Rules
 
-Personal data protection uses Presidio with 7 custom Russian-language recognizers:
+Personal data protection uses Presidio with 7 custom Russian-language recognizers (Russian Federal Law 152-ФЗ compliance). PII masking runs **BEFORE** session storage — unmasked data never persists.
+
+### Prerequisites
+
+- spaCy (`ru_core_news_sm` model) required for Presidio Russian NER
+- See [`docs/ops/pii-masking-setup.md`](/docs/ops/pii-masking-setup.md) for full setup guide
+- If enabled but unavailable, upload returns HTTP 503 (hard compliance guard)
+
+### Recognizers
 
 | Recognizer | Pattern |
 |------------|---------|
@@ -116,6 +124,35 @@ Personal data protection uses Presidio with 7 custom Russian-language recognizer
 | Address | Russian address patterns |
 | Name | Russian full name patterns |
 
+## Time-Gap Filtering (ExtraLimitations)
+
+SmartLogger XML dictionaries support **temporal/positional windows** via `<ExtraLimitations>`, controlling **where** in a dialogue keyword matches are kept or discarded. This is NOT a silence/pause filter despite the `Gaps` naming.
+
+### SearchSpecifier — Filter Mode
+
+| SearchSpecifier | Effect |
+|-----------------|--------|
+| `OnlyInGaps` | **INCLUDE** — keep only matches inside the window |
+| `ExcludeGaps` | **EXCLUDE** — drop matches inside the window |
+
+### EventType
+
+| Type | Behavior |
+|------|----------|
+| `StartEnd` | Window anchored at dialogue start (`First`) or end (`Last`), sized by `Seconds`, `Words`, or `Phrases` |
+| `Parent` | Window anchored on parent node match times, with `Before`/`After` direction and `First`/`Last`/`Each` selector |
+
+Multiple `<Limit>` and `<ExtraLimitation>` entries combine via **AND** — all conditions must be satisfied.
+
+### Timestamp Source
+
+RTF timestamps (`H:MM:SS`) are extracted by `smartlogger.rtf_parser.extract_dialogue()` and converted to float seconds via `rtf_parser._parse_timestamp_to_seconds()`. If timestamps are absent, filtering is a no-op.
+
+- **Canonical semantics doc:** [`docs/specs/extra-limitations-semantics.md`](/docs/specs/extra-limitations-semantics.md) (ground truth from SmartLogger UI, 2026-07-18)
+- **DOMAIN_LOGIC.md section 10** contains detailed reference in Russian
+- **Time-gap filter implementation:** `backend/app/services/search.py` (`_apply_time_gap_filter`)
+- **Regression tests:** `backend/tests/test_time_gap_filtering.py`, `backend/tests/test_rtf_timestamps_real.py`
+
 ## Source Anchors
 
 | Concept | Source |
@@ -126,4 +163,6 @@ Personal data protection uses Presidio with 7 custom Russian-language recognizer
 | Dictionary management | `src/components/DictionaryEditor/`, `backend/app/routers/dictionary.py` |
 | Mining | `backend/app/routers/mining.py`, `src/components/DictionaryEditor/MiningPanel/` |
 | PII masking | `backend/app/routers/pii.py` |
+| Time-gap filtering | `backend/app/services/search.py` (`_apply_time_gap_filter`) |
+| ExtraLimitations semantics | `docs/specs/extra-limitations-semantics.md` |
 | Domain logic docs | `DOMAIN_LOGIC.md` |

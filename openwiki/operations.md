@@ -145,6 +145,44 @@ Automated bug hunting and senior review artifacts:
 
 ## Health Checks
 
-- `GET /health` — Basic backend health
+- `GET /health` — Basic backend health (includes `frida_available`, `pii_masking.available`)
 - `GET /ready` — Readiness check (database + LLM providers)
 - `GET /providers` — LLM provider connectivity status
+
+## PII Masking Setup
+
+PII masking is mandatory for Russian Federal Law 152-ФЗ compliance. See the dedicated setup guide:
+
+- **Full guide:** [`docs/ops/pii-masking-setup.md`](/docs/ops/pii-masking-setup.md)
+
+### Quick Prerequisites
+
+1. spaCy installed: `pip install "spacy>=3.8,<3.9"`
+2. Russian NER model: `python -m spacy download ru_core_news_sm`
+3. Verify: `python -c "import ru_core_news_sm; nlp = ru_core_news_sm.load(); print('OK')"`
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PII_MASKING_ENABLED` | `true` | Master switch; when true, dialogs masked before storage |
+| `PII_MASKING_LANGUAGE` | `ru` | Primary NER language |
+| `PII_MASKING_MIN_SCORE` | `0.5` | Minimum recognizer confidence (0.0-1.0) |
+| `PII_MASKING_CIRCUIT_RESET_SECONDS` | `60.0` | Circuit breaker auto-reset timeout |
+| `PII_MASKING_FAILURE_THRESHOLD` | `3` | Failures before circuit opens |
+
+If enabled but unavailable (spaCy model missing or circuit open), the upload endpoint returns **HTTP 503** — hard compliance guard.
+
+## Optimization Plan
+
+A session-level optimization plan covering P1-P4 tasks is available at:
+
+- **Plan:** [`docs/specs/optimization-plan.md`](/docs/specs/optimization-plan.md) (session 2026-07-18)
+
+### Completed Optimizations (Session 2026-07-18)
+
+- Time-gap filter rewrite with correct `SearchSpecifier` semantics
+- FRIDA endpoint v3→v2 (verified working endpoint `/api/v2/embeddings`)
+- PII masking timestamp propagation fix
+- 16 pre-existing test failures fixed
+- Database VACUUM: 1388 MB → 76 MB (1311 MB free pages reclaimed)
