@@ -1595,6 +1595,13 @@ class HealthCheckResult(BaseModel):
         None,
         description="PII masking subsystem status: enabled, available, circuit_breaker_state",
     )
+    embedding: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Embedding provider status (added in Wave 1): "
+            "{'provider': 'frida' | 'local', 'mode': 'frida' | 'local' | 'auto'}"
+        ),
+    )
 
 
 # ═══════════════════════════════════════════════════════════

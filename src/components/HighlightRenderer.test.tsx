@@ -335,6 +335,43 @@ describe('HighlightRenderer', () => {
     expect(highlight?.classList.contains('highlight-exact')).toBe(false);
   });
 
+  it('IP-1.5 regression: overlapping exact + morph matches keep highlight-exact', () => {
+    // Same phrase matched twice on the same turn: exact (quoted) and
+    // morphological (unquoted). Both cover the identical span. The morph
+    // match comes LAST in the array — before the 2026-09-19 fix it silently
+    // replaced the exact match and dropped the DR-1 highlight-exact class.
+    const text = 'Я хочу расторгнуть договор с вашей компанией.';
+    const start = text.indexOf('расторгнуть');
+    const end = start + 'расторгнуть договор'.length;
+    const matches = [
+      makeMatch({
+        phrase_text: 'расторгнуть договор',
+        matched_text: 'расторгнуть договор',
+        matched_start: start,
+        matched_end: end,
+        is_exact_match: true,
+        match_type: 'exact_bow',
+      }),
+      makeMatch({
+        phrase_text: 'расторгнуть договор',
+        matched_text: 'расторгнуть договор',
+        matched_start: start,
+        matched_end: end,
+        is_exact_match: false,
+        match_type: 'morph_bow',
+      }),
+    ];
+
+    const { container } = renderWithHover(
+      <HighlightRenderer text={text} matches={matches} />,
+    );
+
+    const highlight = container.querySelector('.highlight-match');
+    expect(highlight).toBeTruthy();
+    expect(highlight?.textContent).toBe('расторгнуть договор');
+    expect(highlight?.classList.contains('highlight-exact')).toBe(true);
+  });
+
   it('DR-2: applies fontWeight 600 when word_distance is 0', () => {
     const text = 'клиент хочет расторгнуть';
     const matches = [makeMatch({

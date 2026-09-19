@@ -1,0 +1,20 @@
+/* UploadPage — responsive fallback для dashboard-сетки.
+ *
+ * DS Grid (`@beeline/design-system-react`) поддерживает только фиксированное
+ * число колонок (className `dsb_grid__columns-4`) и не имеет responsive-пропа.
+ * На 375px четыре колонки дают карточки ~80px шириной: текст обрезается,
+ * заголовки нечитаемы (зафиксировано vision-анализом w2-upload-batch-375).
+ *
+ * Controlled fallback: media-query переопределяет только количество колонок
+ * dashboard-сетки UploadPage; DS-класс дополняется своим классом для
+ * повышения специфичности — базовые gap/align DS сохраняются.
+ */
+.dsb_grid.upload-dashboard-grid {
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (max-width: 480px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

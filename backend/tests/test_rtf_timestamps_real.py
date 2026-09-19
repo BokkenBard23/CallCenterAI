@@ -222,7 +222,9 @@ class TestRealRtfDirectory:
     @pytest.mark.asyncio
     async def test_real_rtf_files_have_timestamps(self) -> None:
         """At least 90% of turns across sampled real RTF files must have timestamps."""
-        rtf_files = sorted(_REAL_RTF_DIR.glob("*.rtf"))
+        # rglob: real RTF files live in subdirectories (chatclient/, Old/) —
+        # top-level glob stopped matching after the data layout changed.
+        rtf_files = sorted(_REAL_RTF_DIR.rglob("*.rtf"))
         assert len(rtf_files) > 0, f"No RTF files in {_REAL_RTF_DIR}"
 
         # Sample up to 20 files (deterministic seed for reproducibility)
@@ -274,7 +276,7 @@ class TestRealRtfDirectory:
         sys.path.insert(0, str(_REPO_ROOT / "Transcrib"))
         from smartlogger.rtf_parser import extract_dialogue
 
-        rtf_files = sorted(_REAL_RTF_DIR.glob("*.rtf"))
+        rtf_files = sorted(_REAL_RTF_DIR.rglob("*.rtf"))
         sample_size = min(5, len(rtf_files))
         random.seed(123)
         sampled = random.sample(rtf_files, sample_size)

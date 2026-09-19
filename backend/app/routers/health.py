@@ -49,10 +49,15 @@ def _check_session_store() -> str:
 
 
 async def _check_frida(request: Request) -> Tuple[str, bool]:
-    """Check FRIDA embedding service availability.
+    """Check embedding service availability (FRIDA or local TF-IDF).
+
+    The active provider is resolved at startup (EMBEDDING_PROVIDER=
+    frida|local|auto) and stored on ``app.state.embedding_provider``.
+    For the local TF-IDF provider ``is_available()`` is always True —
+    semantic search works fully offline in that mode.
 
     Returns:
-        Tuple of (check_result, frida_available_bool).
+        Tuple of (check_result, embedding_available_bool).
     """
     try:
         embedding_service = getattr(request.app.state, "embedding_service", None)
@@ -62,7 +67,8 @@ async def _check_frida(request: Request) -> Tuple[str, bool]:
         is_available = await embedding_service.is_available()
         if is_available:
             return "ok", True
-        return "error: FRIDA service unavailable", False
+        provider = getattr(request.app.state, "embedding_provider", "frida")
+        return f"error: {provider} embedding service unavailable", False
     except Exception as exc:
         return f"error: {exc}", False
 
@@ -197,6 +203,12 @@ async def health_check(request: Request) -> HealthCheckResult:
     active_sessions = _count_active_sessions()
     vector_store_size = _get_vector_store_size(request)
 
+    # ── Embedding provider info (Wave 1): active provider + mode ──
+    embedding_info = {
+        "provider": getattr(request.app.state, "embedding_provider", "frida"),
+        "mode": getattr(request.app.state, "embedding_mode", "unknown"),
+    }
+
     return HealthCheckResult(
         status=status,
         version=settings.app_version,
@@ -206,4 +218,5 @@ async def health_check(request: Request) -> HealthCheckResult:
         frida_available=frida_available,
         vector_store_size=vector_store_size,
         pii_masking=pii_masking,
+        embedding=embedding_info,
     )

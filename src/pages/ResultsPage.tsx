@@ -46,6 +46,7 @@ import HighlightedTextView from '../components/HighlightedTextView';
 import DictionaryTree from '../components/DictionaryTree';
 import PhrasePopover from '../components/PhrasePopover';
 import SemanticSearchPanel from '../components/SemanticSearchPanel';
+import { StructureTab } from '../components/StructureTab';
 import MatchCounter from '../components/MatchCounter/MatchCounter';
 import { QualityScorePanel } from '../components/QualityScorePanel';
 import { BlurFade } from '../components/ui/blur-fade';
@@ -172,11 +173,16 @@ function ResultsPageContent() {
 
   const handleViewModeChange = useCallback(
     (tabIndex: number) => {
-      // N.MAJ.3 FIX: 'structure' view mode was declared but never implemented
-      // in the UI (no third <Tab>). Clamping to 'highlighted' for any index
-      // beyond the supported tabs prevents the dead 'structure' path from
-      // polluting the dispatched state.
-      const mode: ViewMode = tabIndex === 0 ? 'summary' : 'highlighted';
+      // W2 (N.MAJ.3): three supported view modes — 'summary' (tab 0),
+      // 'highlighted' (tab 1) and 'structure' (tab 2). The clamp fallback
+      // maps any unexpected tab index to 'highlighted' so the dispatched
+      // state can never hold a dead mode value.
+      const mode: ViewMode =
+        tabIndex === 0
+          ? 'summary'
+          : tabIndex === 2
+            ? 'structure'
+            : 'highlighted';
       dispatch({
         type: 'SET_VIEW_MODE',
         payload: mode,
@@ -428,10 +434,22 @@ function ResultsPageContent() {
   );
 
   // ─── Derived values ──────────────────────────────────
-  // N.MAJ.3 FIX: only two supported tabs ('summary' | 'highlighted').
-  // activeTabIndex is 0 for 'summary' and 1 for 'highlighted'.
-  const activeTabIndex = state.viewMode === 'summary' ? 0 : 1;
+  // W2 (N.MAJ.3): three supported tabs — 'summary' (0), 'highlighted' (1),
+  // 'structure' (2).
+  const activeTabIndex =
+    state.viewMode === 'summary'
+      ? 0
+      : state.viewMode === 'structure'
+        ? 2
+        : 1;
   const fridaAvailable = fridaStatus?.frida_available ?? false;
+  // W2 MAJOR-2 rework: the top-bar badge must reflect the ACTIVE embedding
+  // provider (embedding_provider from /api/embeddings/status), not just
+  // frida_available. When the backend runs EMBEDDING_PROVIDER=local, a green
+  // hardcoded "FRIDA" badge contradicted the panel's «Локальный режим (TF-IDF)»
+  // badge — the exact state contradiction flagged by the W2 review.
+  const embeddingProvider = fridaStatus?.embedding_provider?.provider ?? null;
+  const isLocalEmbeddingMode = embeddingProvider === 'local';
   const dictionaryNodes = state.dictionaries.map((d) => d.response.dictionary).filter(Boolean);
 
   const navItems = useMemo(
@@ -526,7 +544,11 @@ function ResultsPageContent() {
             </Stack>
           )}
           {/* ── Header row ── */}
-          <Stack direction="horizontal" spacing="x3" align="center" justify="space-between">
+          {/* W2 MAJOR-2 rework: wrap="wrap" — при открытой панели семантического
+              поиска (312px справа) строка действий не помещалась в .results-main
+              и overflowing-бейдж режима перекрывался панелью (обрезался до
+              «Локальн…»). Теперь строка переносится вместо наложения. */}
+          <Stack direction="horizontal" spacing="x3" align="center" justify="space-between" wrap="wrap">
             <Stack direction="vertical" spacing="x1" align="start">
               <PageBreadcrumbs currentPage="Результаты" />
               <Stack direction="horizontal" spacing="x3" align="center">
@@ -612,21 +634,32 @@ function ResultsPageContent() {
                 </Button>
               )}
 
-              {/* FRIDA status indicator */}
+              {/* Embedding mode indicator — W2 MAJOR-2 rework: mirrors the
+                  SemanticSearchPanel badge (embedding_provider-aware) so the
+                  top bar and the panel can never contradict each other. */}
               <Tooltip
                 title={
-                  fridaAvailable
-                    ? `FRIDA доступна · ${fridaStatus?.vectors_stored ?? 0} векторов`
-                    : 'FRIDA недоступна'
+                  isLocalEmbeddingMode
+                    ? 'Семантический поиск: локальный режим (TF-IDF)'
+                    : fridaAvailable
+                      ? `FRIDA доступна · ${fridaStatus?.vectors_stored ?? 0} векторов`
+                      : 'FRIDA недоступна'
                 }
               >
                 <span>
                   <Badge
                     type="tertiary"
-                    semantic={fridaAvailable ? 'success' : 'danger'}
+                    semantic={isLocalEmbeddingMode || fridaAvailable ? 'success' : 'danger'}
                     dot
+                    /* W2 MAJOR-2 rework: nowrap — длинный текст бейджа
+                       обрезался правой панелью семантического поиска
+                       (виден был только фрагмент «Локальн…»). Короткая
+                       метка «Локальный» + nowrap гарантируют читаемость;
+                       полный режим («Локальный режим (TF-IDF)») показывает
+                       бейдж панели поиска. */
+                    style={{ whiteSpace: 'nowrap' }}
                   >
-                    FRIDA
+                    {isLocalEmbeddingMode ? 'Локальный' : 'FRIDA'}
                   </Badge>
                 </span>
               </Tooltip>
@@ -717,6 +750,20 @@ function ResultsPageContent() {
                       hideNoMatch={state.hideNoMatch}
                     />
                   </div>
+                </div>
+              </Tab>
+              {/* W2 (N.MAJ.3): third tab — structure of matches per
+                  dictionary section. */}
+              <Tab label="Структура" iconName={Icons.List}>
+                <div
+                  role="tabpanel"
+                  aria-labelledby="tab-structure"
+                  className="results-tabpanel"
+                >
+                  <StructureTab
+                    dictionaries={dictionaryNodes as DictionaryNode[]}
+                    searchResult={state.searchResult}
+                  />
                 </div>
               </Tab>
             </Tabs>

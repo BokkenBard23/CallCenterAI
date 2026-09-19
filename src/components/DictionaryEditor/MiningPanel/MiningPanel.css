@@ -40,6 +40,39 @@
  * ============================================================
  * Wraps on narrow widths and never overflows horizontally.
  * `min-width: 0` is the standard flex-overflow guard. */
+/* ============================================================
+ * JK6 FIX (W2): markdown contrast in dark theme.
+ * DictAuditTab renders the LLM audit explanation via react-markdown,
+ * which emits bare <p>/<li>/<h*> elements. The DS theme cascade resolves
+ * those to --color-text-inactive, which on the dark theme is a low-alpha
+ * white that the vision-gate flagged as "borderline WCAG AA" contrast on
+ * the Sidesheet background. Scoped override (same pattern as
+ * AIAnalysisPanel.css) forces markdown text to the primary text token
+ * with sufficient contrast on both light and dark themes.
+ * ============================================================ */
+.dict-audit-markdown p,
+.dict-audit-markdown li,
+.dict-audit-markdown ul,
+.dict-audit-markdown ol,
+.dict-audit-markdown h1,
+.dict-audit-markdown h2,
+.dict-audit-markdown h3,
+.dict-audit-markdown h4,
+.dict-audit-markdown h5,
+.dict-audit-markdown h6 {
+  color: var(--color-text-active);
+  margin: 0 0 8px 0;
+}
+
+.dict-audit-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.dict-audit-markdown ul,
+.dict-audit-markdown ol {
+  padding-left: 20px;
+}
+
 .mining-panel__picker-row {
   width: 100%;
   min-width: 0;

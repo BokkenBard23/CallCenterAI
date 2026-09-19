@@ -847,4 +847,156 @@ describe('UploadPage', () => {
     // Navigate should NOT have been called
     expect(mockNavigate).not.toHaveBeenCalled();
   });
+
+  // ─── D.8: Batch upload UI ─────────────────────────────
+
+  it('selecting multiple RTF files switches to batch mode and shows the file list', async () => {
+    renderUploadPage();
+
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file1 = new File(['a'], 'dialog-1.rtf', { type: 'application/rtf' });
+    const file2 = new File(['b'], 'dialog-2.rtf', { type: 'application/rtf' });
+
+    fireEvent.change(rtfInput, { target: { files: [file1, file2] } });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Пакетный режим: 2 файлов/)).toBeTruthy();
+    });
+    expect(screen.getByText('dialog-1.rtf')).toBeTruthy();
+    expect(screen.getByText('dialog-2.rtf')).toBeTruthy();
+  });
+
+  it('batch flow: submitBatch called with all files and navigates to /batch-results/:id', async () => {
+    mockSubmitBatch.mockResolvedValue({
+      batch_id: 'batch-123',
+      session_id: 'test-session',
+      total_files: 2,
+      status: 'processing',
+      items: [],
+      completed_count: 0,
+      failed_count: 0,
+      error: null,
+    });
+
+    // Provider selection via the DS Select is heavy to drive in jsdom —
+    // pre-set it through the context (same pattern as renderReadyToAnalyze)
+    // and drive the batch file selection through the real DropZone flow.
+    const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
+      dispatch({
+        type: 'SET_PROVIDERS',
+        payload: [
+          { id: 'ollama', name: 'Ollama', models: ['llama3'], configured: true, available: true },
+        ],
+      });
+      dispatch({ type: 'SET_PROVIDER_STATUS', payload: 'loaded' });
+      dispatch({ type: 'SET_SELECTED_PROVIDER', payload: 'ollama' });
+    });
+
+    renderReadyToAnalyze(onReady);
+
+    // Step 1: select 2 RTF files (first creates the session)
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file1 = new File(['a'], 'dialog-1.rtf', { type: 'application/rtf' });
+    const file2 = new File(['b'], 'dialog-2.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [file1, file2] } });
+
+    // Wait for the first-file upload (session creation) to complete and the
+    // Stepper to auto-advance to the dictionary step.
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="dict-input"]'),
+      ).toBeTruthy();
+    });
+
+    // Step 2: upload a dictionary (auto-advances to step 3)
+    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
+    const dictFile = new File(['<xml/>'], 'dict.xml', { type: 'text/xml' });
+    fireEvent.change(dictInput, { target: { files: [dictFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByText('dict.xml')).toBeTruthy();
+    });
+
+    // Batch CTA is visible and enabled
+    const batchBtn = await screen.findByText('Пакетный анализ (2 файлов)');
+    await waitFor(() => {
+      expect(batchBtn).not.toBeDisabled();
+    });
+
+    fireEvent.click(batchBtn);
+
+    await waitFor(() => {
+      expect(mockSubmitBatch).toHaveBeenCalledTimes(1);
+    });
+    // Called with the files array, session, provider and dictionaries
+    const call = mockSubmitBatch.mock.calls[0];
+    expect(call[0]).toHaveLength(2);
+    expect(call[1]).toBe('test-session');
+    expect(call[2]).toBe('ollama');
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/batch-results/batch-123');
+    });
+  });
+
+  it('batch failure: error snackbar shown, no navigation', async () => {
+    mockSubmitBatch.mockRejectedValue(new Error('Batch failed'));
+
+    const onReady = vi.fn((dispatch: React.Dispatch<AnalysisAction>) => {
+      dispatch({
+        type: 'SET_PROVIDERS',
+        payload: [
+          { id: 'ollama', name: 'Ollama', models: ['llama3'], configured: true, available: true },
+        ],
+      });
+      dispatch({ type: 'SET_PROVIDER_STATUS', payload: 'loaded' });
+      dispatch({ type: 'SET_SELECTED_PROVIDER', payload: 'ollama' });
+    });
+
+    renderReadyToAnalyze(onReady);
+
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file1 = new File(['a'], 'dialog-1.rtf', { type: 'application/rtf' });
+    const file2 = new File(['b'], 'dialog-2.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [file1, file2] } });
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="dict-input"]'),
+      ).toBeTruthy();
+    });
+
+    const dictInput = document.querySelector('[data-testid="dict-input"]') as HTMLInputElement;
+    const dictFile = new File(['<xml/>'], 'dict.xml', { type: 'text/xml' });
+    fireEvent.change(dictInput, { target: { files: [dictFile] } });
+
+    const batchBtn = await screen.findByText('Пакетный анализ (2 файлов)');
+    await waitFor(() => {
+      expect(batchBtn).not.toBeDisabled();
+    });
+
+    fireEvent.click(batchBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Batch failed')).toBeTruthy();
+    });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('single-file selection keeps the regular Анализировать CTA (no batch mode)', async () => {
+    renderUploadPage();
+
+    const rtfInput = document.querySelector('[data-testid="rtf-input"]') as HTMLInputElement;
+    const file = new File(['test'], 'dialog.rtf', { type: 'application/rtf' });
+    fireEvent.change(rtfInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      // 'dialog.rtf' may also appear in the Recent analyses section
+      // (localStorage persists across tests in this file) — use getAllByText.
+      expect(screen.getAllByText('dialog.rtf').length).toBeGreaterThanOrEqual(1);
+    });
+
+    expect(screen.queryByText(/Пакетный режим/)).toBeNull();
+    expect(screen.getByText('Анализировать')).toBeTruthy();
+  });
 });

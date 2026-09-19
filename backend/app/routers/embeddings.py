@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -198,9 +198,9 @@ class EnhancedSearchResponse(BaseModel):
 
 
 class EmbeddingStatusResponse(BaseModel):
-    """Status of FRIDA embedding and NLP services."""
+    """Status of the embedding service (FRIDA or local TF-IDF) and NLP services."""
 
-    frida_available: bool = Field(..., description="Whether FRIDA API is reachable")
+    frida_available: bool = Field(..., description="Whether the FRIDA API is reachable")
     vectors_stored: int = Field(..., description="Total vectors in the store")
     unique_dialogues: int = Field(..., description="Number of unique dialogues indexed")
     index_size_bytes: int = Field(..., description="Estimated FAISS index size in bytes")
@@ -210,6 +210,13 @@ class EmbeddingStatusResponse(BaseModel):
     natasha_available: bool = Field(..., description="Whether Natasha NER is available")
     deeppavlov_available: bool = Field(
         False, description="Whether DeepPavlov NER is available",
+    )
+    embedding_provider: Optional[Dict[str, str]] = Field(
+        None,
+        description=(
+            "Active embedding provider info (Wave 1): "
+            "{'provider': 'frida' | 'local', 'mode': 'frida' | 'local' | 'auto'}"
+        ),
     )
 
 
@@ -592,4 +599,8 @@ async def get_status(request: Request) -> EmbeddingStatusResponse:
         nlp_provider=nlp_provider,
         natasha_available=natasha_available,
         deeppavlov_available=False,
+        embedding_provider={
+            "provider": getattr(request.app.state, "embedding_provider", "frida"),
+            "mode": getattr(request.app.state, "embedding_mode", "unknown"),
+        },
     )

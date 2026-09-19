@@ -63,20 +63,16 @@
   min-width: 0;
   overflow: auto;
   padding: 16px;
-  /* JK7 FIX (PHASE J+K audit): when Sidesheet (AI Analysis / Mining)
-     opens with hasOverlay=true, the semi-transparent backdrop dims the
-     page below. With .dict-editor__main having no background, the page's
-     near-black --color-background-base showed through the empty area
-     below the short ConditionsTable content, and combined with the
-     backdrop the vision-gate repeatedly reported a "Большой полностью
-     чёрный прямоугольник" (large pure-black rectangle) in the
-     lower-center-left of the viewport.
-     Aligning the main background with the sidebar's
-     --color-background-secondary keeps the empty area visually
-     consistent with the surrounding panels (a muted dark-grey surface
-     instead of pure black), so the modal overlay no longer produces
-     a "missing/broken" black void. */
-  background: var(--color-background-secondary);
+  /* JK7 FIX (W2, iteration 2): on the DARK theme --color-background-secondary
+     is DARKER than --color-background-base, so the empty area below a short
+     ConditionsTable rendered as a distinct near-black block that the
+     vision-gate repeatedly reported as a "большой полностью чёрный
+     прямоугольник" (worse with the modal overlay dim). Aligning the main
+     background with the page surface (--color-background-base, same token
+     as the sticky header) makes the leftover area read as regular page
+     background instead of a broken void; the sidebar keeps its secondary
+     surface for the intended two-column rhythm. */
+  background: var(--color-background-base);
 }
 
 /* JK7 ROOT-CAUSE FIX: DS Sidesheet is rendered inline (position: relative,

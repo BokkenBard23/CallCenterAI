@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import SemanticSearchPanel from './SemanticSearchPanel';
 import * as api from '../../api/client';
+import { SnackbarProvider } from '../../context/SnackbarContext';
 import type { HybridSearchResult, VectorSearchResult } from '../../types/api';
 
 // ─── Mock API ──────────────────────────────────────────────
@@ -16,6 +17,7 @@ vi.mock('../../api/client', () => ({
   searchSemantic: vi.fn(),
   searchHybrid: vi.fn(),
   getEmbeddingStatus: vi.fn(),
+  submitFeedback: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     body?: unknown;
@@ -30,6 +32,7 @@ vi.mock('../../api/client', () => ({
 const mockSearchSemantic = vi.mocked(api.searchSemantic);
 const mockSearchHybrid = vi.mocked(api.searchHybrid);
 const mockGetEmbeddingStatus = vi.mocked(api.getEmbeddingStatus);
+const mockSubmitFeedback = vi.mocked(api.submitFeedback);
 
 // ─── Fixtures ──────────────────────────────────────────────
 
@@ -93,8 +96,12 @@ function renderPanel(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 
+  // W2: the panel consumes useSnackbar for feedback toasts — wrap in the
+  // real provider (no backend involved).
   return render(
-    <SemanticSearchPanel {...props} />
+    <SnackbarProvider>
+      <SemanticSearchPanel {...props} />
+    </SnackbarProvider>,
   );
 }
 
@@ -134,6 +141,51 @@ describe('SemanticSearchPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByText('OFF')).toBeTruthy();
+    });
+  });
+
+  it('shows a neutral loading badge while the status probe is in flight', () => {
+    mockGetEmbeddingStatus.mockReturnValue(new Promise(() => {}));
+    renderPanel();
+    expect(screen.getByText('…')).toBeTruthy();
+    // OFF must NOT be shown before the status resolves
+    expect(screen.queryByText('OFF')).toBeNull();
+  });
+
+  // ─── W2: embedding mode badge (Wave 1 health fields) ──
+
+  it('shows local TF-IDF mode badge and keeps search available when provider=local', async () => {
+    mockGetEmbeddingStatus.mockResolvedValue({
+      ...defaultFridaStatus,
+      frida_available: false,
+      embedding_provider: { provider: 'local', mode: 'local' },
+    });
+    renderPanel();
+
+    await waitFor(() => {
+      expect(screen.getByText('Локальный режим (TF-IDF)')).toBeTruthy();
+    });
+
+    // Search must remain ENABLED in local mode (not shown as broken).
+    const input = screen.getByLabelText('Поисковый запрос');
+    expect((input as HTMLInputElement).disabled).toBe(false);
+
+    // The search button is enabled once a query is typed (in local mode
+    // the availability clause does not disable it).
+    fireEvent.change(input, { target: { value: 'тест' } });
+    const searchButton = screen.getByText('Искать').closest('button');
+    expect(searchButton?.disabled).toBe(false);
+  });
+
+  it('shows FRIDA badge when embedding provider=frida', async () => {
+    mockGetEmbeddingStatus.mockResolvedValue({
+      ...defaultFridaStatus,
+      embedding_provider: { provider: 'frida', mode: 'auto' },
+    });
+    renderPanel();
+
+    await waitFor(() => {
+      expect(screen.getByText('FRIDA')).toBeTruthy();
     });
   });
 
@@ -375,6 +427,71 @@ describe('SemanticSearchPanel', () => {
     const dislikeButtons = screen.getAllByLabelText('Неполезный результат');
     expect(likeButtons.length).toBeGreaterThan(0);
     expect(dislikeButtons.length).toBeGreaterThan(0);
+  });
+
+  // ─── W2: feedback wiring (known-issues #1, #2) ───────
+
+  it('submits like feedback via POST /api/feedback with optimistic UI', async () => {
+    mockSubmitFeedback.mockResolvedValue({
+      feedback_id: 'fb-1',
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    });
+    mockSearchHybrid.mockResolvedValue({
+      results: sampleHybridResults,
+      query: 'услуга',
+      total: 2,
+    });
+    renderPanel();
+
+    const input = screen.getByLabelText('Поисковый запрос');
+    fireEvent.change(input, { target: { value: 'услуга' } });
+    fireEvent.click(screen.getByText('Искать'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/подключить/)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getAllByLabelText('Полезный результат')[0]);
+
+    await waitFor(() => {
+      expect(mockSubmitFeedback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session_id: 'test-session',
+          feedback_text: 'Положительная оценка результата семантического поиска',
+        }),
+      );
+    });
+  });
+
+  it('reverts the optimistic vote and shows an error snackbar when feedback fails', async () => {
+    mockSubmitFeedback.mockRejectedValue(new Error('network down'));
+    mockSearchHybrid.mockResolvedValue({
+      results: sampleHybridResults,
+      query: 'услуга',
+      total: 2,
+    });
+    renderPanel();
+
+    const input = screen.getByLabelText('Поисковый запрос');
+    fireEvent.change(input, { target: { value: 'услуга' } });
+    fireEvent.click(screen.getByText('Искать'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/подключить/)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getAllByLabelText('Неполезный результат')[0]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Ошибка отправки отзыва: network down/),
+      ).toBeTruthy();
+    });
+
+    // Vote reverted — the button is enabled again
+    const dislikeButton = screen.getAllByLabelText('Неполезный результат')[0];
+    expect(dislikeButton.closest('button')?.disabled).toBe(false);
   });
 
   // ─── Search History ──────────────────────────────────

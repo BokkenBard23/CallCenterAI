@@ -282,6 +282,16 @@
 /* DR-1: Exact match — visual enhancement for quotes (cursor pointer for Popover) */
 .highlight-exact {
   cursor: pointer;
+  /* IP-1.5 e2e (2026-09-19): previously the ONLY differentiator of an exact
+     (quoted-phrase) match was cursor:pointer — invisible in screenshots and
+     indistinguishable from a morphological match for sighted users. A dotted
+     underline makes the DR-1 exact indicator actually visible on top of the
+     depth-based background/border styling, in both themes, without new
+     colors (token-free, additive). */
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 /* DR-2: Adjacent (word_distance=0) — already handled by inline fontWeight:600,
@@ -410,6 +420,11 @@
   line-height: 1.6;
   word-break: break-word;
   color: var(--color-text-primary, #1a1a1a);
+  /* IP-1.5 e2e (2026-09-19): .segment-text is a <span>; the per-turn match
+     counter caption that follows it flowed INLINE with zero gap, producing
+     "…вашей компанией.2 совпадения" (vision gate: text merge). Making the
+     utterance text a block puts the counter on its own line. */
+  display: block;
 }
 
 /* --- Ellipsis for collapsed segments --- */

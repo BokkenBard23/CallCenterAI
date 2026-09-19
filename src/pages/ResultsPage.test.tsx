@@ -238,6 +238,32 @@ describe('ResultsPage', () => {
     expect(screen.getByText('Выделенный текст')).toBeTruthy();
   });
 
+  // ─── W2 (N.MAJ.3): Structure tab ──────────────────────
+
+  it('shows the third "Структура" tab when results exist', () => {
+    renderWithProviders(
+      <ResultsPage />,
+      ['/results'],
+      { both: { searchResult: sampleSearchResult, llmResult: sampleLLMResult } },
+    );
+    expect(screen.getByText('Структура')).toBeTruthy();
+  });
+
+  it('switches to the structure tab and renders dictionary match counts', () => {
+    renderWithProviders(
+      <ResultsPage />,
+      ['/results'],
+      { both: { searchResult: sampleSearchResult, llmResult: sampleLLMResult } },
+    );
+
+    const structureTab = screen.getByText('Структура');
+    fireEvent.click(structureTab);
+
+    // No dictionaries loaded in this test state → StructureTab empty state
+    // (the left sidebar DictionaryTree shows the same text — use getAllByText)
+    expect(screen.getAllByText('Словари не загружены').length).toBeGreaterThanOrEqual(1);
+  });
+
   it('does not show LLM warning when both results exist', () => {
     renderWithProviders(
       <ResultsPage />,
@@ -291,6 +317,28 @@ describe('ResultsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('FRIDA')).toBeTruthy();
     });
+  });
+
+  // W2 MAJOR-2 rework: top-bar badge must mirror the ACTIVE embedding
+  // provider — in local mode it must NOT claim "FRIDA" (state contradiction
+  // with the SemanticSearchPanel's «Локальный режим (TF-IDF)» badge).
+  it('shows local-mode badge in header when embedding provider is local', async () => {
+    mockGetEmbeddingStatus.mockResolvedValue({
+      frida_available: true,
+      vectors_stored: 0,
+      embedding_provider: { provider: 'local', mode: 'local' },
+    } as never);
+
+    renderWithProviders(
+      <ResultsPage />,
+      ['/results'],
+      { searchResult: sampleSearchResult },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Локальный')).toBeTruthy();
+    });
+    expect(screen.queryByText('FRIDA')).toBeNull();
   });
 
   it('shows vectorize button when sessionId exists', () => {

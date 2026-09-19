@@ -118,6 +118,18 @@ class Settings(BaseSettings):
     frida_max_context_tokens: int = 500
     frida_batch_size: int = 10
 
+    # ── Embeddings: provider selection (Wave 1 offline fallback) ──
+    # EMBEDDING_PROVIDER:
+    #   frida — always use the FRIDA API (previous behaviour)
+    #   local — always use the offline TF-IDF provider (no network)
+    #   auto  — probe FRIDA once at startup (short timeout); fall back to
+    #           the local TF-IDF provider when unreachable
+    # The ACTIVE provider is reported by GET /api/health and
+    # GET /api/embeddings/status.
+    embedding_provider: str = "auto"
+    # Timeout (seconds) for the one-shot FRIDA availability probe in auto mode.
+    embedding_probe_timeout: float = 5.0
+
     # ── Vector Store ──
     vector_store_dimension: int = 1536
     vector_store_index_dir: Path = Path("data/vector_store")

@@ -39,6 +39,7 @@ import { DropZone } from '../components/DropZone';
 import RouterLink from '../components/RouterLink';
 import * as api from '../api/client';
 import * as historyStorage from '../storage/history';
+import './UploadPage.scss';
 import type {
   HistoryEntry,
   ProviderInfo,
@@ -154,6 +155,15 @@ export default function UploadPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  // ─── D.8 Batch upload state ────────────────────────────
+  /** Files selected in batch mode (>1 RTF file chosen at once). The first
+   *  file is uploaded normally to create the session (so dictionaries have
+   *  a session to attach to and ResultsPage has a representative dialogue);
+   *  ALL files are then re-submitted via POST /api/analysis/batch which
+   *  processes them sequentially on the backend. */
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [batchAnalyzing, setBatchAnalyzing] = useState(false);
+
   /** Recent analyses — initialised from localStorage lazily on first
    *  render (mount). Refreshed via setRecentEntries() after each
    *  successful analysis. Shows last N entries in the dashboard hub. */
@@ -237,10 +247,23 @@ export default function UploadPage() {
   }, [state.selectedProvider, state.providers]);
 
   // ─── RTF file selection (via DropZone) ─────────────────
+  // D.8: the RTF DropZone is multi-file. Selecting 2+ .rtf files switches
+  // to batch mode: the first file creates the session via the normal upload
+  // flow, all files are stored for the batch submission on step 3.
   const handleRtfFilesSelected = useCallback(
     async (files: File[]) => {
       const file = files[0];
       if (!file) return;
+
+      if (files.length > 1) {
+        setBatchFiles(files);
+        showSnackbar(
+          `Пакетный режим: ${files.length} файлов. Загружаю первый файл для создания сессии…`,
+          { variant: 'elastic', delay: 4000 },
+        );
+      } else {
+        setBatchFiles([]);
+      }
 
       setRtfFileName(file.name);
       setRtfFileSize(file.size);
@@ -328,6 +351,7 @@ export default function UploadPage() {
   const handleRemoveRtf = useCallback(() => {
     setRtfFileName(null);
     setRtfFileSize(0);
+    setBatchFiles([]);
     dispatch({ type: 'SET_RTF_FILE', payload: null });
     dispatch({ type: 'SET_RTF_UPLOAD_STATUS', payload: 'idle' });
     dispatch({ type: 'SET_RTF_ERROR', payload: null });
@@ -474,6 +498,54 @@ export default function UploadPage() {
     state.rtfFile, state.dictionaries, dispatch, navigate, showSnackbar,
   ]);
 
+  // ─── D.8 Batch analysis ────────────────────────────────
+  // Submits ALL selected RTF files to POST /api/analysis/batch. The session
+  // (created by the first-file upload on step 1) already has the XML
+  // dictionaries attached, so the backend reuses them for every file.
+  // BatchResultsPage polls /batch/{id}/status and renders per-file results.
+  const handleBatchAnalyze = useCallback(async () => {
+    if (
+      batchFiles.length < 2 ||
+      !state.sessionId ||
+      !state.selectedProvider
+    ) {
+      return;
+    }
+
+    setBatchAnalyzing(true);
+    dispatch({ type: 'SET_ANALYSIS_ERROR', payload: null });
+
+    try {
+      const batchResp = await api.submitBatch(
+        batchFiles,
+        state.sessionId,
+        state.selectedProvider,
+        state.selectedModel ?? undefined,
+        true,
+        true,
+        state.dictionaries
+          .map((d) => d.response.dictionary?.name)
+          .filter(Boolean) as string[],
+      );
+
+      showSnackbar(
+        `Пакетный анализ запущен: ${batchResp.total_files} файлов`,
+        { variant: 'elastic', delay: 4000 },
+      );
+      navigate(`/batch-results/${batchResp.batch_id}`);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Ошибка пакетного анализа';
+      dispatch({ type: 'SET_ANALYSIS_ERROR', payload: msg });
+      showSnackbar(msg, { variant: 'fixed', delay: 6000 });
+    } finally {
+      setBatchAnalyzing(false);
+    }
+  }, [
+    batchFiles, state.sessionId, state.selectedProvider, state.selectedModel,
+    state.dictionaries, dispatch, navigate, showSnackbar,
+  ]);
+
   // ─── Reset with confirmation ──────────────────────────
   const handleResetClick = useCallback(() => {
     setShowResetConfirm(true);
@@ -483,6 +555,7 @@ export default function UploadPage() {
     dispatch({ type: 'RESET_UPLOAD' });
     setRtfFileName(null);
     setRtfFileSize(0);
+    setBatchFiles([]);
     setDictFileNames([]);
     setActiveStep('rtf');
     setShowResetConfirm(false);
@@ -552,6 +625,20 @@ export default function UploadPage() {
     state.dictionaries.length > 0 &&
     !analyzing;
 
+  // D.8: batch mode is active when 2+ RTF files were selected on step 1.
+  // It requires the same prerequisites as the single-file analysis (session
+  // with dictionaries + selected provider) — the backend reuses the session
+  // dictionaries for every file in the batch.
+  const isBatchMode = batchFiles.length > 1;
+  const canBatch =
+    isBatchMode &&
+    state.sessionId !== null &&
+    state.selectedProvider !== null &&
+    state.rtfUploadStatus === 'success' &&
+    state.dictionaryUploadStatus === 'success' &&
+    state.dictionaries.length > 0 &&
+    !batchAnalyzing;
+
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
   // ─── Render ───────────────────────────────────────────
@@ -579,7 +666,9 @@ export default function UploadPage() {
       </Stack>
 
       {/* ─── Dashboard: Feature cards grid (4 cards) ─── */}
-      <Grid columns={4} gap="x4" align="stretch">
+      {/* Responsive fallback (see UploadPage.scss): DS Grid не имеет
+          responsive-пропа для columns; на <=768px — 2 колонки, <=480px — 1. */}
+      <Grid columns={4} gap="x4" align="stretch" className="upload-dashboard-grid">
         {DASHBOARD_CARDS.map((card) => (
           <GridItem key={card.id} colSpan={1}>
             <Card>
@@ -681,9 +770,10 @@ export default function UploadPage() {
               ) : (
                 <DropZone
                   accept=".rtf"
+                  multiple
                   onFilesSelected={handleRtfFilesSelected}
                   idleLabel="Нажмите или перетащите RTF-файл"
-                  idleSubLabel="Формат .rtf, один файл"
+                  idleSubLabel="Формат .rtf; выберите несколько файлов для пакетного анализа"
                   dragLabel="Отпустите файл для загрузки"
                   ariaLabel="Загрузить RTF-файл диалога"
                   disabled={state.rtfUploadStatus === 'uploading'}
@@ -869,6 +959,48 @@ export default function UploadPage() {
         </Stack>
       </Card>
 
+      {/* D.8: batch file list — shown on every step while 2+ RTF files are
+          selected (the Stepper auto-advances after the first-file upload,
+          so the list must live outside the step-1 conditional). The first
+          file created the session; all files are submitted together as a
+          batch via the "Пакетный анализ" action. */}
+      {batchFiles.length > 1 && (
+        <Stack direction="vertical" spacing="x2">
+          <InlineAlert type="info" iconName={Icons.DataTransferCheck}>
+            {`Пакетный режим: ${batchFiles.length} файлов. Первый файл загружен
+            для создания сессии, все файлы будут отправлены на пакетный анализ
+            на шаге 3.`}
+          </InlineAlert>
+          {batchFiles.map((file, idx) => (
+            <Card key={`${file.name}-${idx}`}>
+              <Stack
+                direction="horizontal"
+                spacing="x2"
+                align="center"
+                justify="space-between"
+              >
+                <Stack direction="horizontal" spacing="x2" align="center">
+                  <Icon iconName={Icons.Attachment} size="small" />
+                  <Typography variant="body2">{file.name}</Typography>
+                  <Typography variant="caption" inactive>
+                    {formatFileSize(file.size)}
+                  </Typography>
+                </Stack>
+                <IconButton
+                  iconName={Icons.Close}
+                  variant="plain"
+                  size="small"
+                  aria-label={`Убрать ${file.name} из пакета`}
+                  onClick={() =>
+                    setBatchFiles((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                />
+              </Stack>
+            </Card>
+          ))}
+        </Stack>
+      )}
+
             {/* close the new inner Stack around Stepper + Card */}
             </Stack>
           {/* close #quick-upload div */}
@@ -942,7 +1074,7 @@ export default function UploadPage() {
       {/* ── Action buttons ── */}
       <Divider />
 
-      <Stack direction="horizontal" spacing="x4" align="center" justify="end">
+      <Stack direction="horizontal" spacing="x4" align="center" justify="end" wrap="wrap">
         {/* M9 FIX (vision-audit): disable "Сбросить" when there is nothing to
             reset — previously it stayed active in the empty initial state,
             contradicting the empty-state logic. */}
@@ -964,21 +1096,45 @@ export default function UploadPage() {
             as inactive. The vision audit flagged that DS Button
             variant="primary" disabled still looked "active" on a dark theme.
             Once canAnalyze becomes true, the button switches to primary. */}
-        <Button
-          variant={canAnalyze ? 'primary' : 'secondary'}
-          disabled={!canAnalyze}
-          onClick={handleAnalyze}
-          startIcon={
-            analyzing ? undefined : <Icon iconName={Icons.Search} />
-          }
-          title={
-            canAnalyze
-              ? undefined
-              : 'Загрузите RTF-файл, XML-словарь и выберите провайдера, чтобы запустить анализ'
-          }
-        >
-          {analyzing ? 'Анализируем…' : 'Анализировать'}
-        </Button>
+        {isBatchMode ? (
+          /* D.8: batch action replaces the single-file analyze CTA when 2+
+             RTF files were selected. Same disabled-state treatment as the
+             single-file CTA (H10 FIX pattern) for an unambiguous inactive
+             state on dark theme. */
+          <Button
+            variant={canBatch ? 'primary' : 'secondary'}
+            disabled={!canBatch}
+            onClick={handleBatchAnalyze}
+            startIcon={
+              batchAnalyzing ? undefined : <Icon iconName={Icons.DataTransferCheck} />
+            }
+            title={
+              canBatch
+                ? undefined
+                : 'Загрузите RTF-файлы, XML-словарь и выберите провайдера, чтобы запустить пакетный анализ'
+            }
+          >
+            {batchAnalyzing
+              ? 'Запуск пакета…'
+              : `Пакетный анализ (${batchFiles.length} файлов)`}
+          </Button>
+        ) : (
+          <Button
+            variant={canAnalyze ? 'primary' : 'secondary'}
+            disabled={!canAnalyze}
+            onClick={handleAnalyze}
+            startIcon={
+              analyzing ? undefined : <Icon iconName={Icons.Search} />
+            }
+            title={
+              canAnalyze
+                ? undefined
+                : 'Загрузите RTF-файл, XML-словарь и выберите провайдера, чтобы запустить анализ'
+            }
+          >
+            {analyzing ? 'Анализируем…' : 'Анализировать'}
+          </Button>
+        )}
       </Stack>
 
       {/* ── Analysis error banner ── */}

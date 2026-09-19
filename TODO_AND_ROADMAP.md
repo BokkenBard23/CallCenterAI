@@ -2,56 +2,50 @@
 
 Текущие задачи, бэклог, tech debt и долгосрочные планы.
 
-> **Канонический backlog:** `docs/specs/backlog.json` (version 3, 44/53 done, 9 pending).
-> **Pipeline state:** `docs/specs/pipeline-state.yaml` (active task: Track B — Quick Win Mining Panel).
+> **Канонический backlog:** `docs/specs/backlog.json` (version 4, 45/53 done, 8 pending).
+> **Pipeline state:** `docs/specs/pipeline-state.yaml` (active task: one-run-completion — final QA).
 > **Архитектура:** `ARCHITECTURE.md`.
-
----
-
-## Pending — UX backlog
-
-### N.MAJ.3 — ViewMode "Структура" (unimplemented tab)
-**Status:** deferred (was: removed from ViewMode union, 2026-07-17)
-**Reason:** PHASE N research audit found that `ViewMode` type declared
-`'summary' | 'highlighted' | 'structure'` but `ResultsPage.tsx` only
-rendered two `<Tab>` elements ("Сводка" and "Выделенный текст"). The
-`activeTabIndex` ternary mapped `tabIndex=2` to `'structure'` with no
-matching `<Tab>` — a dead code path. Removed `'structure'` from the union
-and clamped `handleViewModeChange` so any unexpected index falls back to
-`'highlighted'`. If a tree-structure view of the search result is later
-desired (per original ResultsPage brief L.7), re-introduce the literal in
-`src/types/api.ts` together with the corresponding `<Tab>` element in
-`ResultsPage.tsx` and the rendering branch in `activeTabIndex`.
 
 ---
 
 ## Текущий статус
 
-**Active task:** Track B — Quick Win Mining Panel — ✅ ALL DONE (2026-07-12)
-- Chunk 1 (Backend): dict_mining service + router + prompts + SQLite + models — ✅ DONE (46/46 tests)
-- Chunk 2 (Frontend): MiningPanel UI (3 tabs + integration) — ✅ DONE
-- Reviewer: ✅ APPROVED (iteration 1/3)
-- Visual gate: ✅ PASSED iteration 3/3 (CDP-verified on 375/768/1440)
-- Final QA: ✅ PASSED (vitest 564/565, backend 46/46, tsc -b --force ExitCode 0)
-- Vision-анализ: ✅ 5/5 pages PASS with gpt-5.4 (vision benchmark: gpt-5.4 primary, qwen fallback)
-- `pipeline-state.yaml` → `orchestrator_status: track_b_all_done`, `next_agent: done`
+**Active task:** one-run-completion (Wave 1 Backend + Wave 2 Frontend) — ✅ ALL DONE (2026-09-19)
 
-**Latest maintenance session (2026-07-13):** pipeline integration hygiene —
-tsc --noEmit → tsc -b --force (5 places), rule 06 enforcement propagated
-(designer/orchestrator/reviewer/02-mcp-protocol), mobile_relevance: none set
-in pipeline-state, vision prompt parameterized, startIcon/100vh patterns
-documented in 01-design-system-first.md, client.test.ts getProviders fixed
-(14/14 passing). Commit 72d8770 + coder agent fix.
+### One-Run Completion (2026-09-19)
 
-**Baseline (verified 2026-07-13):**
+**Wave 1 — Backend (coder):**
+- ✅ Local TF-IDF embedding provider (`EMBEDDING_PROVIDER=local`) — офлайн-режим семантического поиска без FRIDA
+- ✅ `embedding_factory.py` (frida|local|auto + probe с таймаутом + fallback), wiring в `main.py` lifespan, vocab save/load
+- ✅ `/api/health` + `/api/embeddings/status` сообщают активный провайдер (`embedding.provider`)
+- ✅ Кросс-батчевая стабильность индексов: append-only vocab + frozen IDF (ревью-фикс Major-1: re-sort ломал ранее сохранённые векторы, cos=0.0; после фикса cos=1.0, 5 регрессионных тестов)
+
+**Wave 2 — Frontend (ui-coder):**
+- ✅ **D.8** Batch Upload UI: DropZone `multiple` + batch-список + `submitBatch` → `/batch-results/:id` (BatchResultsPage)
+- ✅ **N.MAJ.3** ViewMode "Структура": третий Tab + StructureTab (дерево совпадений по словарям, match-count Badge)
+- ✅ Semantic-бейдж «FRIDA»/«Локальный режим (TF-IDF)» из `embedding_provider` (топ-бар + панель)
+- ✅ Feedback wiring: like/dislike → `POST /api/feedback` (optimistic UI + error snackbar) — known-issues #1/#2 закрыты
+- ✅ JK7 (чёрный прямоугольник dict-editor) + JK6 (контраст markdown) + tech-debt (Icon opacity → токен)
+- ✅ Ревью-фиксы Major-2: адаптивная сетка dashboard (375/768), wrap-фиксы, provider-aware бейдж + тест
+
+**Final QA (tester, 2026-09-19):**
+- ✅ Полная батарея: tsc 0; vitest 624/624; eslint 0 errors (1 pre-existing warning); pytest 2231 passed / 1 skipped
+- ✅ **IP-1.5** is_exact e2e (автоматизирован, SYNTHETIC data): API-проверки 28/28 (exact_bow match + offsets, near-miss не флагается), DOM `highlight-exact` только на точном совпадении, vision-gate PASS (`e2e-isexact-1440.png` + `ai-analysis-e2e-isexact-1440.md`)
+- ✅ Batch flow e2e: 3 синтетических RTF → submitBatch → poll → результаты доступны
+- ✅ Local semantic search e2e: `EMBEDDING_PROVIDER=local`, индексация, semantic (token-exact) + hybrid (морфология) поиск, provider=local в `/api/health`
+- 🐛 Найдены и исправлены 3 UI-бага IP-1.5 (HighlightRenderer exact-preference, видимый dotted-underline индикатор DR-1, счётчик совпадений на отдельной строке) — отчёт: `docs/specs/test-report-one-run-completion.md`
+
+**Baseline (verified 2026-09-19):**
 - `tsc -b --force` → ExitCode 0
-- `vitest run` → 565/565 passing (was 564/565 with 1 pre-existing getProviders failure — now FIXED)
-- `eslint .` → 0 errors
-- DictionaryEditor: 61/61 tests pass
+- `vitest run` → 624/624 passing (60 files)
+- `eslint .` → 0 errors (1 pre-existing warning `useMiningState.ts`)
+- Backend pytest → 2231 passed / 1 skipped
+
+**Предыдущие вехи см. в git history / docs/specs/** (Track B Mining Panel ✅ 2026-07-12; maintenance 2026-07-13 — tsc -b --force миграция, rule 06, getProviders fix).
 
 ---
 
-## Completed (44/53 backlog items)
+## Completed (45/53 backlog items)
 
 ### Pipelines 001-007 (базовый UI + backend)
 - ✅ Pipeline 001: Начальный UI + backend (91 BE + 127 FE tests)
@@ -115,14 +109,21 @@ documented in 01-design-system-first.md, client.test.ts getProviders fixed
 
 ---
 
-## Pending Backlog (9 items)
+## Pending Backlog (8 items)
 
-### Legacy pending (2 items)
+### Legacy pending (1 item)
 
 | ID | Задача | Приоритет | Объём | Статус |
 |----|--------|-----------|-------|--------|
-| IP-1.5 | Визуальная проверка `is_exact` подсветки в браузере | Medium | S | ⏳ Требует ручной проверки: загрузить XML с TERMINAL-кавычками, проверить подсветку |
 | IP-5.1 | Runtime фильтрация по `attribute_tree` | Low | M | ⏳ `attribute_tree` парсится и хранится, но search.py не использует. Нужен источник метаданных звонка (CRM) |
+
+### Done 2026-09-19 (was legacy pending / deferred)
+
+| ID | Задача | Статус |
+|----|--------|--------|
+| IP-1.5 | Визуальная проверка `is_exact` подсветки в браузере | ✅ DONE 2026-09-19 — автоматизирована e2e (SYNTHETIC data, API 28/28 + vision PASS); найдены и закрыты 3 UI-бага (HighlightRenderer exact-preference, видимый DR-1 индикатор, счётчик совпадений). Артефакты: `docs/specs/screenshots/e2e-isexact-1440.png` + `ai-analysis-e2e-isexact-1440.md`, отчёт `docs/specs/test-report-one-run-completion.md` |
+| N.MAJ.3 | ViewMode "Структура" (третий Tab ResultsPage) | ✅ DONE 2026-09-19 — W2/N.MAJ.3: `'structure'` возвращён в union + StructureTab (дерево совпадений по словарям с match-count Badge), тесты + visual gate |
+| D.8 | Batch Upload UI (multi-file upload + BatchResultsPage) | ✅ DONE 2026-09-19 — W2/D.8: DropZone `multiple` + batch-список + `submitBatch` → `/batch-results/:id`; batch flow e2e (3 synthetic RTF → poll → results) PASS |
 
 ### Phase G — Dictionary Mining v2 (7 items, all low priority)
 
@@ -189,7 +190,7 @@ Track B fully complete. Phase F optional feature development. NOT STARTED.
 | D.5 | 5.4 Five analysis strategies | Низкий приоритет |
 | D.6 | Large file refactoring (8 файлов >500 строк) | Defer до зелёного билда + CI |
 | D.7 | State management refactor (useReducer → Zustand) | Крупная переработка |
-| D.8 | **Batch Upload UI** — `submitBatch` есть в `api/client.ts` (backend `POST /api/upload/rtf/batch` + `POST /api/analysis/batch` готовы), но UploadPage не имеет UI для multi-file batch upload. Нужно: DropZone с `multiple` + batch action button → `navigate('/batch-results/' + batchId)`. | Backend готов, FE UI отсутствует |
+| ~~D.8~~ | **Batch Upload UI** | ✅ DONE 2026-09-19 (one-run-completion W2/D.8) — перенесено в «Done 2026-09-19» выше |
 
 ---
 
@@ -219,8 +220,8 @@ Track B fully complete. Phase F optional feature development. NOT STARTED.
 
 | Документ | Назначение |
 |----------|-----------|
-| `docs/specs/backlog.json` | Канонический backlog (version 3, 44/53 done) |
+| `docs/specs/backlog.json` | Канонический backlog (version 4, 45/53 done) |
 | `docs/specs/pipeline-state.yaml` | Active pipeline state |
 | `docs/improvement-plan.md` | Phases 1-7 + pipeline history |
 | `PROJECT_MAP.md` | File structure map |
-| `.loops/known-issues.md` | 11 tracked issues (9 fixed, 2 open) |
+| `.loops/known-issues.md` | 11 tracked issues (11 fixed/documented, 0 open) |

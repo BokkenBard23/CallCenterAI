@@ -42,26 +42,34 @@ _OPENAPI_TAGS = [
 ]
 
 
-def _init_services() -> None:
-    """Initialize FRIDA embedding services and attach to app.state.
+def _init_services(embedding_service=None) -> None:
+    """Initialize embedding services and attach to app.state.
 
     Called during lifespan startup. Services are singletons shared
     across all requests via app.state.
+
+    Args:
+        embedding_service: Pre-resolved embedding service (frida or local
+            TF-IDF fallback) from resolve_embedding_service(). When None
+            (legacy/test path), a FRIDA service is created directly.
     """
     from app.services.chunker import Chunker
     from app.services.embedding import FridaEmbeddingService
     from app.services.hybrid_search import HybridSearchService
     from app.services.vector_store import VectorStore
 
-    # FridaEmbeddingService (reuses BEELINE_API_KEY from settings)
-    api_key = settings.beeline_api_key
-    embedding_service = FridaEmbeddingService(
-        api_key=api_key,
-        base_url=settings.frida_base_url,
-        model=settings.frida_model,
-        max_batch_size=settings.frida_batch_size,
-        max_context_tokens=settings.frida_max_context_tokens,
-    )
+    if embedding_service is None:
+        # Legacy sync path (direct _init_services() calls in tests):
+        # default to FRIDA exactly as before the provider switch existed.
+        embedding_service = FridaEmbeddingService(
+            api_key=settings.beeline_api_key,
+            base_url=settings.frida_base_url,
+            model=settings.frida_model,
+            max_batch_size=settings.frida_batch_size,
+            max_context_tokens=settings.frida_max_context_tokens,
+        )
+        app.state.embedding_provider = "frida"
+        app.state.embedding_mode = "frida"
 
     # VectorStore (FAISS IndexFlatIP, auto-save to configured dir)
     vector_store = VectorStore(
@@ -78,6 +86,14 @@ def _init_services() -> None:
             logger.info("VectorStore loaded from %s (%d vectors)", index_dir, vector_store.index.ntotal)
         except Exception as exc:
             logger.warning("VectorStore load failed: %s. Starting with empty index.", exc)
+
+    # Local TF-IDF provider: restore the fitted vocabulary so persisted
+    # FAISS vectors remain valid across restarts (see local_embedding.py).
+    if getattr(embedding_service, "provider_name", "frida") == "local":
+        try:
+            embedding_service.load(str(settings.vector_store_index_dir))
+        except Exception as exc:
+            logger.warning("Local TF-IDF vocabulary load failed: %s", exc)
 
     # Chunker (razdel + Natasha NER)
     chunker = Chunker()
@@ -156,9 +172,18 @@ async def lifespan(app: FastAPI):
     logger.info("Call Center AI backend starting - debug=%s", settings.debug)
     logger.info("Transcrib dir: %s (exists=%s)", _TRANSCRIB_DIR, _TRANSCRIB_DIR.is_dir())
 
-    # Initialize FRIDA services
-    _init_services()
-    logger.info("FRIDA embedding services initialized")
+    # Initialize embedding services (provider: frida | local | auto-fallback)
+    from app.services.embedding_factory import resolve_embedding_service
+
+    embedding_service, provider_name, provider_mode = await resolve_embedding_service()
+    app.state.embedding_provider = provider_name
+    app.state.embedding_mode = provider_mode
+    _init_services(embedding_service=embedding_service)
+    logger.info(
+        "Embedding services initialized (provider=%s, mode=%s)",
+        provider_name,
+        provider_mode,
+    )
 
     # Fetch and log dynamic LLM concurrency limits from Beeline AI
     # (observability only — semaphores are not resized at runtime).
@@ -184,13 +209,19 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Session DB vacuum on shutdown failed: %s", exc)
 
-    # Close FRIDA HTTP client
+    # Close FRIDA HTTP client (local TF-IDF provider has no HTTP client —
+    # persist its vocabulary instead so restarts keep the vector space).
     if hasattr(app.state, "embedding_service"):
+        service = app.state.embedding_service
         try:
-            await app.state.embedding_service.http_client.aclose()
-            logger.info("FRIDA HTTP client closed")
+            if getattr(service, "provider_name", "frida") == "local":
+                service.save(str(settings.vector_store_index_dir))
+                logger.info("Local TF-IDF vocabulary saved")
+            else:
+                await service.http_client.aclose()
+                logger.info("FRIDA HTTP client closed")
         except Exception as exc:
-            logger.warning("FRIDA HTTP client close failed: %s", exc)
+            logger.warning("Embedding service shutdown failed: %s", exc)
 
     logger.info("Call Center AI backend shutting down")
 

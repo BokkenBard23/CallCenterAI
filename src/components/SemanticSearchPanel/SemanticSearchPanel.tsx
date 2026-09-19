@@ -38,8 +38,10 @@ import {
   searchHybrid,
   searchSemantic,
   getEmbeddingStatus,
+  submitFeedback,
   ApiError,
 } from '../../api/client';
+import { useSnackbar } from '../../context/SnackbarContext';
 import type {
   HybridSearchResult,
   VectorSearchResult,
@@ -192,9 +194,15 @@ interface SemanticSearchPanelProps {
 function ResultCard({
   result,
   onNavigate,
+  vote,
+  onVote,
 }: {
   result: HybridSearchResult | VectorSearchResult;
   onNavigate: (dialogueId: string, turnIndex: number) => void;
+  /** Current optimistic vote for this result ('like' | 'dislike' | null). */
+  vote: 'like' | 'dislike' | null;
+  /** Feedback handler (W2 known-issues #1, #2). */
+  onVote: (result: HybridSearchResult | VectorSearchResult, kind: 'like' | 'dislike') => void;
 }) {
   const isHybrid = 'combined_score' in result;
   const score = isHybrid
@@ -249,26 +257,32 @@ function ResultCard({
           {highlightText(result.text, matchedEntities)}
         </Typography>
 
-        {/* Feedback buttons */}
+        {/* Feedback buttons — W2 wiring (known-issues #1, #2):
+            POST /api/feedback with optimistic UI. The vote is applied
+            immediately and reverted with an error snackbar on failure. */}
         <Stack direction="horizontal" spacing="x1" justify="end">
           <IconButton
             iconName={Icons.Like}
-            variant="plain"
+            variant={vote === 'like' ? 'outlined' : 'plain'}
             size="small"
             aria-label="Полезный результат"
+            aria-pressed={vote === 'like'}
+            disabled={vote !== null}
             onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
-              // TODO: implement — send feedback to API
+              onVote(result, 'like');
             }}
           />
           <IconButton
             iconName={Icons.Dislike}
-            variant="plain"
+            variant={vote === 'dislike' ? 'outlined' : 'plain'}
             size="small"
             aria-label="Неполезный результат"
+            aria-pressed={vote === 'dislike'}
+            disabled={vote !== null}
             onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
-              // TODO: implement — send feedback to API
+              onVote(result, 'dislike');
             }}
           />
         </Stack>
@@ -329,6 +343,8 @@ export default memo(function SemanticSearchPanel({
   onResultClick,
   onClose,
 }: SemanticSearchPanelProps) {
+  const { showSnackbar } = useSnackbar();
+
   // ── Search state ──
   const [query, setQuery] = useState('');
   const [searchType, setSearchType] = useState<SearchType>('hybrid');
@@ -342,6 +358,9 @@ export default memo(function SemanticSearchPanel({
   // ── FRIDA status ──
   const [fridaStatus, setFridaStatus] = useState<EmbeddingStatusResponse | null>(null);
   const [fridaStatusLoading, setFridaStatusLoading] = useState(true);
+
+  // ── Feedback votes (W2: optimistic UI per result) ──
+  const [votes, setVotes] = useState<Record<string, 'like' | 'dislike'>>({});
 
   // ── Search history ──
   const [history, setHistory] = useState<SearchHistoryEntry[]>(() => loadHistory());
@@ -532,8 +551,67 @@ export default memo(function SemanticSearchPanel({
     setHistory(updated);
   }, []);
 
-  // ── Derived: FRIDA available ──
+  // ── Derived: FRIDA available / embedding mode ──
   const fridaAvailable = fridaStatus?.frida_available ?? false;
+  // W2 (Wave 1 health fields): /api/embeddings/status now returns
+  // embedding_provider {provider, mode}. When provider === 'local' the
+  // semantic search runs on local TF-IDF embeddings and is AVAILABLE —
+  // it must NOT be shown as broken.
+  const embeddingProvider = fridaStatus?.embedding_provider?.provider ?? null;
+  const isLocalMode = embeddingProvider === 'local';
+  const searchAvailable = fridaAvailable || isLocalMode;
+
+  // ── Feedback vote handler (W2 known-issues #1, #2) ──
+  const resultKey = (r: HybridSearchResult | VectorSearchResult): string =>
+    `${r.dialogue_id}-${r.turn_index}`;
+
+  const handleVote = useCallback(
+    (result: HybridSearchResult | VectorSearchResult, kind: 'like' | 'dislike') => {
+      const key = resultKey(result);
+
+      if (!sessionId) {
+        showSnackbar('Нет активной сессии — feedback не отправлен', {
+          variant: 'fixed',
+          delay: 5000,
+        });
+        return;
+      }
+
+      // Optimistic update
+      setVotes((prev) => ({ ...prev, [key]: kind }));
+
+      submitFeedback({
+        session_id: sessionId,
+        phrase_text: result.text.slice(0, 200),
+        matched_text: result.text.slice(0, 200),
+        turn_index: result.turn_index,
+        feedback_text:
+          kind === 'like'
+            ? 'Положительная оценка результата семантического поиска'
+            : 'Отрицательная оценка результата семантического поиска',
+      })
+        .then(() => {
+          showSnackbar('Спасибо за отзыв!', { variant: 'elastic', delay: 3000 });
+        })
+        .catch((err: unknown) => {
+          // Revert the optimistic vote
+          setVotes((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+          const msg =
+            err instanceof ApiError || err instanceof Error
+              ? err.message
+              : 'Неизвестная ошибка';
+          showSnackbar(`Ошибка отправки отзыва: ${msg}`, {
+            variant: 'fixed',
+            delay: 6000,
+          });
+        });
+    },
+    [sessionId, showSnackbar],
+  );
 
   // ── Render ──
 
@@ -548,23 +626,43 @@ export default memo(function SemanticSearchPanel({
         <Stack direction="horizontal" spacing="x2" align="center" justify="space-between">
           <Stack direction="horizontal" spacing="x2" align="center">
             <Typography variant="h6">Семантический поиск</Typography>
-            {/* FRIDA status indicator */}
+            {/* Embedding mode indicator — W2 (Wave 1 health fields):
+                FRIDA vs local TF-IDF. In local mode the search is fully
+                available (offline), so the badge is green, not danger. */}
             <Tooltip
               title={
                 fridaStatusLoading
                   ? 'Проверка статуса…'
-                  : fridaAvailable
-                    ? `FRIDA доступна · ${fridaStatus?.vectors_stored ?? 0} векторов · ${fridaStatus?.nlp_provider ?? 'none'}`
-                    : 'FRIDA недоступна'
+                  : isLocalMode
+                    ? 'Семантический поиск работает в локальном режиме (TF-IDF)'
+                    : fridaAvailable
+                      ? `FRIDA доступна · ${fridaStatus?.vectors_stored ?? 0} векторов · ${fridaStatus?.nlp_provider ?? 'none'}`
+                      : 'Семантический поиск недоступен'
               }
             >
               <span>
                 <Badge
                   type="tertiary"
-                  semantic={fridaAvailable ? 'success' : 'danger'}
-                  dot
+                  /* W2: neutral '…' while the status probe is in flight —
+                     a transient red OFF badge (before the /status response
+                     lands) read as "semantic search broken" and contradicted
+                     the green FRIDA badge in the page action bar. */
+                  semantic={
+                    fridaStatusLoading
+                      ? 'neutral'
+                      : searchAvailable
+                        ? 'success'
+                        : 'danger'
+                  }
+                  dot={!fridaStatusLoading}
                 >
-                  {fridaAvailable ? 'FRIDA' : 'OFF'}
+                  {fridaStatusLoading
+                    ? '…'
+                    : isLocalMode
+                      ? 'Локальный режим (TF-IDF)'
+                      : fridaAvailable
+                        ? 'FRIDA'
+                        : 'OFF'}
                 </Badge>
               </span>
             </Tooltip>
@@ -591,7 +689,7 @@ export default memo(function SemanticSearchPanel({
             placeholder="Поиск по смыслу…"
             value={query}
             onChange={handleQueryChange}
-            disabled={!fridaAvailable && !fridaStatusLoading}
+            disabled={!searchAvailable && !fridaStatusLoading}
             fullWidth
             aria-label="Поисковый запрос"
           />
@@ -623,7 +721,7 @@ export default memo(function SemanticSearchPanel({
             variant="primary"
             fullWidth
             onClick={handleSubmit}
-            disabled={!query.trim() || isLoading || (!fridaAvailable && !fridaStatusLoading)}
+            disabled={!query.trim() || isLoading || (!searchAvailable && !fridaStatusLoading)}
           >
             {isLoading ? 'Поиск…' : 'Искать'}
           </Button>
@@ -738,6 +836,8 @@ export default memo(function SemanticSearchPanel({
                 key={`${result.dialogue_id}-${result.turn_index}-${index}`}
                 result={result}
                 onNavigate={handleResultClick}
+                vote={votes[`${result.dialogue_id}-${result.turn_index}`] ?? null}
+                onVote={handleVote}
               />
             ))}
           </Stack>

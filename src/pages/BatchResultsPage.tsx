@@ -382,8 +382,14 @@ export default function BatchResultsPage() {
         <BlurFade delay={0} duration={0.4} direction="up" inView>
           <Card>
             <Stack direction="vertical" spacing="x4" align="center">
-              {/* DS gap: no Icon disabled prop, using opacity workaround */}
-              <Icon iconName={Icons.Archive} size="large" style={{ opacity: 0.5 }} />
+              {/* Tech-debt #3 (W2): DS Icon has no disabled prop — the previous
+                  style={{opacity:0.5}} workaround is replaced with the DS
+                  text-disabled token color (same visual intent, token-based). */}
+              <Icon
+                iconName={Icons.Archive}
+                size="large"
+                style={{ color: 'var(--color-text-disabled)' }}
+              />
               <Typography variant="body1" inactive>
                 Нет файлов для анализа
               </Typography>

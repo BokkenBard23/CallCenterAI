@@ -143,7 +143,19 @@ function splitIntoChunks(
         match: null,
       });
     } else {
-      const innermost = coveringRanges[coveringRanges.length - 1];
+      // IP-1.5 e2e fix (2026-09-19): when several matches cover the same chunk
+      // (e.g. an exact_match and a morphological match of the same phrase with
+      // identical spans), the previous `coveringRanges[last]` pick silently
+      // dropped the DR-1 `highlight-exact` indicator whenever the morphological
+      // match came later in the matches array. Among the innermost ranges
+      // (same end), prefer an exact match so the DR-1 class is preserved.
+      // Nested/non-overlapping behavior is unchanged.
+      const innermostCandidate = coveringRanges[coveringRanges.length - 1];
+      const innermostSet = coveringRanges.filter(
+        (r) => r.end === innermostCandidate.end,
+      );
+      const exactRange = innermostSet.find((r) => r.match.is_exact_match);
+      const innermost = exactRange ?? innermostCandidate;
       chunks.push({
         type: 'highlighted',
         text: chunkText,

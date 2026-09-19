@@ -214,8 +214,12 @@ function DictAuditTabBase({
                 <Stack direction="vertical" gap="x2">
                   <Box>
                     {/* react-markdown → Typography mapping (AIAnalysisPanel pattern).
-                        Without `components` override ReactMarkdown renders native <p>/<h*>. */}
-                    <ReactMarkdown>{pg.llm_explanation}</ReactMarkdown>
+                        Without `components` override ReactMarkdown renders native <p>/<h*>.
+                        JK6 FIX (W2): .dict-audit-markdown scope (MiningPanel.css)
+                        forces the primary text token for dark-theme contrast. */}
+                    <div className="dict-audit-markdown">
+                      <ReactMarkdown>{pg.llm_explanation}</ReactMarkdown>
+                    </div>
                   </Box>
                   {pg.recommendations.length === 0 ? (
                     <Typography variant="body2" color="colorTextInactive">

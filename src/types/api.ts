@@ -256,6 +256,8 @@ export interface ProvidersResponse {
 export interface HealthResponse {
   status: string;
   version: string;
+  /** W2 (Wave 1 additive): active embedding provider info. */
+  embedding?: { provider: string; mode: string };
 }
 
 export interface UploadedDictionary {
@@ -320,13 +322,11 @@ export interface HistoryEntry {
 export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 export type AnalysisStatus = 'idle' | 'analyzing' | 'completed' | 'error';
 export type ProviderStatus = 'loading' | 'loaded' | 'error';
-// N.MAJ.3 FIX (PHASE N audit): the 'structure' view mode was declared in
-// the union but never implemented — ResultsPage renders only two tabs
-// ("Сводка" and "Выделенный текст") and the activeTabIndex ternary mapped
-// tabIndex=2 to 'structure' with no matching <Tab>. Removed from the union
-// to prevent dead code paths. Tracked in TODO_AND_ROADMAP.md for future
-// implementation if needed.
-export type ViewMode = 'summary' | 'highlighted';
+// W2 (N.MAJ.3): 'structure' view mode restored to the union — ResultsPage
+// now renders a third Tab ("Структура") with a per-dictionary tree of
+// matched sections/conditions. handleViewModeChange keeps a clamp fallback
+// for any unexpected tab index.
+export type ViewMode = 'summary' | 'highlighted' | 'structure';
 
 // ═══════════════════════════════════════════════════════════
 // FRIDA Embeddings Models
@@ -390,6 +390,12 @@ export interface EmbeddingStatusResponse {
   nlp_provider: 'natasha' | 'deeppavlov' | 'none';
   natasha_available: boolean;
   deeppavlov_available: boolean;
+  /**
+   * W2 (Wave 1 additive): active embedding provider info.
+   * provider: 'frida' | 'local' — when 'local', semantic search runs on the
+   * local TF-IDF embeddings and is AVAILABLE (not broken).
+   */
+  embedding_provider?: { provider: string; mode: string } | null;
 }
 
 /** Search type toggle for SemanticSearchPanel */

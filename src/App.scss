@@ -9,6 +9,11 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Фон приложения должен наследовать тему на всю высоту, включая
+     область ниже видимой части при скролле. Без этого браузер
+     показывает белый body фон, который проступает при прокрутке. */
+  background-color: var(--color-background-base, #ffffff);
+  color: var(--color-text-primary, #1a1a1a);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -128,6 +133,11 @@ textarea:focus-visible,
   padding: 24px 32px;
   width: 100%;
   margin: 0 auto;
+  /* Тёмная тема должна покрывать всю прокручиваемую область, а не только
+     видимую часть. Без явного background-color при скролле вниз
+     проступает белый фон body. */
+  background-color: var(--color-background-base, #ffffff);
+  color: var(--color-text-primary, #1a1a1a);
 
   /* Focus target for skip-nav — remove outline when focused via JS */
   &:focus {
